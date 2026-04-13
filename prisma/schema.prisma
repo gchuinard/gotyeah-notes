@@ -1,0 +1,23 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Page {
+  id        String   @id @default(cuid())
+  title     String   @default("Sans titre")
+  content   String   @default("[]")
+  icon      String?
+  parentId  String?
+  parent    Page?    @relation("PageTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children  Page[]   @relation("PageTree")
+  position  Float    @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([parentId])
+}
