@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "db:push": "prisma db push",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "postinstall": "prisma db push"
   },
   "dependencies": {
     "@blocknote/core": "^0.48.0",
@@ -21,13 +22,16 @@
     "@mantine/hooks": "^9.0.2",
     "@prisma/adapter-better-sqlite3": "^7.7.0",
     "@prisma/client": "^7.7.0",
+    "@types/bcryptjs": "^2.4.6",
+    "bcryptjs": "^3.0.3",
     "better-sqlite3": "^12.9.0",
     "dotenv": "^17.4.2",
     "lucide-react": "^1.8.0",
     "next": "^16.2.3",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
-    "swr": "^2.4.1"
+    "swr": "^2.4.1",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.2.2",

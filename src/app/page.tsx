@@ -1,12 +1,14 @@
-import { prisma } from "@/lib/prisma";
 import { redirect } from "next/navigation";
+import { getSession } from "@/lib/session";
 
 export default async function Home() {
-  const first = await prisma.page.findFirst({ orderBy: { createdAt: "asc" } });
-  if (first) redirect(`/pages/${first.id}`);
+  const user = await getSession();
+  if (!user) redirect("/login");
+
   return (
-    <div className="p-12 text-gray-500 text-sm">
-      Crée ta première page depuis la sidebar ←
+    <div className="flex flex-col items-center justify-center h-full text-gray-400 dark:text-gray-500 gap-2">
+      <span className="text-4xl">👋</span>
+      <p className="text-sm">Sélectionne une page ou crée-en une nouvelle.</p>
     </div>
   );
 }

@@ -7,17 +7,175 @@ datasource db {
   provider = "sqlite"
 }
 
+model User {
+  id           String       @id @default(cuid())
+  email        String       @unique
+  firstName    String
+  lastName     String
+  displayName  String
+  passwordHash String
+  createdAt    DateTime     @default(now())
+  sessions     Session[]
+  memberships  Membership[]
+  pageVisits   PageVisit[]
+  ownedPages   Page[]       @relation("PageOwner")
+  records      Record[]
+}
+
+model Session {
+  id                 String     @id @default(cuid())
+  userId             String
+  user               User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt          DateTime
+  createdAt          DateTime   @default(now())
+  currentWorkspaceId String?
+  currentWorkspace   Workspace? @relation("CurrentSession", fields: [currentWorkspaceId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+}
+
+model Membership {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  role        String    @default("admin") // "admin" | "editor" | "viewer"
+  createdAt   DateTime  @default(now())
+
+  @@unique([userId, workspaceId])
+  @@index([userId])
+  @@index([workspaceId])
+}
+
+model Workspace {
+  id             String       @id @default(cuid())
+  name           String       @default("Mon espace")
+  createdAt      DateTime     @default(now())
+  createdBy      String?      // userId du créateur — ref uniquement, pas l'autorité
+  memberships    Membership[]
+  pages          Page[]
+  sections       Section[]
+  activeSessions Session[]    @relation("CurrentSession")
+}
+
+model Section {
+  id          String    @id @default(cuid())
+  name        String
+  type        String    @default("private") // "private" | "team"
+  icon        String?
+  position    Float     @default(0)
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  pages       Page[]
+
+  @@index([workspaceId])
+}
+
 model Page {
-  id        String   @id @default(cuid())
-  title     String   @default("Sans titre")
-  content   String   @default("[]")
-  icon      String?
-  parentId  String?
-  parent    Page?    @relation("PageTree", fields: [parentId], references: [id], onDelete: Cascade)
-  children  Page[]   @relation("PageTree")
-  position  Float    @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String    @id @default(cuid())
+  title       String    @default("Sans titre")
+  content     String    @default("[]")
+  icon        String?
+  parentId    String?
+  parent      Page?     @relation("PageTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children    Page[]    @relation("PageTree")
+  // Float sans contrainte d'unicité : gap-based ordering
+  position    Float     @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  // Renseigné UNIQUEMENT sur les pages racines (parentId IS NULL).
+  // Ne jamais écrire directement — passer par lib/pages.ts > setPageSection().
+  sectionId   String?
+  section     Section?  @relation(fields: [sectionId], references: [id], onDelete: SetNull)
+
+  // Créateur de la page. Toujours renseigné à la création via lib/pages.ts > createPage().
+  // Pour les pages privées (visibility="private"), filtre WHERE ownerId = currentUserId.
+  ownerId     String?
+  owner       User?     @relation("PageOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+
+  // Dénormalisé depuis la section racine ("private" | "team").
+  // Synchronisé à la création et au déplacement via lib/pages.ts > setPageSection().
+  // Pour les pages enfants, copié depuis le parent à la création via createPage().
+  visibility  String    @default("team")
+
+  database    Database?
+  visits      PageVisit[]
 
   @@index([parentId])
+  @@index([workspaceId])
+  @@index([sectionId])
+  @@index([ownerId])
+  @@index([visibility])
+}
+
+model PageVisit {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pageId    String
+  page      Page     @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  visitedAt DateTime @default(now())
+
+  @@unique([userId, pageId]) // upsert à chaque visite, pas insert
+  @@index([userId])
+  @@index([pageId])
+}
+
+model Database {
+  id         String             @id @default(cuid())
+  pageId     String             @unique
+  page       Page               @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  properties DatabaseProperty[]
+  records    Record[]
+  views      View[]
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+}
+
+model DatabaseProperty {
+  id         String   @id @default(cuid())
+  databaseId String
+  database   Database @relation(fields: [databaseId], references: [id], onDelete: Cascade)
+  name       String
+  type       String
+  position   Float    @default(0)
+  config     String   @default("{}")
+
+  @@index([databaseId])
+}
+
+model Record {
+  id         String   @id @default(cuid())
+  databaseId String
+  database   Database @relation(fields: [databaseId], references: [id], onDelete: Cascade)
+  title      String   @default("Sans titre")
+  icon       String?
+  coverUrl   String?
+  content    String   @default("[]")
+  createdBy  String?
+  creator    User?    @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  position   Float    @default(0)
+  properties String   @default("{}")
+
+  @@index([databaseId])
+  @@index([createdBy])
+}
+
+model View {
+  id         String   @id @default(cuid())
+  databaseId String
+  database   Database @relation(fields: [databaseId], references: [id], onDelete: Cascade)
+  name       String   @default("Vue")
+  type       String   @default("table") // "table" | "kanban" | "calendar" | "gallery"
+  position   Float    @default(0)
+  config     String   @default("{}")
+  createdAt  DateTime @default(now())
+
+  @@index([databaseId])
 }

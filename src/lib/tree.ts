@@ -4,6 +4,9 @@ export type FlatPage = {
   icon: string | null;
   parentId: string | null;
   position: number;
+  sectionId: string | null;
+  visibility: string;
+  ownerId: string | null;
 };
 
 export type TreeNode = FlatPage & { children: TreeNode[] };

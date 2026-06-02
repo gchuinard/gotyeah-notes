@@ -16,13 +16,11 @@ export default function ThemeToggle() {
   const toggle = () => {
     const next = !dark;
     setDark(next);
-    if (next) {
-      document.documentElement.classList.add("dark");
-      localStorage.setItem("theme", "dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-      localStorage.setItem("theme", "light");
-    }
+    const value = next ? "dark" : "light";
+    document.documentElement.classList.toggle("dark", next);
+    localStorage.setItem("theme", value);
+    // Cookie lu côté serveur pour éviter le flash au rechargement
+    document.cookie = `theme=${value}; path=/; max-age=31536000; SameSite=Lax`;
   };
 
   return (

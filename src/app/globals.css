@@ -1,4 +1,142 @@
 @import "tailwindcss";
 
-/* Dark mode basé sur la classe .dark sur <html> */
-@custom-variant dark (&:where(.dark, .dark *));
+/* ─── Themes ─────────────────────────────────────────────────────────────────── */
+
+:root,
+[data-theme="light"] {
+  --bg: #ffffff;
+  --surface: #f3f4f6;
+  --surface-hover: #e5e7eb;
+  --surface-active: #e5e7eb;
+  --border: #e5e7eb;
+  --text: #111827;
+  --text-muted: #6b7280;
+  --accent: #3b82f6;
+}
+
+[data-theme="dark"] {
+  --bg: #111827;
+  --surface: #1f2937;
+  --surface-hover: #374151;
+  --surface-active: #374151;
+  --border: #374151;
+  --text: #f9fafb;
+  --text-muted: #9ca3af;
+  --accent: #60a5fa;
+}
+
+[data-theme="sepia"] {
+  --bg: #fdf8f0;
+  --surface: #f0e6d3;
+  --surface-hover: #e8d5bb;
+  --surface-active: #e8d5bb;
+  --border: #d4c4a8;
+  --text: #3d2b1f;
+  --text-muted: #7a5c48;
+  --accent: #a0522d;
+}
+
+[data-theme="ocean"] {
+  --bg: #0c1e35;
+  --surface: #1a3a5c;
+  --surface-hover: #224975;
+  --surface-active: #224975;
+  --border: #1f4570;
+  --text: #e0f2fe;
+  --text-muted: #7dd3fc;
+  --accent: #0ea5e9;
+}
+
+[data-theme="forest"] {
+  --bg: #1a2e1a;
+  --surface: #2a4a2a;
+  --surface-hover: #355935;
+  --surface-active: #355935;
+  --border: #355935;
+  --text: #dcfce7;
+  --text-muted: #86efac;
+  --accent: #22c55e;
+}
+
+[data-theme="midnight"] {
+  --bg: #0d0d1a;
+  --surface: #1a1a3e;
+  --surface-hover: #252550;
+  --surface-active: #252550;
+  --border: #2d2d6b;
+  --text: #e2e8f0;
+  --text-muted: #94a3b8;
+  --accent: #6366f1;
+}
+
+[data-theme="rose"] {
+  --bg: #fff1f5;
+  --surface: #ffe4e6;
+  --surface-hover: #fecdd3;
+  --surface-active: #fecdd3;
+  --border: #fda4af;
+  --text: #881337;
+  --text-muted: #be123c;
+  --accent: #f43f5e;
+}
+
+[data-theme="nord"] {
+  --bg: #2e3440;
+  --surface: #3b4252;
+  --surface-hover: #434c5e;
+  --surface-active: #434c5e;
+  --border: #4c566a;
+  --text: #eceff4;
+  --text-muted: #d8dee9;
+  --accent: #88c0d0;
+}
+
+[data-theme="dracula"] {
+  --bg: #282a36;
+  --surface: #44475a;
+  --surface-hover: #555867;
+  --surface-active: #555867;
+  --border: #6272a4;
+  --text: #f8f8f2;
+  --text-muted: #6272a4;
+  --accent: #bd93f9;
+}
+
+[data-theme="catppuccin"] {
+  --bg: #1e1e2e;
+  --surface: #313244;
+  --surface-hover: #3d3f52;
+  --surface-active: #3d3f52;
+  --border: #45475a;
+  --text: #cdd6f4;
+  --text-muted: #a6adc8;
+  --accent: #cba6f7;
+}
+
+[data-theme="gruvbox"] {
+  --bg: #282828;
+  --surface: #3c3836;
+  --surface-hover: #504945;
+  --surface-active: #504945;
+  --border: #504945;
+  --text: #ebdbb2;
+  --text-muted: #bdae93;
+  --accent: #d79921;
+}
+
+[data-theme="tokyo"] {
+  --bg: #1a1b2e;
+  --surface: #24283b;
+  --surface-hover: #2f3349;
+  --surface-active: #2f3349;
+  --border: #3b4261;
+  --text: #a9b1d6;
+  --text-muted: #565f89;
+  --accent: #7aa2f7;
+}
+
+/* ─── Utilities ───────────────────────────────────────────────────────────────── */
+
+.app-header-bg {
+  background-color: color-mix(in srgb, var(--bg) 80%, transparent);
+}

@@ -13,14 +13,14 @@ export default function ConfirmModal({ message, onConfirm, onCancel }: Props) {
       onClick={onCancel}
     >
       <div
-        className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-5 w-80 flex flex-col gap-4"
+        className="bg-[var(--bg)] rounded-lg shadow-lg p-5 w-80 flex flex-col gap-4"
         onClick={(e) => e.stopPropagation()}
       >
-        <p className="text-sm text-gray-700 dark:text-gray-200">{message}</p>
+        <p className="text-sm text-[var(--text)]">{message}</p>
         <div className="flex justify-end gap-2">
           <button
             onClick={onCancel}
-            className="px-3 py-1.5 text-sm rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300"
+            className="px-3 py-1.5 text-sm rounded hover:bg-[var(--surface-hover)] text-[var(--text-muted)]"
           >
             Annuler
           </button>
