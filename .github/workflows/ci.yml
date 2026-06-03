@@ -21,11 +21,12 @@ jobs:
         with:
           node-version: "24"
           cache: "npm"
+      # --legacy-peer-deps : le projet a un conflit de peer-deps connu
+      # (@blocknote/mantine veut @mantine/core@^8, le projet est en v9).
+      # L'install locale et le lockfile reposent dessus.
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --legacy-peer-deps
       - name: Prisma generate
         run: npx prisma generate
-      - name: Prisma db push (schéma SQLite éphémère)
-        run: npx prisma db push --skip-generate
       - name: Build
         run: npm run build
