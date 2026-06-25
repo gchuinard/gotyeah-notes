@@ -8,9 +8,10 @@ Ce fichier cadre le travail de Claude Code sur ce projet. Lis-le avant toute mod
 
 ## Stack
 
-- **Next.js 15** (App Router, Server Components par défaut)
+- **Next.js 16** (App Router, Server Components par défaut)
+- **React 19**
 - **TypeScript** strict
-- **Tailwind CSS** pour le style
+- **Tailwind CSS v4** pour le style
 - **Prisma 7 + SQLite** (fichier local, provider "prisma-client", output `../generated/prisma`)
 - **BlockNote** (`@blocknote/react` + `@blocknote/mantine`) pour l'éditeur de blocs
 - **dnd-kit** pour le drag & drop (sidebar, table rows, kanban cards)
