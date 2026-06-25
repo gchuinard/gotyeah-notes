@@ -16,7 +16,7 @@ RUN apt-get update \
 # and a DATABASE_URL. Point it at a throwaway file (this layer never reaches the
 # runtime image) so the install step also generates the Prisma client.
 ENV DATABASE_URL="file:/tmp/build.db"
-COPY package.json package-lock.json* prisma.config.ts ./
+COPY package.json package-lock.json* .npmrc prisma.config.ts ./
 COPY prisma ./prisma
 RUN npm ci
 
