@@ -30,13 +30,19 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_URL: "file:/data/dev.db"
-    # Host 30001 -> container 3000 (notes_app already owns 30000). Point your
-    # reverse proxy / subdomain at 127.0.0.1:30001.
-    ports:
-      - "30001:3000"
+    # Reached by Nginx Proxy Manager over the shared external network, as
+    # gotyeah_notes:3000 (no host port published — same convention as the other
+    # apps on this Pi). Add `ports: ["30001:3000"]` if you need direct access.
+    networks:
+      - npm
     volumes:
       - gotyeah-db:/data
     restart: unless-stopped
 
 volumes:
   gotyeah-db:
+
+networks:
+  npm:
+    external: true
+    name: nginx-proxy-manager_default
