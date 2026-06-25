@@ -1,9 +1,12 @@
 "use client";
 import { useCreateBlockNote } from "@blocknote/react";
+import { fr } from "@blocknote/core/locales";
 import { BlockNoteView } from "@blocknote/mantine";
 import "@blocknote/mantine/style.css";
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { mutate } from "swr";
+import { Table2 } from "lucide-react";
 import EmojiPicker from "@/components/EmojiPicker";
 
 type Props = {
@@ -21,11 +24,35 @@ export default function Editor({
   initialIcon,
   onTitleChange,
 }: Props) {
+  const router = useRouter();
   const [title, setTitle] = useState(initialTitle);
   const [icon, setIcon] = useState<string | null>(initialIcon ?? null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [saving, setSaving] = useState<"idle" | "saving" | "saved">("idle");
+  const [converting, setConverting] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleConvertToDatabase = async () => {
+    if (!window.confirm("Convertir cette page en database ?\nL'éditeur sera remplacé par une vue tableau.")) return;
+    setConverting(true);
+    try {
+      const res = await fetch("/api/databases", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pageId }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        alert((body as { error?: string }).error ?? `Erreur ${res.status}`);
+        return;
+      }
+      router.refresh();
+    } catch {
+      alert("Impossible de convertir la page.");
+    } finally {
+      setConverting(false);
+    }
+  };
 
   let parsed: unknown = undefined;
   try {
@@ -36,7 +63,7 @@ export default function Editor({
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const editor = useCreateBlockNote({ initialContent: parsed as any });
+  const editor = useCreateBlockNote({ initialContent: parsed as any, dictionary: fr });
 
   const scheduleSave = (payload: Record<string, unknown>) => {
     setSaving("saving");
@@ -114,6 +141,18 @@ export default function Editor({
             />
           </div>
         )}
+      </div>
+
+      {/* Convertir en database */}
+      <div className="mb-3">
+        <button
+          onClick={handleConvertToDatabase}
+          disabled={converting}
+          className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-600 transition-colors disabled:opacity-50"
+        >
+          <Table2 size={14} />
+          {converting ? "Conversion…" : "Convertir en database"}
+        </button>
       </div>
 
       <input

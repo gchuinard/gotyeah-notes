@@ -1,0 +1,42 @@
+name: gotyeah-notes
+
+services:
+  # One-shot: applies the Prisma schema to the SQLite file on the shared volume,
+  # then exits. Runs the prisma CLI from the `builder` stage (it has the CLI,
+  # engines, schema and config — the runtime image deliberately doesn't).
+  migrate:
+    build:
+      context: .
+      target: builder
+    image: gotyeah-notes-migrate
+    user: "1001:1001"
+    environment:
+      DATABASE_URL: "file:/data/dev.db"
+      HOME: /tmp
+    command: ["npx", "prisma", "db", "push", "--skip-generate"]
+    volumes:
+      - gotyeah-db:/data
+    restart: "no"
+
+  app:
+    build:
+      context: .
+      target: runner
+    image: gotyeah-notes
+    container_name: gotyeah_notes
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: "file:/data/dev.db"
+    # Host 30001 -> container 3000 (notes_app already owns 30000). Point your
+    # reverse proxy / subdomain at 127.0.0.1:30001.
+    ports:
+      - "30001:3000"
+    volumes:
+      - gotyeah-db:/data
+    restart: unless-stopped
+
+volumes:
+  gotyeah-db:

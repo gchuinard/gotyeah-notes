@@ -2,7 +2,10 @@
 import useSWR, { mutate } from "swr";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { ChevronRight, GripVertical, Plus, Trash2, FileText } from "lucide-react";
+import {
+  ChevronRight, Clock, FileText,
+  Home, Lock, LogOut, Plus, Settings, Trash2, Users,
+} from "lucide-react";
 import { useRef, useState } from "react";
 import {
   DndContext,
@@ -20,54 +23,74 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { buildTree, FlatPage, TreeNode } from "@/lib/tree";
 import ConfirmModal from "@/components/ConfirmModal";
-import ThemeToggle from "@/components/ThemeToggle";
+import WorkspaceSelector from "@/components/WorkspaceSelector";
+import { useWorkspace } from "@/contexts/WorkspaceContext";
+import type { SessionUser } from "@/lib/session";
+
+type Section = { id: string; name: string; type: string; icon: string | null; position: number };
+type RecentPage = { id: string; title: string; icon: string | null };
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
-export default function Sidebar() {
-  const { data } = useSWR<FlatPage[]>("/api/pages", fetcher);
-  const router = useRouter();
+export default function Sidebar({ user }: { user: SessionUser }) {
+  const { activeWorkspace } = useWorkspace();
+  const workspaceId = activeWorkspace?.id ?? null;
 
-  const tree = data ? buildTree(data) : [];
+  const pagesKey = workspaceId ? `/api/pages?workspaceId=${workspaceId}` : null;
+  const sectionsKey = workspaceId ? `/api/sections?workspaceId=${workspaceId}` : null;
+  const recentKey = workspaceId ? `/api/pages/recent?workspaceId=${workspaceId}` : null;
+
+  const { data: pages = [] } = useSWR<FlatPage[]>(pagesKey, fetcher);
+  const { data: sections = [] } = useSWR<Section[]>(sectionsKey, fetcher);
+  const { data: recent = [] } = useSWR<RecentPage[]>(recentKey, fetcher);
+
+  const router = useRouter();
+  const params = useParams<{ id?: string }>();
+
+  const tree = buildTree(pages);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
   );
 
-  const createPage = async (parentId: string | null = null) => {
+  const createPage = async (parentId: string | null = null, sectionId: string | null = null) => {
+    if (!workspaceId) return;
     const res = await fetch("/api/pages", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ parentId }),
+      body: JSON.stringify({ parentId, workspaceId, sectionId }),
     });
     const page = await res.json();
-    mutate("/api/pages");
+    if (pagesKey) mutate(pagesKey);
     router.push(`/pages/${page.id}`);
   };
 
-  const handleDragEnd = (event: DragEndEvent) => {
+  const handleDragEnd = (sectionId: string) => (event: DragEndEvent) => {
     const { active, over } = event;
-    if (!over || active.id === over.id || !data) return;
+    if (!over || active.id === over.id || !pages.length) return;
 
     const activeId = active.id as string;
     const overId = over.id as string;
 
-    const activePage = data.find((p) => p.id === activeId);
-    const overPage = data.find((p) => p.id === overId);
+    const activePage = pages.find((p) => p.id === activeId);
+    const overPage = pages.find((p) => p.id === overId);
     if (!activePage || !overPage) return;
-
-    // Drag & drop uniquement entre pages du même parent
     if (activePage.parentId !== overPage.parentId) return;
 
-    const siblings = data
-      .filter((p) => p.parentId === activePage.parentId)
+    // Pour les pages racines : limiter les siblings à la même section
+    // pour éviter d'utiliser les positions d'une autre section comme repères.
+    const siblings = pages
+      .filter((p) => {
+        if (p.parentId !== activePage.parentId) return false;
+        if (activePage.parentId === null) return p.sectionId === activePage.sectionId;
+        return true;
+      })
       .sort((a, b) => a.position - b.position);
 
     const activeIdx = siblings.findIndex((p) => p.id === activeId);
     const overIdx = siblings.findIndex((p) => p.id === overId);
     if (activeIdx === -1 || overIdx === -1) return;
 
-    // Reconstruit l'ordre après déplacement
     const reordered = [...siblings];
     reordered.splice(activeIdx, 1);
     reordered.splice(overIdx, 0, siblings[activeIdx]);
@@ -76,74 +99,221 @@ export default function Sidebar() {
     const next = reordered[overIdx + 1];
 
     let newPosition: number;
-    if (!prev) {
+    if (!prev && reordered.length >= 2) {
       newPosition = reordered[1].position - 1;
-    } else if (!next) {
+    } else if (!next && reordered.length >= 2) {
       newPosition = reordered[reordered.length - 2].position + 1;
-    } else {
+    } else if (prev && next) {
       newPosition = (prev.position + next.position) / 2;
+    } else {
+      return; // garde-fou : situation impossible normalement
     }
 
-    // Optimistic update : UI instantanée, PATCH en arrière-plan
-    const optimistic = data.map((p) =>
+    if (!Number.isFinite(newPosition)) return;
+
+    const optimistic = pages.map((p) =>
       p.id === activeId ? { ...p, position: newPosition } : p
     );
-    mutate("/api/pages", optimistic, { revalidate: false });
+    if (pagesKey) mutate(pagesKey, optimistic, { revalidate: false });
 
     fetch(`/api/pages/${activeId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ position: newPosition }),
-    }).then(() => mutate("/api/pages"));
+    }).then(() => { if (pagesKey) mutate(pagesKey); });
   };
 
-  const rootIds = tree.map((n) => n.id);
+  const privateSection = sections.find((s) => s.type === "private");
+  const teamSections = sections.filter((s) => s.type === "team");
 
   return (
-    <aside className="w-64 bg-gray-50 dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 h-screen overflow-y-auto p-2 text-sm flex flex-col">
-      <div className="px-2 py-3 font-semibold text-gray-700 dark:text-gray-200 text-base">Notes</div>
-      <button
-        onClick={() => createPage(null)}
-        className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400"
-      >
-        <Plus size={14} /> Nouvelle page
-      </button>
-      <div className="mt-2 flex-1">
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCenter}
-          onDragEnd={handleDragEnd}
+    <aside className="w-64 bg-[var(--surface)] border-r border-[var(--border)] h-screen overflow-y-auto p-2 text-sm flex flex-col">
+      <WorkspaceSelector />
+
+      {/* Navigation fixe */}
+      <div className="flex flex-col gap-0.5 mb-2">
+        <Link
+          href="/"
+          className={`flex items-center gap-2 px-2 py-1.5 rounded hover:bg-[var(--surface-hover)] text-[var(--text-muted)] ${
+            !params?.id ? "bg-[var(--surface-active)]" : ""
+          }`}
         >
-          <SortableContext items={rootIds} strategy={verticalListSortingStrategy}>
-            {tree.map((node) => (
-              <TreeItem key={node.id} node={node} depth={0} onCreate={createPage} />
-            ))}
-          </SortableContext>
-        </DndContext>
+          <Home size={14} />
+          Accueil
+        </Link>
       </div>
-      <div className="mt-auto pt-2 border-t border-gray-200 dark:border-gray-700">
-        <ThemeToggle />
+
+      {/* Récents */}
+      {recent.length > 0 && (
+        <div className="mb-2">
+          <div className="flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-[var(--text-muted)] uppercase tracking-wide">
+            <Clock size={11} />
+            Récents
+          </div>
+          {recent.map((page) => (
+            <Link
+              key={page.id}
+              href={`/pages/${page.id}`}
+              className={`flex items-center gap-1.5 px-2 py-1 rounded hover:bg-[var(--surface-hover)] text-[var(--text-muted)] truncate ${
+                params?.id === page.id ? "bg-[var(--surface-active)]" : ""
+              }`}
+            >
+              {page.icon ? (
+                <span className="shrink-0 text-sm leading-none">{page.icon}</span>
+              ) : (
+                <FileText size={12} className="shrink-0" />
+              )}
+              <span className="truncate text-xs">{page.title || "Sans titre"}</span>
+            </Link>
+          ))}
+        </div>
+      )}
+
+      <div className="flex-1 flex flex-col gap-3 overflow-y-auto">
+        {/* Section privée */}
+        {privateSection && (
+          <SectionBlock
+            key={privateSection.id}
+            section={privateSection}
+            icon={<Lock size={11} />}
+            tree={tree.filter((n) => n.sectionId === privateSection.id)}
+            pages={pages}
+            pagesKey={pagesKey}
+            params={params}
+            onCreate={createPage}
+            onDragEnd={handleDragEnd(privateSection.id)}
+          />
+        )}
+
+        {/* Sections équipe */}
+        {teamSections.map((section) => (
+          <SectionBlock
+            key={section.id}
+            section={section}
+            icon={<Users size={11} />}
+            tree={tree.filter((n) => n.sectionId === section.id)}
+            pages={pages}
+            pagesKey={pagesKey}
+            params={params}
+            onCreate={createPage}
+            onDragEnd={handleDragEnd(section.id)}
+          />
+        ))}
+      </div>
+
+      <div className="mt-auto pt-2 border-t border-[var(--border)] flex flex-col gap-0.5">
+        <div className="flex items-center gap-1 px-2 py-1">
+          <span className="flex-1 text-xs text-[var(--text-muted)] truncate" title={user.email}>
+            {user.displayName}
+          </span>
+          <Link
+            href="/settings"
+            className="p-1 hover:bg-[var(--surface-hover)] rounded"
+            title="Paramètres"
+          >
+            <Settings size={13} className="text-[var(--text-muted)]" />
+          </Link>
+          <button
+            onClick={async () => {
+              await fetch("/api/auth/logout", { method: "POST" });
+              window.location.href = "/login";
+            }}
+            className="p-1 hover:bg-[var(--surface-hover)] rounded"
+            title="Se déconnecter"
+          >
+            <LogOut size={13} className="text-[var(--text-muted)]" />
+          </button>
+        </div>
       </div>
     </aside>
   );
 }
 
+// ─── SectionBlock ────────────────────────────────────────────────────────────
+
+function SectionBlock({
+  section,
+  icon,
+  tree,
+  pages,
+  pagesKey,
+  params,
+  onCreate,
+  onDragEnd,
+}: {
+  section: Section;
+  icon: React.ReactNode;
+  tree: TreeNode[];
+  pages: FlatPage[];
+  pagesKey: string | null;
+  params: { id?: string } | null;
+  onCreate: (parentId: string | null, sectionId: string | null) => void;
+  onDragEnd: (event: DragEndEvent) => void;
+}) {
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
+  );
+  const rootIds = tree.map((n) => n.id);
+
+  return (
+    <div>
+      <div className="flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-[var(--text-muted)] uppercase tracking-wide group">
+        {icon}
+        <span className="flex-1 truncate">{section.name}</span>
+        <button
+          onClick={() => onCreate(null, section.id)}
+          className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[var(--surface-hover)] rounded"
+          title="Nouvelle page"
+        >
+          <Plus size={11} />
+        </button>
+      </div>
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+        <SortableContext items={rootIds} strategy={verticalListSortingStrategy}>
+          {tree.map((node) => (
+            <TreeItem
+              key={node.id}
+              node={node}
+              depth={0}
+              onCreate={onCreate}
+              pagesKey={pagesKey}
+              currentId={params?.id}
+            />
+          ))}
+        </SortableContext>
+      </DndContext>
+      {tree.length === 0 && (
+        <button
+          onClick={() => onCreate(null, section.id)}
+          className="w-full flex items-center gap-2 px-3 py-1 rounded hover:bg-[var(--surface-hover)] text-[var(--text-muted)] text-xs"
+        >
+          <Plus size={11} /> Nouvelle page
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ─── TreeItem ─────────────────────────────────────────────────────────────────
+
 function TreeItem({
   node,
   depth,
   onCreate,
+  pagesKey,
+  currentId,
 }: {
   node: TreeNode;
   depth: number;
-  onCreate: (parentId: string | null) => void;
+  onCreate: (parentId: string | null, sectionId: string | null) => void;
+  pagesKey: string | null;
+  currentId: string | undefined;
 }) {
   const [open, setOpen] = useState(true);
   const [editing, setEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState(node.title);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const params = useParams<{ id?: string }>();
-  const currentId = params?.id;
   const router = useRouter();
   const hasChildren = node.children.length > 0;
 
@@ -151,7 +321,6 @@ function TreeItem({
     useSortable({ id: node.id });
 
   const style = {
-    // CSS.Translate = translate uniquement, pas de scale → plus fluide
     transform: CSS.Translate.toString(transform),
     transition: isDragging ? "none" : transition,
     opacity: isDragging ? 0.4 : 1,
@@ -174,7 +343,7 @@ function TreeItem({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title: trimmed }),
     });
-    mutate("/api/pages");
+    if (pagesKey) mutate(pagesKey);
   };
 
   const onDelete = (e: React.MouseEvent) => {
@@ -186,7 +355,7 @@ function TreeItem({
   const confirmDelete = async () => {
     setConfirmOpen(false);
     await fetch(`/api/pages/${node.id}`, { method: "DELETE" });
-    mutate("/api/pages");
+    if (pagesKey) mutate(pagesKey);
     if (currentId === node.id) router.push("/");
   };
 
@@ -202,25 +371,15 @@ function TreeItem({
         />
       )}
       <div
-        className={`group flex items-center gap-1 px-1 py-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 cursor-pointer ${
-          currentId === node.id ? "bg-gray-200 dark:bg-gray-700" : ""
-        }`}
+        {...attributes}
+        {...listeners}
+        className={`group flex items-center gap-1 px-1 py-1 rounded hover:bg-[var(--surface-hover)] ${
+          isDragging ? "cursor-grabbing" : ""
+        } ${currentId === node.id ? "bg-[var(--surface-active)]" : ""}`}
         style={{ paddingLeft: 8 + depth * 12 }}
       >
-        {/* Drag handle */}
         <button
-          {...attributes}
-          {...listeners}
-          className="opacity-0 group-hover:opacity-100 cursor-grab active:cursor-grabbing shrink-0 p-0.5 rounded hover:bg-gray-300"
-          title="Déplacer"
-          tabIndex={-1}
-        >
-          <GripVertical size={12} className="text-gray-400" />
-        </button>
-
-        {/* Toggle enfants */}
-        <button
-          onClick={() => setOpen(!open)}
+          onClick={(e) => { e.stopPropagation(); setOpen(!open); }}
           className="w-4 shrink-0 flex items-center justify-center"
         >
           {hasChildren && (
@@ -231,7 +390,6 @@ function TreeItem({
           )}
         </button>
 
-        {/* Titre / rename */}
         {editing ? (
           <input
             ref={inputRef}
@@ -242,49 +400,55 @@ function TreeItem({
               if (e.key === "Enter") commitRename();
               if (e.key === "Escape") setEditing(false);
             }}
-            className="flex-1 bg-white dark:bg-gray-700 dark:text-gray-100 border border-blue-400 rounded px-1 text-sm outline-none min-w-0"
+            className="flex-1 bg-[var(--bg)] text-[var(--text)] border border-blue-400 rounded px-1 text-sm outline-none min-w-0"
             onClick={(e) => e.preventDefault()}
           />
         ) : (
           <Link
             href={`/pages/${node.id}`}
-            className="flex-1 flex items-center gap-1 truncate text-gray-700 dark:text-gray-200"
+            className="flex-1 flex items-center gap-1 truncate text-[var(--text)]"
             onDoubleClick={startEditing}
           >
             {node.icon ? (
               <span className="shrink-0 text-sm leading-none">{node.icon}</span>
             ) : (
-              <FileText size={12} className="text-gray-400 shrink-0" />
+              <FileText size={12} className="text-[var(--text-muted)] shrink-0" />
             )}
             <span className="truncate">{node.title || "Sans titre"}</span>
           </Link>
         )}
 
-        {/* Actions */}
         <button
           onClick={(e) => {
             e.preventDefault();
-            onCreate(node.id);
+            e.stopPropagation();
+            onCreate(node.id, null);
           }}
-          className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-gray-300 rounded"
+          className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[var(--surface-hover)] rounded"
           title="Ajouter une sous-page"
         >
           <Plus size={12} />
         </button>
         <button
           onClick={onDelete}
-          className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-gray-300 rounded"
+          className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[var(--surface-hover)] rounded"
           title="Supprimer"
         >
           <Trash2 size={12} />
         </button>
       </div>
 
-      {/* Enfants avec leur propre SortableContext */}
       {open && hasChildren && (
         <SortableContext items={childIds} strategy={verticalListSortingStrategy}>
           {node.children.map((c) => (
-            <TreeItem key={c.id} node={c} depth={depth + 1} onCreate={onCreate} />
+            <TreeItem
+              key={c.id}
+              node={c}
+              depth={depth + 1}
+              onCreate={onCreate}
+              pagesKey={pagesKey}
+              currentId={currentId}
+            />
           ))}
         </SortableContext>
       )}

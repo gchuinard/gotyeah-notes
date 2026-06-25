@@ -1,27 +1,29 @@
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import "./globals.css";
-import Sidebar from "@/components/Sidebar";
-import SearchPalette from "@/components/SearchPalette";
+import { WorkspaceProvider } from "@/contexts/WorkspaceContext";
+import AppShell from "@/components/AppShell";
+import { getSession } from "@/lib/session";
 
 export const metadata: Metadata = {
   title: "Notes",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const cookieStore = await cookies();
+  const theme = cookieStore.get("app-theme")?.value ?? "light";
+  const user = await getSession();
+
   return (
-    <html lang="fr" suppressHydrationWarning>
-      {/* Évite le flash lors du rechargement en mode sombre */}
-      <head>
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `if(localStorage.getItem('theme')==='dark')document.documentElement.classList.add('dark')`,
-          }}
-        />
-      </head>
-      <body className="flex h-screen bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
-        <Sidebar />
-        <main className="flex-1 overflow-y-auto">{children}</main>
-        <SearchPalette />
+    <html lang="fr" data-theme={theme}>
+      <body className="flex h-screen bg-[var(--bg)] text-[var(--text)]">
+        {user ? (
+          <WorkspaceProvider initialWorkspaceId={user.currentWorkspaceId}>
+            <AppShell user={user}>{children}</AppShell>
+          </WorkspaceProvider>
+        ) : (
+          children
+        )}
       </body>
     </html>
   );

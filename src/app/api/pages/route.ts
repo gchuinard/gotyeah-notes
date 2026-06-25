@@ -1,26 +1,56 @@
 import { NextResponse } from "next/server";
+import { getSession } from "@/lib/session";
+import { getMembership } from "@/lib/workspace";
+import { createPage } from "@/lib/pages";
 import { prisma } from "@/lib/prisma";
 
-export async function GET() {
+export async function GET(req: Request) {
+  const user = await getSession();
+  if (!user) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+
+  const { searchParams } = new URL(req.url);
+  const workspaceId = searchParams.get("workspaceId");
+  if (!workspaceId) return NextResponse.json([]);
+
+  const membership = await getMembership(user.id, workspaceId);
+  if (!membership) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
   const pages = await prisma.page.findMany({
+    where: {
+      workspaceId,
+      OR: [
+        { visibility: "team" },
+        { visibility: "private", ownerId: user.id },
+      ],
+    },
     orderBy: [{ position: "asc" }],
-    select: { id: true, title: true, icon: true, parentId: true, position: true },
+    select: {
+      id: true,
+      title: true,
+      icon: true,
+      parentId: true,
+      position: true,
+      sectionId: true,
+      visibility: true,
+      ownerId: true,
+    },
   });
   return NextResponse.json(pages);
 }
 
 export async function POST(req: Request) {
+  const user = await getSession();
+  if (!user) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+
   const body = await req.json().catch(() => ({}));
-  const { parentId = null, title = "Sans titre" } = body;
+  const { parentId = null, title = "Sans titre", workspaceId, sectionId = null } = body;
 
-  const last = await prisma.page.findFirst({
-    where: { parentId },
-    orderBy: { position: "desc" },
-  });
-  const position = (last?.position ?? 0) + 1;
+  if (!workspaceId) {
+    return NextResponse.json({ error: "workspaceId requis" }, { status: 400 });
+  }
+  const membership = await getMembership(user.id, workspaceId);
+  if (!membership) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const page = await prisma.page.create({
-    data: { title, parentId, position },
-  });
+  const page = await createPage({ title, parentId, workspaceId, ownerId: user.id, sectionId });
   return NextResponse.json(page);
 }
