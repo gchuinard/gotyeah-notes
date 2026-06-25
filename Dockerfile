@@ -29,11 +29,13 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV DATABASE_URL="file:/tmp/build.db"
 
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/generated ./generated
 COPY . .
+# Generate the Prisma client (output: generated/prisma) explicitly: `prisma db
+# push` in postinstall doesn't reliably emit it for the prisma-client generator.
+# generate needs only the schema, never a DB connection.
 # No public/ dir in the repo today; create it so the runner COPY never fails and
 # future static assets are picked up automatically.
-RUN mkdir -p public && npm run build
+RUN npx prisma generate && mkdir -p public && npm run build
 
 # Data dir owned by the runtime uid, so the named volume is initialised with the
 # right ownership whichever service (app or migrate) mounts it first.
