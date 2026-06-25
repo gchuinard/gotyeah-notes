@@ -13,7 +13,7 @@ services:
     environment:
       DATABASE_URL: "file:/data/dev.db"
       HOME: /tmp
-    command: ["npx", "prisma", "db", "push", "--skip-generate"]
+    command: ["npx", "prisma", "db", "push"]
     volumes:
       - gotyeah-db:/data
     restart: "no"
