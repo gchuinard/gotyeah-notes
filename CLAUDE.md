@@ -10,10 +10,11 @@ Ce n'est **pas** un produit SaaS. C'est un outil perso. Les choix techniques doi
 
 ## Stack
 
-- **Next.js 15** (App Router, Server Components par défaut)
+- **Next.js 16** (App Router, Server Components par défaut)
+- **React 19**
 - **TypeScript** strict
-- **Tailwind CSS** pour le style
-- **Prisma + SQLite** (fichier `prisma/dev.db`)
+- **Tailwind CSS v4** pour le style
+- **Prisma 7 + SQLite** (fichier `prisma/dev.db`)
 - **BlockNote** (`@blocknote/react` + `@blocknote/mantine`) pour l'éditeur
 - **dnd-kit** pour le drag & drop
 - **SWR** pour le fetch côté client
