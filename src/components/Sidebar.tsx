@@ -262,7 +262,7 @@ function SectionBlock({
         <span className="flex-1 truncate">{section.name}</span>
         <button
           onClick={() => onCreate(null, section.id)}
-          className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[var(--surface-hover)] rounded"
+          className="opacity-0 group-hover:opacity-100 p-0.5 rounded cursor-pointer text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] transition-colors"
           title="Nouvelle page"
         >
           <Plus size={11} />
@@ -285,7 +285,7 @@ function SectionBlock({
       {tree.length === 0 && (
         <button
           onClick={() => onCreate(null, section.id)}
-          className="w-full flex items-center gap-2 px-3 py-1 rounded hover:bg-[var(--surface-hover)] text-[var(--text-muted)] text-xs"
+          className="w-full flex items-center gap-2 px-3 py-1 rounded cursor-pointer hover:bg-[var(--surface-hover)] text-[var(--text-muted)] hover:text-[var(--text)] text-xs transition-colors"
         >
           <Plus size={11} /> Nouvelle page
         </button>
@@ -424,14 +424,14 @@ function TreeItem({
             e.stopPropagation();
             onCreate(node.id, null);
           }}
-          className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[var(--surface-hover)] rounded"
+          className="opacity-0 group-hover:opacity-100 p-0.5 rounded cursor-pointer text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] transition-colors"
           title="Ajouter une sous-page"
         >
           <Plus size={12} />
         </button>
         <button
           onClick={onDelete}
-          className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[var(--surface-hover)] rounded"
+          className="opacity-0 group-hover:opacity-100 p-0.5 rounded cursor-pointer text-[var(--text-muted)] hover:bg-red-500/15 hover:text-red-500 transition-colors"
           title="Supprimer"
         >
           <Trash2 size={12} />
