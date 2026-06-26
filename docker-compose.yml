@@ -30,6 +30,9 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_URL: "file:/data/dev.db"
+      # Pont de confiance du serveur MCP (cf. lib/session.ts). Doit valoir le même
+      # secret que NOTES_MCP_SECRET côté MCP. Vide = chemin act-as désactivé.
+      MCP_SHARED_SECRET: "${MCP_SHARED_SECRET:-}"
     # Reached by Nginx Proxy Manager over the shared external network, as
     # gotyeah_notes:3000 (no host port published — same convention as the other
     # apps on this Pi). Add `ports: ["30001:3000"]` if you need direct access.
