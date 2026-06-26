@@ -46,7 +46,7 @@ export default function Header({ user }: { user: SessionUser }) {
 
         {/* Avatar déterministe : couleur calculée depuis user.id */}
         <div
-          className={`ml-2 w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold border border-white/50 dark:border-gray-700/50 shrink-0 ${avatarColor}`}
+          className={`ml-2 w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold border border-[var(--border)] shrink-0 ${avatarColor}`}
           title={user.displayName}
           aria-label={user.displayName}
         >

@@ -10,6 +10,7 @@ import "@blocknote/mantine/style.css";
 import { mutate as globalMutate } from "swr";
 import type { ParsedDatabaseProperty, ParsedRecord, PropertyValue } from "@/lib/db";
 import Cell from "@/components/databases/Cell";
+import { useThemeMode } from "@/lib/client/useThemeMode";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -134,6 +135,7 @@ export default function RecordPanel({ record, properties, databaseId, onClose }:
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const editor = useCreateBlockNote({ initialContent: parsedContent as any, dictionary: fr });
+  const themeMode = useThemeMode();
 
   // ── Visible properties (non-title, sorted) ───────────────────────────────────
   const visibleProps = properties
@@ -225,6 +227,7 @@ export default function RecordPanel({ record, properties, databaseId, onClose }:
         <div className="flex-1 px-2 min-h-[200px]">
           <BlockNoteView
             editor={editor}
+            theme={themeMode}
             onChange={() => scheduleContentSave(JSON.stringify(editor.document))}
           />
         </div>

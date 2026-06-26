@@ -140,3 +140,25 @@
 .app-header-bg {
   background-color: color-mix(in srgb, var(--bg) 80%, transparent);
 }
+
+/* ─── BlockNote ───────────────────────────────────────────────────────────────────
+   L'éditeur suit les couleurs du thème du site (variables de [data-theme]).
+   La prop `theme` de <BlockNoteView> gère déjà le light/dark de base (surlignages,
+   sélection…) ; ici on aligne les surfaces sur la palette exacte de chaque thème.
+   Sélecteur `html[data-theme]` pour passer devant `.bn-root[data-color-scheme="dark"]`. */
+html[data-theme] .bn-root {
+  --bn-colors-editor-background: var(--bg);
+  --bn-colors-editor-text: var(--text);
+  --bn-colors-menu-background: var(--surface);
+  --bn-colors-menu-text: var(--text);
+  --bn-colors-tooltip-background: var(--surface);
+  --bn-colors-tooltip-text: var(--text);
+  --bn-colors-hovered-background: var(--surface-hover);
+  --bn-colors-hovered-text: var(--text);
+  --bn-colors-selected-background: var(--surface-active);
+  --bn-colors-selected-text: var(--text);
+  --bn-colors-disabled-text: var(--text-muted);
+  --bn-colors-border: var(--border);
+  --bn-colors-side-menu: var(--text-muted);
+  --bn-colors-shadow: var(--border);
+}

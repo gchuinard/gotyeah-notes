@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import { mutate } from "swr";
 import { Table2 } from "lucide-react";
 import EmojiPicker from "@/components/EmojiPicker";
+import { useThemeMode } from "@/lib/client/useThemeMode";
 
 type Props = {
   pageId: string;
@@ -25,6 +26,7 @@ export default function Editor({
   onTitleChange,
 }: Props) {
   const router = useRouter();
+  const themeMode = useThemeMode();
   const [title, setTitle] = useState(initialTitle);
   const [icon, setIcon] = useState<string | null>(initialIcon ?? null);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -99,7 +101,7 @@ export default function Editor({
   }, []);
 
   return (
-    <div className="max-w-3xl mx-auto py-12 px-6 dark:text-gray-100">
+    <div className="max-w-3xl mx-auto py-12 px-6 text-[var(--text)]">
       <div className="text-xs text-gray-400 h-4 mb-2">
         {saving === "saving" && "Enregistrement…"}
         {saving === "saved" && "Enregistré ✓"}
@@ -164,11 +166,12 @@ export default function Editor({
           scheduleSave({ title: v });
         }}
         placeholder="Sans titre"
-        className="w-full text-4xl font-bold outline-none mb-6 bg-transparent dark:text-gray-100 placeholder:text-gray-300 dark:placeholder:text-gray-600"
+        className="w-full text-4xl font-bold outline-none mb-6 bg-transparent text-[var(--text)] placeholder:text-[var(--text-muted)]"
       />
 
       <BlockNoteView
         editor={editor}
+        theme={themeMode}
         onChange={() => {
           scheduleSave({ content: JSON.stringify(editor.document) });
         }}

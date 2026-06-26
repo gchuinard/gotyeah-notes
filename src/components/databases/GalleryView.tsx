@@ -59,7 +59,7 @@ function GalleryCard({
           loading="lazy"
         />
       ) : (
-        <div className="w-full h-20 bg-slate-100 dark:bg-slate-800" />
+        <div className="w-full h-20 bg-[var(--surface)]" />
       )}
 
       {/* Content */}

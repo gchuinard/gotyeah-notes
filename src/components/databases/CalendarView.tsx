@@ -176,7 +176,7 @@ function CalendarCell({
       className={[
         "min-h-[100px] border border-[var(--border)] p-1 flex flex-col gap-0.5 cursor-pointer",
         "hover:bg-[var(--surface-hover)] transition-colors select-none",
-        isToday ? "bg-blue-50 dark:bg-blue-950/30" : "",
+        isToday ? "bg-[color-mix(in_srgb,var(--accent)_12%,transparent)]" : "",
       ].join(" ")}
     >
       {/* Day number */}
