@@ -1,5 +1,17 @@
 @import "tailwindcss";
 
+/* ─── Base ───────────────────────────────────────────────────────────────────────
+   Tailwind v4 ne met plus cursor:pointer sur les <button> (flèche par défaut).
+   On le rétablit pour tout élément cliquable actif → l'utilisateur voit que ça clique.
+   Dans @layer base : une classe utilitaire (cursor-*) sur un élément précis l'emporte. */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not(:disabled),
+  summary {
+    cursor: pointer;
+  }
+}
+
 /* ─── Themes ─────────────────────────────────────────────────────────────────── */
 
 :root,
