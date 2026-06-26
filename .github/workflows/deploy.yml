@@ -3,6 +3,10 @@ name: Deploy
 on:
   push:
     branches: [main]
+    # Évite un build/déploiement sur le Pi pour des changements purement documentaires
+    # (un commit mêlant doc + code déclenche quand même le déploiement).
+    paths-ignore:
+      - "**.md"
   workflow_dispatch:
 
 concurrency:
