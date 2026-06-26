@@ -38,6 +38,19 @@ services:
     volumes:
       - gotyeah-db:/data
     restart: unless-stopped
+    # Sonde lue par le workflow Deploy (.State.Health.Status). Node 24 expose
+    # fetch globalement ; on accepte tout statut < 500 (l'app répond, même via
+    # une redirection / vers /login).
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
 volumes:
   gotyeah-db:

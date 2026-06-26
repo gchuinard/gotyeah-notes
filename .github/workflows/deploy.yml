@@ -1,0 +1,44 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script_stop: true
+          command_timeout: 20m
+          script: |
+            set -euo pipefail
+            cd /home/pi/sites/gotyeah-notes
+            git fetch --prune origin
+            git reset --hard origin/main
+            docker compose up -d --build
+            for i in $(seq 1 60); do
+              health=$(docker inspect --format '{{.State.Health.Status}}' gotyeah_notes 2>/dev/null || echo missing)
+              if [ "$health" = "healthy" ]; then
+                echo "App healthy."
+                exit 0
+              fi
+              echo "Waiting for app to be healthy (health=$health)..."
+              sleep 2
+            done
+            echo "App did not become healthy in time."
+            docker logs --tail 200 gotyeah_notes || true
+            exit 1
