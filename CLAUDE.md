@@ -4,7 +4,7 @@ Ce fichier cadre le travail de Claude Code sur ce projet. Lis-le avant toute mod
 
 ## Contexte projet
 
-**notion-perso** est un clone de Notion self-hosted. Multi-workspace, multi-membres avec rôles, pages organisées en arborescence, databases avec vues multiples (table, kanban, calendar, gallery), drag-and-drop, éditeur de blocs BlockNote.
+**gotyeah-notes** est un clone de Notion self-hosted. Multi-workspace, multi-membres avec rôles, pages organisées en arborescence, databases avec vues multiples (table, kanban, calendar, gallery), drag-and-drop, éditeur de blocs BlockNote.
 
 ## Stack
 
