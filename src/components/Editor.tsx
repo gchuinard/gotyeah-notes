@@ -76,6 +76,11 @@ export default function Editor({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
+      // Le titre et l'icône s'affichent dans la sidebar et les récents : revalider
+      // toutes les clés /api/pages* (scopées par workspaceId, d'où le matcher).
+      if ("title" in payload || "icon" in payload) {
+        mutate((key) => typeof key === "string" && key.startsWith("/api/pages"));
+      }
       setSaving("saved");
       setTimeout(() => setSaving("idle"), 1200);
     }, 600);
@@ -84,14 +89,12 @@ export default function Editor({
   const handleEmojiSelect = (emoji: string) => {
     setIcon(emoji);
     scheduleSave({ icon: emoji });
-    mutate("/api/pages");
   };
 
   const handleRemoveIcon = (e: React.MouseEvent) => {
     e.stopPropagation();
     setIcon(null);
     scheduleSave({ icon: null });
-    mutate("/api/pages");
   };
 
   useEffect(() => {
