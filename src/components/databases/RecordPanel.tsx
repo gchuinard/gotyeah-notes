@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   X, Type, Hash, ChevronDown, List, Calendar, CheckSquare, Link, Mail,
+  LayoutTemplate,
 } from "lucide-react";
 import { useCreateBlockNote } from "@blocknote/react";
 import { fr } from "@blocknote/core/locales";
@@ -126,6 +127,23 @@ export default function RecordPanel({ record, properties, databaseId, onClose }:
     }, 500);
   };
 
+  // ── Modèle de corps de la database (recordTemplate) ──────────────────────────
+  // Prend le corps du record courant comme gabarit → s'applique aux futurs records
+  // (web ET MCP), géré côté serveur. Cf. lib/templates.ts, POST .../records.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [tplMsg, setTplMsg] = useState<string | null>(null);
+
+  const patchTemplate = async (recordTemplate: string | null, okMsg: string) => {
+    setMenuOpen(false);
+    const res = await fetch(`/api/databases/${databaseId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ recordTemplate }),
+    });
+    setTplMsg(res.ok ? okMsg : "Échec");
+    setTimeout(() => setTplMsg(null), 2500);
+  };
+
   // ── BlockNote editor (same pattern as Editor.tsx) ────────────────────────────
   let parsedContent: unknown = undefined;
   try {
@@ -189,12 +207,45 @@ export default function RecordPanel({ record, properties, databaseId, onClose }:
               </h2>
             )}
           </div>
-          <button
-            onClick={onClose}
-            className="shrink-0 p-1.5 text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] rounded transition-colors"
-          >
-            <X size={18} />
-          </button>
+          <div className="flex items-center gap-1 shrink-0">
+            {tplMsg && (
+              <span className="text-xs text-[var(--text-muted)] mr-1 whitespace-nowrap">{tplMsg}</span>
+            )}
+            <div className="relative">
+              <button
+                onClick={() => setMenuOpen((o) => !o)}
+                title="Modèle de la database"
+                className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] rounded transition-colors"
+              >
+                <LayoutTemplate size={17} />
+              </button>
+              {menuOpen && (
+                <>
+                  <div className="fixed inset-0 z-[60]" onClick={() => setMenuOpen(false)} />
+                  <div className="absolute right-0 top-full mt-1 z-[61] w-64 bg-[var(--surface)] border border-[var(--border)] rounded-md shadow-lg py-1 text-sm">
+                    <button
+                      onClick={() => patchTemplate(JSON.stringify(editor.document), "Modèle enregistré ✓")}
+                      className="w-full text-left px-3 py-1.5 hover:bg-[var(--surface-hover)] text-[var(--text)]"
+                    >
+                      Définir comme modèle de la database
+                    </button>
+                    <button
+                      onClick={() => patchTemplate(null, "Modèle effacé")}
+                      className="w-full text-left px-3 py-1.5 hover:bg-[var(--surface-hover)] text-[var(--text-muted)]"
+                    >
+                      Effacer le modèle
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+            <button
+              onClick={onClose}
+              className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] rounded transition-colors"
+            >
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
         {/* Properties */}

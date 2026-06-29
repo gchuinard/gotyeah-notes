@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import {
   ChevronRight, Clock, FileText,
-  Home, Lock, LogOut, Plus, Settings, Trash2, Users,
+  Home, LayoutTemplate, Lock, LogOut, Plus, Settings, Trash2, Users,
 } from "lucide-react";
 import { useRef, useState } from "react";
 import {
@@ -63,6 +63,36 @@ export default function Sidebar({ user }: { user: SessionUser }) {
     const page = await res.json();
     if (pagesKey) mutate(pagesKey);
     router.push(`/pages/${page.id}`);
+  };
+
+  // Crée une page « Tickets » et la scaffold direct en database de tickets
+  // (colonnes + kanban + modèle de corps). Cf. POST /api/databases?template=ticket.
+  const [creatingTicketDb, setCreatingTicketDb] = useState(false);
+  const createTicketDatabase = async () => {
+    if (!workspaceId || creatingTicketDb) return;
+    setCreatingTicketDb(true);
+    try {
+      const sectionId =
+        sections.find((s) => s.type === "private")?.id ??
+        sections.find((s) => s.type === "team")?.id ??
+        null;
+      const pageRes = await fetch("/api/pages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspaceId, sectionId, title: "Tickets" }),
+      });
+      if (!pageRes.ok) return;
+      const page = await pageRes.json();
+      await fetch("/api/databases", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pageId: page.id, template: "ticket" }),
+      });
+      if (pagesKey) mutate(pagesKey);
+      router.push(`/pages/${page.id}`);
+    } finally {
+      setCreatingTicketDb(false);
+    }
   };
 
   const handleDragEnd = (sectionId: string) => (event: DragEndEvent) => {
@@ -141,6 +171,15 @@ export default function Sidebar({ user }: { user: SessionUser }) {
           <Home size={14} />
           Accueil
         </Link>
+        <button
+          onClick={createTicketDatabase}
+          disabled={creatingTicketDb || !workspaceId}
+          title="Crée une database de tickets (façon Jira) prête à l'emploi"
+          className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-[var(--surface-hover)] text-[var(--text-muted)] disabled:opacity-50 text-left"
+        >
+          <LayoutTemplate size={14} />
+          {creatingTicketDb ? "Création…" : "Database de tickets"}
+        </button>
       </div>
 
       {/* Récents */}

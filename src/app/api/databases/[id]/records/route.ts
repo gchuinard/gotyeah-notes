@@ -28,6 +28,7 @@ export async function GET(
 const createRecordSchema = z.object({
   title: z.string().optional(),
   icon: z.string().optional(),
+  content: z.string().optional(),
   // Property keys are not validated against existing DatabaseProperties.
   // Coherence between properties and the database schema is intentionally
   // left to the client — the server only stores what it receives.
@@ -54,8 +55,20 @@ export async function POST(
     );
   }
 
-  const { title, icon, properties: rawProperties = {} } = result.data;
+  const { title, icon, content, properties: rawProperties = {} } = result.data;
   const properties = rawProperties as RecordProperties;
+
+  // Corps pré-rempli : le client peut fournir `content` ; sinon, si la database a
+  // un modèle (recordTemplate), on l'applique. C'est le point unique qui fait que
+  // le « + » du web ET les outils MCP héritent du modèle, sans logique dupliquée.
+  let initialContent = content;
+  if (initialContent === undefined) {
+    const db = await prisma.database.findUnique({
+      where: { id: databaseId },
+      select: { recordTemplate: true },
+    });
+    if (db?.recordTemplate) initialContent = db.recordTemplate;
+  }
 
   const position = await nextPosition("record", { databaseId });
 
@@ -66,6 +79,7 @@ export async function POST(
       position,
       ...(title !== undefined && { title }),
       ...(icon !== undefined && { icon }),
+      ...(initialContent !== undefined && { content: initialContent }),
       ...serializeRecord({ properties }),
     },
   });

@@ -9,9 +9,15 @@ import {
   parseManyDatabaseProperties,
   parseManyViews,
 } from "@/lib/db";
+import {
+  TICKET_BODY_TEMPLATE_JSON,
+  TICKET_PROPERTY_PRESET,
+  TICKET_KANBAN_GROUP_PROPERTY,
+} from "@/lib/templates";
 
 const createDatabaseSchema = z.object({
   pageId: z.string().min(1),
+  template: z.enum(["ticket"]).optional(),
 });
 
 export async function POST(req: Request) {
@@ -27,7 +33,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const { pageId } = result.data;
+  const { pageId, template } = result.data;
 
   const page = await prisma.page.findUnique({
     where: { id: pageId },
@@ -44,9 +50,14 @@ export async function POST(req: Request) {
   }
 
   const db = await prisma.$transaction(async (tx) => {
-    const database = await tx.database.create({ data: { pageId } });
+    const database = await tx.database.create({
+      data: {
+        pageId,
+        ...(template === "ticket" && { recordTemplate: TICKET_BODY_TEMPLATE_JSON }),
+      },
+    });
 
-    const property = await tx.databaseProperty.create({
+    const titleProperty = await tx.databaseProperty.create({
       data: {
         databaseId: database.id,
         name: "Titre",
@@ -56,7 +67,7 @@ export async function POST(req: Request) {
       },
     });
 
-    const view = await tx.view.create({
+    const tableView = await tx.view.create({
       data: {
         databaseId: database.id,
         name: "Vue principale",
@@ -66,7 +77,43 @@ export async function POST(req: Request) {
       },
     });
 
-    return { ...database, properties: [property], views: [view] };
+    const properties = [titleProperty];
+    const views = [tableView];
+
+    // Scaffolding « Tickets » : colonnes standard + vue kanban groupée par Statut.
+    if (template === "ticket") {
+      const idByName: Record<string, string> = {};
+      let position = 2000;
+      for (const preset of TICKET_PROPERTY_PRESET) {
+        const prop = await tx.databaseProperty.create({
+          data: {
+            databaseId: database.id,
+            name: preset.name,
+            type: preset.type,
+            position,
+            ...serializeDatabaseProperty({ config: preset.config }),
+          },
+        });
+        properties.push(prop);
+        idByName[preset.name] = prop.id;
+        position += 1000;
+      }
+
+      const kanbanView = await tx.view.create({
+        data: {
+          databaseId: database.id,
+          name: "Par statut",
+          type: "kanban",
+          position: 2000,
+          ...serializeView({
+            config: { groupByPropertyId: idByName[TICKET_KANBAN_GROUP_PROPERTY] },
+          }),
+        },
+      });
+      views.push(kanbanView);
+    }
+
+    return { ...database, properties, views };
   });
 
   return NextResponse.json(
