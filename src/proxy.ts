@@ -12,6 +12,15 @@ export function proxy(request: NextRequest) {
 
   const token = request.cookies.get("session_token")?.value;
   if (!token) {
+    // Pont de confiance MCP : ces appels ne portent pas de cookie mais les en-têtes
+    // act-as. On laisse passer vers la route API, qui valide le secret en temps
+    // constant et mappe l'email sur un User (cf. lib/session.ts > getServiceUser).
+    const hasMcpBridge =
+      !!request.headers.get("x-mcp-secret") &&
+      !!request.headers.get("x-act-as-email");
+    if (hasMcpBridge && pathname.startsWith("/api/")) {
+      return NextResponse.next();
+    }
     if (pathname.startsWith("/api/")) {
       return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
     }
