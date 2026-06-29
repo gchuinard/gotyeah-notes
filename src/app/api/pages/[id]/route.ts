@@ -35,7 +35,10 @@ export async function GET(
   const page = await getPageWithMembership(id, user.id);
   if (!page) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const full = await prisma.page.findUnique({ where: { id } });
+  const full = await prisma.page.findUnique({
+    where: { id },
+    include: { database: { select: { id: true } } },
+  });
   return NextResponse.json(full);
 }
 
