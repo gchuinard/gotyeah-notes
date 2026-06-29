@@ -147,15 +147,18 @@ L'éditeur BlockNote debounce 500-600ms sur `onChange` et envoie un PATCH. Même
 
 - Les outils MCP de gotyeah-notes sont **greffés sur le MCP distant Sonar** (`gotyeah_sonar/mcp_remote/`), **pas** un serveur séparé : on réutilise son OAuth fédéré à l'IdP **Pocket ID** déjà branché dans claude.ai (volonté : ne pas dupliquer l'auth).
 - **Pont de confiance** : `lib/session.ts > getSession()` accepte, à défaut de cookie valide, un appel du MCP via `X-MCP-Secret` (== env `MCP_SHARED_SECRET`, comparaison constant-time) + `X-Act-As-Email` → mappé sur un **User existant** (match email exact). Entièrement **OFF tant que `MCP_SHARED_SECRET` est vide** → aucune surface ajoutée par défaut. L'auth web cookie/password est inchangée.
-- **Outils** : `notes_list_workspaces`, `notes_list_pages`, `notes_get_page`, `notes_create_page`, `notes_update_page`, `notes_delete_page`, `notes_search`, `notes_list_sections`, `notes_create_section`.
-- **Activation** (sur le Pi) : même secret dans les deux `.env` — `MCP_SHARED_SECRET` ici, `NOTES_API_BASE_URL=http://gotyeah_notes:3000` + `NOTES_MCP_SECRET` côté Sonar (les deux conteneurs sont sur le réseau `nginx-proxy-manager_default`) — puis `docker compose up -d` et rafraîchir le connecteur claude.ai.
+- ⚠️ **`src/proxy.ts` est le middleware** (Next 16 a renommé `middleware` → `proxy`). Il s'exécute AVANT les routes et 401-ait tout `/api/*` sans cookie : il **laisse passer** les appels portant `x-mcp-secret` + `x-act-as-email` (la validation autoritaire reste dans `session.ts`). Toute future auth par en-têtes doit aussi être whitelistée là.
+- **Outils — pages/sections** : `notes_list_workspaces`, `notes_list_pages`, `notes_get_page`, `notes_create_page`, `notes_update_page`, `notes_delete_page`, `notes_search`, `notes_list_sections`, `notes_create_section`.
+- **Outils — databases (v2)** : `notes_get_database`, `notes_create_database`, `notes_delete_database`, `notes_create_property`, `notes_update_property`, `notes_delete_property`, `notes_list_records`, `notes_get_record`, `notes_create_record`, `notes_update_record`, `notes_delete_record`, `notes_create_view`, `notes_update_view`, `notes_delete_view`. Une database EST une page → `notes_get_page` renvoie `database: {id}`. Les records se manipulent **par NOM** de propriété (traduit en ids + options select via le schéma, côté `gotyeah_sonar/mcp_remote/notes_tools.py`).
+- **Activation** (sur le Pi) : même secret dans les deux `.env` — `MCP_SHARED_SECRET` ici, `NOTES_API_BASE_URL=http://gotyeah_notes:3000` + `NOTES_MCP_SECRET` côté Sonar (les deux conteneurs sont sur le réseau `nginx-proxy-manager_default`) — puis `docker compose up -d` et rafraîchir le connecteur claude.ai. **✅ Actif en prod (2026-06-29)** ; l'email du User a été aligné sur le gmail (= email IdP) car le match est exact.
 - Variables d'env : voir `.env.example`.
 
 ## Reste à faire
 
-- [ ] **Activer le MCP** : poser les secrets dans les `.env` du Pi (notes + Sonar), `docker compose up -d`, rafraîchir le connecteur claude.ai. *(code déjà déployé, dormant)*
-- [ ] **MCP v2 — databases/records** : outils pour créer/éditer databases, properties, records, views (compléter « tout faire »).
+- [x] ~~**Activer le MCP**~~ : fait (2026-06-29). Secrets posés sur le Pi, pont actif, connecteur claude.ai rafraîchi.
+- [x] ~~**MCP v2 — databases/records**~~ : fait (2026-06-29). 14 outils `notes_*` (databases, properties, records, views) côté Sonar, records par nom. Voir section *Intégration MCP*.
 - [ ] **Match email IdP→User insensible à la casse** : actuellement exact (SQLite ne supporte pas `mode: "insensitive"`). À traiter si la casse diffère entre Pocket ID et le compte.
+- [ ] **MCP v3 (optionnel)** : `update_property` ne gère que rename/position (changer type/options d'un select casserait les records). Édition des options select par nom à ajouter si besoin.
 - [ ] **Builds hors Pi** : déplacer le build Docker en CI (GitHub Actions) + `docker pull` au déploiement, pour supprimer les pics RAM/swap au déploiement.
 - [ ] (optionnel) UI Settings « Jetons d'accès » si un jour on veut un PAT en complément de l'IdP.
 
