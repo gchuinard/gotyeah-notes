@@ -7,7 +7,9 @@ import {
   serializeRecord,
   parseRecord,
   mergeRecordProperties,
+  serializeSectionsBody,
   type RecordProperties,
+  type RecordSection,
 } from "@/lib/db";
 
 export async function GET(
@@ -30,6 +32,19 @@ const patchRecordSchema = z.object({
   content: z.string().optional(),
   properties: z.record(z.string(), z.unknown()).optional(),
   position: z.number().optional(),
+  // Corps sectionné (templates) : remplacement TOTAL des sections fournies.
+  // null = repasser en corps libre. templateId = template appliqué à ce record.
+  sectionsBody: z
+    .array(
+      z.object({
+        id: z.string(),
+        label: z.string(),
+        content: z.array(z.unknown()),
+      })
+    )
+    .nullable()
+    .optional(),
+  templateId: z.string().nullable().optional(),
 });
 
 export async function PATCH(
@@ -53,7 +68,15 @@ export async function PATCH(
   const access = await checkRecordAccess(id, user.id);
   if (!access) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const { title, icon, content, properties: rawProperties, position } = result.data;
+  const {
+    title,
+    icon,
+    content,
+    properties: rawProperties,
+    position,
+    sectionsBody,
+    templateId,
+  } = result.data;
 
   let mergedProperties: RecordProperties | undefined;
   if (rawProperties !== undefined) {
@@ -63,13 +86,20 @@ export async function PATCH(
 
   const updated = await prisma.record.update({
     where: { id },
-    data: serializeRecord({
-      ...(title !== undefined && { title }),
-      ...(icon !== undefined && { icon }),
-      ...(content !== undefined && { content }),
-      ...(position !== undefined && { position }),
-      ...(mergedProperties !== undefined && { properties: mergedProperties }),
-    }),
+    data: {
+      ...serializeRecord({
+        ...(title !== undefined && { title }),
+        ...(icon !== undefined && { icon }),
+        ...(content !== undefined && { content }),
+        ...(position !== undefined && { position }),
+        ...(mergedProperties !== undefined && { properties: mergedProperties }),
+      }),
+      ...(sectionsBody !== undefined && {
+        sectionsBody:
+          sectionsBody === null ? null : serializeSectionsBody(sectionsBody as RecordSection[]),
+      }),
+      ...(templateId !== undefined && { templateId }),
+    },
   });
 
   return NextResponse.json(parseRecord(updated));

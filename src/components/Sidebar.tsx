@@ -65,11 +65,15 @@ export default function Sidebar({ user }: { user: SessionUser }) {
     router.push(`/pages/${page.id}`);
   };
 
-  // Crée une page puis la scaffold direct en database à partir d'un modèle
-  // (colonnes + kanban + modèle de corps). Cf. POST /api/databases?template=…
+  // Crée une page puis la scaffold direct en database à partir d'un template
+  // (colonnes + kanban + sections). Cf. POST /api/databases { templateId }.
   const [creatingDb, setCreatingDb] = useState(false);
   const [dbMenuOpen, setDbMenuOpen] = useState(false);
-  const createTemplatedDatabase = async (template: "ticket" | "bug", title: string) => {
+  const { data: templates = [] } = useSWR<{ id: string; name: string; builtin: boolean }[]>(
+    dbMenuOpen && workspaceId ? `/api/templates?workspaceId=${workspaceId}` : null,
+    fetcher
+  );
+  const createDatabaseFromTemplate = async (templateId: string, name: string) => {
     if (!workspaceId || creatingDb) return;
     setDbMenuOpen(false);
     setCreatingDb(true);
@@ -81,14 +85,14 @@ export default function Sidebar({ user }: { user: SessionUser }) {
       const pageRes = await fetch("/api/pages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ workspaceId, sectionId, title }),
+        body: JSON.stringify({ workspaceId, sectionId, title: name }),
       });
       if (!pageRes.ok) return;
       const page = await pageRes.json();
       await fetch("/api/databases", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pageId: page.id, template }),
+        body: JSON.stringify({ pageId: page.id, templateId }),
       });
       if (pagesKey) mutate(pagesKey);
       router.push(`/pages/${page.id}`);
@@ -187,19 +191,25 @@ export default function Sidebar({ user }: { user: SessionUser }) {
           {dbMenuOpen && (
             <>
               <div className="fixed inset-0 z-40" onClick={() => setDbMenuOpen(false)} />
-              <div className="absolute left-1 right-1 top-full mt-0.5 z-50 bg-[var(--surface)] border border-[var(--border)] rounded-md shadow-lg py-1">
-                <button
-                  onClick={() => createTemplatedDatabase("ticket", "Tickets")}
-                  className="w-full text-left px-3 py-1.5 hover:bg-[var(--surface-hover)] text-[var(--text)]"
+              <div className="absolute left-1 right-1 top-full mt-0.5 z-50 bg-[var(--surface)] border border-[var(--border)] rounded-md shadow-lg py-1 max-h-72 overflow-y-auto">
+                {templates.map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => createDatabaseFromTemplate(t.id, t.name)}
+                    className="w-full text-left px-3 py-1.5 hover:bg-[var(--surface-hover)] text-[var(--text)]"
+                  >
+                    {t.name}
+                    {t.builtin && <span className="ml-1 text-xs text-[var(--text-muted)]">(fourni)</span>}
+                  </button>
+                ))}
+                <div className="border-t border-[var(--border)] my-1" />
+                <Link
+                  href="/templates"
+                  onClick={() => setDbMenuOpen(false)}
+                  className="block px-3 py-1.5 hover:bg-[var(--surface-hover)] text-[var(--text-muted)]"
                 >
-                  Tickets
-                </button>
-                <button
-                  onClick={() => createTemplatedDatabase("bug", "Bugs")}
-                  className="w-full text-left px-3 py-1.5 hover:bg-[var(--surface-hover)] text-[var(--text)]"
-                >
-                  Bugs
-                </button>
+                  Gérer les modèles…
+                </Link>
               </div>
             </>
           )}

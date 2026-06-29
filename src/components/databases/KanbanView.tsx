@@ -651,6 +651,8 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
         icon: null,
         coverUrl: null,
         content: "[]",
+        templateId: null,
+        sectionsBody: null,
         createdBy: null,
         createdAt: now,
         updatedAt: now,

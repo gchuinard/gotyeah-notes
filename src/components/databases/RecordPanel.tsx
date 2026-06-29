@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import useSWR, { mutate as globalMutate } from "swr";
 import {
   X, Type, Hash, ChevronDown, List, Calendar, CheckSquare, Link, Mail,
   LayoutTemplate,
@@ -8,10 +9,10 @@ import { useCreateBlockNote } from "@blocknote/react";
 import { fr } from "@blocknote/core/locales";
 import { BlockNoteView } from "@blocknote/mantine";
 import "@blocknote/mantine/style.css";
-import { mutate as globalMutate } from "swr";
-import type { ParsedDatabaseProperty, ParsedRecord, PropertyValue } from "@/lib/db";
+import type { ParsedDatabaseProperty, ParsedRecord, PropertyValue, RecordSection } from "@/lib/db";
 import Cell from "@/components/databases/Cell";
 import { useThemeMode } from "@/lib/client/useThemeMode";
+import { useWorkspace } from "@/contexts/WorkspaceContext";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -26,6 +27,55 @@ const PROP_ICONS: Record<string, React.ReactNode> = {
   email:       <Mail size={14} />,
 };
 
+const fetcher = (url: string) => fetch(url).then((r) => r.json());
+
+type TemplateLite = {
+  id: string;
+  name: string;
+  builtin: boolean;
+  sections: { id: string; label: string }[];
+};
+
+function parseSections(raw: string | null): RecordSection[] | null {
+  if (!raw) return null;
+  try {
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? (arr as RecordSection[]) : null;
+  } catch {
+    return null;
+  }
+}
+
+// ─── Éditeur d'une section (corps sectionné) ──────────────────────────────────
+// Le libellé est rendu HORS éditeur → non modifiable.
+
+function SectionEditor({
+  section,
+  themeMode,
+  onChange,
+}: {
+  section: RecordSection;
+  themeMode: "light" | "dark";
+  onChange: (content: unknown[]) => void;
+}) {
+  const initial =
+    Array.isArray(section.content) && section.content.length > 0 ? section.content : undefined;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const editor = useCreateBlockNote({ initialContent: initial as any, dictionary: fr });
+  return (
+    <div className="mb-3">
+      <h3 className="px-3 text-sm font-semibold text-[var(--text)] select-none">
+        {section.label}
+      </h3>
+      <BlockNoteView
+        editor={editor}
+        theme={themeMode}
+        onChange={() => onChange(editor.document)}
+      />
+    </div>
+  );
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Props = {
@@ -39,6 +89,9 @@ type Props = {
 
 export default function RecordPanel({ record, properties, databaseId, onClose }: Props) {
   const recordsKey = `/api/databases/${databaseId}/records`;
+  const themeMode = useThemeMode();
+  const { activeWorkspace } = useWorkspace();
+  const wsId = activeWorkspace?.id ?? null;
 
   // ── Slide-in animation ───────────────────────────────────────────────────────
   const [visible, setVisible] = useState(false);
@@ -59,7 +112,6 @@ export default function RecordPanel({ record, properties, databaseId, onClose }:
   const [titleValue, setTitleValue] = useState(record.title);
   const titleInputRef = useRef<HTMLInputElement>(null);
 
-  // Sync title when parent SWR updates (only if not mid-edit)
   useEffect(() => {
     if (!isEditingTitle) setTitleValue(record.title);
   }, [record.title, isEditingTitle]);
@@ -75,7 +127,6 @@ export default function RecordPanel({ record, properties, databaseId, onClose }:
     setIsEditingTitle(false);
     const trimmed = titleValue.trim();
     if (trimmed === record.title) return;
-    // Optimistic update
     globalMutate(
       recordsKey,
       (prev: ParsedRecord[] | undefined) =>
@@ -110,12 +161,89 @@ export default function RecordPanel({ record, properties, databaseId, onClose }:
     }).then((res) => { if (res.ok) globalMutate(recordsKey); });
   };
 
-  // ── Content save (BlockNote, 500ms debounce) ──────────────────────────────────
-  const contentSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => {
-    if (contentSaveTimer.current) clearTimeout(contentSaveTimer.current);
-  }, []);
+  // ── Corps sectionné (templates) ──────────────────────────────────────────────
+  const [sections, setSections] = useState<RecordSection[]>(() => parseSections(record.sectionsBody) ?? []);
+  const [bodyVersion, setBodyVersion] = useState(0); // force le remount des éditeurs
+  useEffect(() => {
+    setSections(parseSections(record.sectionsBody) ?? []);
+    setBodyVersion((v) => v + 1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [record.id]);
 
+  const sectionsRef = useRef<RecordSection[]>(sections);
+  sectionsRef.current = sections;
+  const sectionsSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (sectionsSaveTimer.current) clearTimeout(sectionsSaveTimer.current); }, []);
+
+  const scheduleSectionsSave = () => {
+    if (sectionsSaveTimer.current) clearTimeout(sectionsSaveTimer.current);
+    sectionsSaveTimer.current = setTimeout(() => {
+      fetch(`/api/records/${record.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sectionsBody: sectionsRef.current }),
+      });
+    }, 600);
+  };
+
+  const onSectionChange = (id: string, content: unknown[]) => {
+    setSections((prev) => prev.map((s) => (s.id === id ? { ...s, content } : s)));
+    scheduleSectionsSave();
+  };
+
+  // ── Menu de template (par carte) ─────────────────────────────────────────────
+  const [tplMenuOpen, setTplMenuOpen] = useState(false);
+  const { data: templates = [] } = useSWR<TemplateLite[]>(
+    tplMenuOpen && wsId ? `/api/templates?workspaceId=${wsId}` : null,
+    fetcher
+  );
+
+  const applyTemplate = async (tpl: TemplateLite | null) => {
+    setTplMenuOpen(false);
+    if (!tpl) {
+      setSections([]);
+      setBodyVersion((v) => v + 1);
+      await fetch(`/api/records/${record.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sectionsBody: null, templateId: null }),
+      });
+      globalMutate(recordsKey);
+      return;
+    }
+    // Nouvelles sections : on préserve le contenu par id ; les anciennes sections
+    // non vides absentes du nouveau template sont conservées (ajoutées à la fin).
+    const prev = sectionsRef.current;
+    const byId = new Map(prev.map((s) => [s.id, s]));
+    const used = new Set<string>();
+    const next: RecordSection[] = tpl.sections.map((ts) => {
+      used.add(ts.id);
+      const old = byId.get(ts.id);
+      return { id: ts.id, label: ts.label, content: old?.content ?? [] };
+    });
+    for (const s of prev) {
+      if (!used.has(s.id) && Array.isArray(s.content) && s.content.length > 0) next.push(s);
+    }
+    setSections(next);
+    setBodyVersion((v) => v + 1);
+    await fetch(`/api/records/${record.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sectionsBody: next, templateId: tpl.id }),
+    });
+    globalMutate(recordsKey);
+  };
+
+  // ── Éditeur de corps LIBRE (utilisé hors mode sectionné) ─────────────────────
+  let parsedContent: unknown = undefined;
+  try {
+    const arr = JSON.parse(record.content);
+    if (Array.isArray(arr) && arr.length > 0) parsedContent = arr;
+  } catch {}
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const editor = useCreateBlockNote({ initialContent: parsedContent as any, dictionary: fr });
+  const contentSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (contentSaveTimer.current) clearTimeout(contentSaveTimer.current); }, []);
   const scheduleContentSave = (content: string) => {
     if (contentSaveTimer.current) clearTimeout(contentSaveTimer.current);
     contentSaveTimer.current = setTimeout(() => {
@@ -127,33 +255,7 @@ export default function RecordPanel({ record, properties, databaseId, onClose }:
     }, 500);
   };
 
-  // ── Modèle de corps de la database (recordTemplate) ──────────────────────────
-  // Prend le corps du record courant comme gabarit → s'applique aux futurs records
-  // (web ET MCP), géré côté serveur. Cf. lib/templates.ts, POST .../records.
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [tplMsg, setTplMsg] = useState<string | null>(null);
-
-  const patchTemplate = async (recordTemplate: string | null, okMsg: string) => {
-    setMenuOpen(false);
-    const res = await fetch(`/api/databases/${databaseId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ recordTemplate }),
-    });
-    setTplMsg(res.ok ? okMsg : "Échec");
-    setTimeout(() => setTplMsg(null), 2500);
-  };
-
-  // ── BlockNote editor (same pattern as Editor.tsx) ────────────────────────────
-  let parsedContent: unknown = undefined;
-  try {
-    const arr = JSON.parse(record.content);
-    if (Array.isArray(arr) && arr.length > 0) parsedContent = arr;
-  } catch {}
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const editor = useCreateBlockNote({ initialContent: parsedContent as any, dictionary: fr });
-  const themeMode = useThemeMode();
+  const isSectioned = sections.length > 0;
 
   // ── Visible properties (non-title, sorted) ───────────────────────────────────
   const visibleProps = properties
@@ -164,10 +266,8 @@ export default function RecordPanel({ record, properties, databaseId, onClose }:
 
   return (
     <>
-      {/* Overlay — click to close */}
       <div className="fixed inset-0 bg-black/30 z-40" onClick={onClose} />
 
-      {/* Panel */}
       <div
         className={[
           "fixed right-0 top-0 bottom-0 w-[600px] max-w-full z-50",
@@ -208,32 +308,38 @@ export default function RecordPanel({ record, properties, databaseId, onClose }:
             )}
           </div>
           <div className="flex items-center gap-1 shrink-0">
-            {tplMsg && (
-              <span className="text-xs text-[var(--text-muted)] mr-1 whitespace-nowrap">{tplMsg}</span>
-            )}
             <div className="relative">
               <button
-                onClick={() => setMenuOpen((o) => !o)}
-                title="Modèle de la database"
-                className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] rounded transition-colors"
+                onClick={() => setTplMenuOpen((o) => !o)}
+                title="Modèle de cette carte"
+                className="flex items-center gap-1 px-2 py-1.5 text-sm text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] rounded transition-colors"
               >
-                <LayoutTemplate size={17} />
+                <LayoutTemplate size={15} />
+                <ChevronDown size={13} />
               </button>
-              {menuOpen && (
+              {tplMenuOpen && (
                 <>
-                  <div className="fixed inset-0 z-[60]" onClick={() => setMenuOpen(false)} />
-                  <div className="absolute right-0 top-full mt-1 z-[61] w-64 bg-[var(--surface)] border border-[var(--border)] rounded-md shadow-lg py-1 text-sm">
+                  <div className="fixed inset-0 z-[60]" onClick={() => setTplMenuOpen(false)} />
+                  <div className="absolute right-0 top-full mt-1 z-[61] w-60 bg-[var(--surface)] border border-[var(--border)] rounded-md shadow-lg py-1 text-sm max-h-80 overflow-y-auto">
+                    <div className="px-3 py-1 text-xs text-[var(--text-muted)] uppercase tracking-wide">Appliquer un modèle</div>
+                    {templates.map((tpl) => (
+                      <button
+                        key={tpl.id}
+                        onClick={() => applyTemplate(tpl)}
+                        className="w-full text-left px-3 py-1.5 hover:bg-[var(--surface-hover)] text-[var(--text)]"
+                      >
+                        {tpl.name}
+                        {tpl.builtin && (
+                          <span className="ml-1 text-xs text-[var(--text-muted)]">(fourni)</span>
+                        )}
+                      </button>
+                    ))}
+                    <div className="border-t border-[var(--border)] my-1" />
                     <button
-                      onClick={() => patchTemplate(JSON.stringify(editor.document), "Modèle enregistré ✓")}
-                      className="w-full text-left px-3 py-1.5 hover:bg-[var(--surface-hover)] text-[var(--text)]"
-                    >
-                      Définir comme modèle de la database
-                    </button>
-                    <button
-                      onClick={() => patchTemplate(null, "Modèle effacé")}
+                      onClick={() => applyTemplate(null)}
                       className="w-full text-left px-3 py-1.5 hover:bg-[var(--surface-hover)] text-[var(--text-muted)]"
                     >
-                      Effacer le modèle
+                      Corps libre (sans modèle)
                     </button>
                   </div>
                 </>
@@ -253,12 +359,10 @@ export default function RecordPanel({ record, properties, databaseId, onClose }:
           <div className="px-6 py-1 shrink-0">
             {visibleProps.map((property) => (
               <div key={property.id} className="flex items-center gap-3 py-1.5 min-h-[36px]">
-                {/* Label */}
                 <div className="flex items-center gap-2 w-44 shrink-0 text-sm text-[var(--text-muted)]">
                   <span className="shrink-0">{PROP_ICONS[property.type] ?? <Type size={14} />}</span>
                   <span className="truncate">{property.name}</span>
                 </div>
-                {/* Value — reuse Cell component */}
                 <div className="flex-1 min-w-0 text-sm">
                   <Cell
                     property={property}
@@ -271,16 +375,26 @@ export default function RecordPanel({ record, properties, databaseId, onClose }:
           </div>
         )}
 
-        {/* Divider */}
         <div className="border-t border-[var(--border)] mx-6 my-3 shrink-0" />
 
-        {/* BlockNote content */}
+        {/* Corps : sectionné (libellés fixes) ou libre */}
         <div className="flex-1 px-2 min-h-[200px]">
-          <BlockNoteView
-            editor={editor}
-            theme={themeMode}
-            onChange={() => scheduleContentSave(JSON.stringify(editor.document))}
-          />
+          {isSectioned ? (
+            sections.map((section) => (
+              <SectionEditor
+                key={`${section.id}-${bodyVersion}`}
+                section={section}
+                themeMode={themeMode}
+                onChange={(content) => onSectionChange(section.id, content)}
+              />
+            ))
+          ) : (
+            <BlockNoteView
+              editor={editor}
+              theme={themeMode}
+              onChange={() => scheduleContentSave(JSON.stringify(editor.document))}
+            />
+          )}
         </div>
       </div>
     </>

@@ -4,7 +4,14 @@ import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 import { checkDatabaseAccess } from "@/lib/workspace";
 import { nextPosition } from "@/lib/positions";
-import { serializeRecord, parseRecord, parseManyRecords, type RecordProperties } from "@/lib/db";
+import {
+  serializeRecord,
+  parseRecord,
+  parseManyRecords,
+  serializeSectionsBody,
+  type RecordProperties,
+} from "@/lib/db";
+import { emptySectionsBody } from "@/lib/templates";
 
 export async function GET(
   _: Request,
@@ -58,16 +65,23 @@ export async function POST(
   const { title, icon, content, properties: rawProperties = {} } = result.data;
   const properties = rawProperties as RecordProperties;
 
-  // Corps pré-rempli : le client peut fournir `content` ; sinon, si la database a
-  // un modèle (recordTemplate), on l'applique. C'est le point unique qui fait que
-  // le « + » du web ET les outils MCP héritent du modèle, sans logique dupliquée.
+  // Corps du record. Si la database est templatée (recordSections), on estampe un
+  // corps SECTIONNÉ vide + le templateId. Sinon, si un modèle de corps LIBRE existe
+  // et qu'aucun `content` n'est fourni, on l'applique. Point unique → web + MCP.
+  const dbRow = await prisma.database.findUnique({
+    where: { id: databaseId },
+    select: { recordTemplate: true, recordSections: true, templateId: true },
+  });
+
   let initialContent = content;
-  if (initialContent === undefined) {
-    const db = await prisma.database.findUnique({
-      where: { id: databaseId },
-      select: { recordTemplate: true },
-    });
-    if (db?.recordTemplate) initialContent = db.recordTemplate;
+  let sectionsBody: string | undefined;
+  let recordTemplateId: string | undefined;
+  if (content === undefined && dbRow?.recordSections) {
+    const secs = JSON.parse(dbRow.recordSections) as { id: string; label: string }[];
+    sectionsBody = serializeSectionsBody(emptySectionsBody(secs));
+    recordTemplateId = dbRow.templateId ?? undefined;
+  } else if (initialContent === undefined && dbRow?.recordTemplate) {
+    initialContent = dbRow.recordTemplate;
   }
 
   const position = await nextPosition("record", { databaseId });
@@ -80,6 +94,8 @@ export async function POST(
       ...(title !== undefined && { title }),
       ...(icon !== undefined && { icon }),
       ...(initialContent !== undefined && { content: initialContent }),
+      ...(sectionsBody !== undefined && { sectionsBody }),
+      ...(recordTemplateId !== undefined && { templateId: recordTemplateId }),
       ...serializeRecord({ properties }),
     },
   });

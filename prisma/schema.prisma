@@ -56,7 +56,26 @@ model Workspace {
   memberships    Membership[]
   pages          Page[]
   sections       Section[]
+  templates      Template[]
   activeSessions Session[]    @relation("CurrentSession")
+}
+
+// Modèle réutilisable (façon Jira) : colonnes + regroupement kanban + sections de
+// corps à libellés fixes. Appartient à un workspace. Les templates « fournis »
+// (ticket, bug) sont définis en code (lib/templates.ts) à côté de ceux-ci.
+model Template {
+  id                  String    @id @default(cuid())
+  workspaceId         String
+  workspace           Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name                String
+  icon                String?
+  columns             String    @default("[]") // JSON : PropertyPreset[]
+  kanbanGroupProperty String? // nom de la colonne servant au regroupement kanban
+  sections            String    @default("[]") // JSON : [{ id, label }]
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([workspaceId])
 }
 
 model Section {
@@ -132,9 +151,15 @@ model Database {
   properties DatabaseProperty[]
   records    Record[]
   views      View[]
-  // Modèle de corps (document BlockNote JSON) pré-rempli à la création d'un record
-  // quand aucun `content` n'est fourni. null = pas de modèle. Cf. lib/templates.ts.
+  // Modèle de corps LIBRE (document BlockNote JSON) pré-rempli à la création d'un
+  // record quand aucun `content` n'est fourni. null = pas de modèle.
   recordTemplate String?
+  // Template (sections + colonnes) depuis lequel la database a été scaffoldée.
+  // Référence un id de Template OU un id de template fourni ("builtin-…").
+  templateId     String?
+  // Squelette de sections estampé sur les nouveaux records (JSON [{id,label}]).
+  // Copié du template à la création → robuste si le template change/disparaît.
+  recordSections String?
   createdAt  DateTime           @default(now())
   updatedAt  DateTime           @updatedAt
 }
@@ -165,6 +190,10 @@ model Record {
   updatedAt  DateTime @updatedAt
   position   Float    @default(0)
   properties String   @default("{}")
+  // Corps SECTIONNÉ (templates à libellés fixes). JSON : [{ id, label, content }]
+  // où content est un document BlockNote. null = corps libre (champ `content`).
+  templateId  String?
+  sectionsBody String?
 
   @@index([databaseId])
   @@index([createdBy])

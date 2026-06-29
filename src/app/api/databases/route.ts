@@ -9,11 +9,17 @@ import {
   parseManyDatabaseProperties,
   parseManyViews,
 } from "@/lib/db";
-import { DATABASE_TEMPLATES } from "@/lib/templates";
+import {
+  resolveBuiltinTemplate,
+  isBuiltinTemplateId,
+  parseTemplateRow,
+  type TemplateShape,
+} from "@/lib/templates";
 
 const createDatabaseSchema = z.object({
   pageId: z.string().min(1),
-  template: z.enum(["ticket", "bug"]).optional(),
+  // Id d'un template fourni ("builtin-…") ou d'un Template du workspace.
+  templateId: z.string().optional(),
 });
 
 export async function POST(req: Request) {
@@ -29,7 +35,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const { pageId, template } = result.data;
+  const { pageId, templateId } = result.data;
 
   const page = await prisma.page.findUnique({
     where: { id: pageId },
@@ -45,13 +51,26 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Page already has a database" }, { status: 409 });
   }
 
-  const tpl = template ? DATABASE_TEMPLATES[template] : null;
+  // Résolution du template (fourni ou du workspace de la page).
+  let tpl: TemplateShape | null = null;
+  if (templateId) {
+    if (isBuiltinTemplateId(templateId)) {
+      tpl = resolveBuiltinTemplate(templateId);
+    } else {
+      const row = await prisma.template.findUnique({ where: { id: templateId } });
+      if (row && row.workspaceId === page.workspaceId) tpl = parseTemplateRow(row);
+    }
+    if (!tpl) return NextResponse.json({ error: "Template introuvable" }, { status: 400 });
+  }
 
   const db = await prisma.$transaction(async (tx) => {
     const database = await tx.database.create({
       data: {
         pageId,
-        ...(tpl && { recordTemplate: tpl.body }),
+        ...(tpl && {
+          templateId: tpl.id,
+          recordSections: JSON.stringify(tpl.sections),
+        }),
       },
     });
 
@@ -78,37 +97,40 @@ export async function POST(req: Request) {
     const properties = [titleProperty];
     const views = [tableView];
 
-    // Scaffolding d'un modèle (tickets, bugs…) : colonnes + vue kanban groupée.
+    // Scaffolding d'un template : colonnes + (si défini) vue kanban groupée.
     if (tpl) {
       const idByName: Record<string, string> = {};
       let position = 2000;
-      for (const preset of tpl.properties) {
+      for (const col of tpl.columns) {
         const prop = await tx.databaseProperty.create({
           data: {
             databaseId: database.id,
-            name: preset.name,
-            type: preset.type,
+            name: col.name,
+            type: col.type,
             position,
-            ...serializeDatabaseProperty({ config: preset.config }),
+            ...serializeDatabaseProperty({ config: col.config }),
           },
         });
         properties.push(prop);
-        idByName[preset.name] = prop.id;
+        idByName[col.name] = prop.id;
         position += 1000;
       }
 
-      const kanbanView = await tx.view.create({
-        data: {
-          databaseId: database.id,
-          name: "Par statut",
-          type: "kanban",
-          position: 2000,
-          ...serializeView({
-            config: { groupByPropertyId: idByName[tpl.kanbanGroupProperty] },
-          }),
-        },
-      });
-      views.push(kanbanView);
+      const groupId = tpl.kanbanGroupProperty
+        ? idByName[tpl.kanbanGroupProperty]
+        : undefined;
+      if (groupId) {
+        const kanbanView = await tx.view.create({
+          data: {
+            databaseId: database.id,
+            name: "Par statut",
+            type: "kanban",
+            position: 2000,
+            ...serializeView({ config: { groupByPropertyId: groupId } }),
+          },
+        });
+        views.push(kanbanView);
+      }
     }
 
     return { ...database, properties, views };

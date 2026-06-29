@@ -412,6 +412,8 @@ export default function TableView({ databaseId, view: _view, properties: initial
       icon: null,
       coverUrl: null,
       content: "[]",
+      templateId: null,
+      sectionsBody: null,
       createdBy: null,
       createdAt: now,
       updatedAt: now,

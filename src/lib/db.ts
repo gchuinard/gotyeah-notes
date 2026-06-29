@@ -220,3 +220,32 @@ export function removePropertyKey(
     return { id: r.id, properties: JSON.stringify(props) };
   });
 }
+
+// ─── Corps sectionné (templates à libellés fixes) ─────────────────────────────
+
+/**
+ * Une section du corps d'un record templaté.
+ * - id      : stable (correspond à TemplateSection.id)
+ * - label   : libellé FIXE (non éditable, rendu hors éditeur)
+ * - content : document BlockNote (mêmes blocs que Record.content / Page.content)
+ */
+export type RecordSection = {
+  id: string;
+  label: string;
+  content: unknown[];
+};
+
+/** Parse `Record.sectionsBody` (JSON) → sections, ou null si corps libre. */
+export function parseSectionsBody(raw: string | null): RecordSection[] | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as RecordSection[]) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function serializeSectionsBody(sections: RecordSection[]): string {
+  return JSON.stringify(sections);
+}
