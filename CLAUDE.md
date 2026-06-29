@@ -21,7 +21,7 @@ Ce fichier cadre le travail de Claude Code sur ce projet. Lis-le avant toute mod
 
 Pas d'autres libs sans raison forte. Avant d'ajouter une dépendance, demande-toi si on peut faire sans.
 
-## Modèle de données (10 modèles)
+## Modèle de données (12 modèles)
 
 ```
 User            → auth basique (email, passwordHash, displayName)
@@ -32,9 +32,12 @@ Section         → conteneur dans la sidebar, type = "private"|"team", appartie
 Page            → arborescence (parentId), visibility dénormalisé depuis la section racine
 PageVisit       → UPSERT sur unique (userId, pageId), pour la section "Récents"
 Database        → liée 1-1 à une Page (pageId @unique). Une database EST une page.
+                  templateId/recordSections = template source + squelette de sections estampé.
 DatabaseProperty → colonnes dynamiques (name, type, position, config JSON)
-Record          → lignes de la database (title, properties JSON indexé par property.id)
+Record          → lignes de la database (title, properties JSON indexé par property.id).
+                  templateId/sectionsBody = corps SECTIONNÉ (sinon corps libre `content`).
 View            → type table|kanban|calendar|gallery, config JSON (filtres, tris, group-by, columnWidths)
+Template        → modèle réutilisable par workspace : columns + kanbanGroupProperty + sections [{id,label}]
 ```
 
 ### Conventions clés du modèle
@@ -46,6 +49,7 @@ View            → type table|kanban|calendar|gallery, config JSON (filtres, tr
 - **DatabaseProperty.type = "title"** : type spécial, un seul par database, créé auto, ne peut pas être supprimé ni dupliqué. Les garde-fous sont en place côté API.
 - **View.config** : remplacement TOTAL au PATCH (pas de merge). Le client envoie toujours le config complet.
 - **Record.properties au PATCH** : MERGE via `mergeRecordProperties()`, pas écrasement. Une valeur `null` supprime la clé.
+- **Templates (modèles)** : un `Template` (par workspace) définit colonnes + regroupement kanban + sections de corps à libellés FIXES. Templates « fournis » (ticket, bug) en code (`lib/templates.ts`, id `builtin-*`, lecture seule) à côté des templates DB. `POST /api/databases { templateId }` scaffolde colonnes + kanban + estampe `Database.recordSections`. Un record d'une DB templatée a un **corps sectionné** (`Record.sectionsBody` = `[{id,label,content}]`, parse via `lib/db.ts > parseSectionsBody`) — libellés rendus HORS éditeur (non modifiables), un éditeur BlockNote par section. **Opt-in** : sans template, le record garde son corps libre (`content`). Le menu « modèle » du `RecordPanel` change le template par carte (indépendant du kanban).
 - **Position** : Float, gap-based ordering (gap de 1000). Helpers dans `lib/positions.ts > nextPosition()`.
 - **Prisma 7** génère les types avec suffixe `Model` (RecordModel, ViewModel...). `lib/db.ts` les aliase. Le type natif TS `Record` est shadowé → importer comme `import type { Record as DbRecord }`.
 
@@ -57,16 +61,21 @@ src/
 │   ├── layout.tsx
 │   ├── page.tsx
 │   ├── pages/[id]/page.tsx          # Server Component : charge Page + détecte Database
+│   ├── templates/page.tsx          # Page de gestion des modèles (TemplatesManager)
 │   └── api/
-│       ├── pages/...                # CRUD pages
+│       ├── pages/...                # CRUD pages (GET /api/pages/[id] expose database:{id})
+│       ├── templates/
+│       │   ├── route.ts            # GET liste (fournis + workspace), POST create
+│       │   └── [id]/route.ts       # GET, PATCH, DELETE (builtins en lecture seule)
 │       ├── databases/
+│       │   ├── route.ts            # POST create (+ scaffold depuis templateId)
 │       │   └── [id]/
-│       │       ├── route.ts         # GET, DELETE database
+│       │       ├── route.ts         # GET, PATCH (recordTemplate), DELETE database
 │       │       ├── properties/route.ts  # POST property
-│       │       ├── records/route.ts     # GET list, POST record
+│       │       ├── records/route.ts     # GET list, POST record (estampe le corps sectionné)
 │       │       └── views/route.ts       # POST view
 │       ├── properties/[id]/route.ts # PATCH, DELETE property
-│       ├── records/[id]/route.ts    # GET, PATCH, DELETE record
+│       ├── records/[id]/route.ts    # GET, PATCH (dont sectionsBody/templateId), DELETE
 │       └── views/[id]/route.ts      # PATCH, DELETE view
 ├── components/
 │   ├── Sidebar.tsx
@@ -78,22 +87,25 @@ src/
 │       ├── KanbanView.tsx           # Vue kanban (DnD cards, menu ⋯, renommage colonnes)
 │       ├── CalendarView.tsx         # Vue calendrier mensuel
 │       ├── GalleryView.tsx          # Vue grille de cartes
-│       ├── RecordPanel.tsx          # Slide panel détail d'un record (propriétés + BlockNote)
+│       ├── RecordPanel.tsx          # Slide panel record : props + corps libre OU sectionné + menu modèle par carte
 │       ├── Cell.tsx                 # Édition inline par type (title, text, number, select, etc.)
 │       ├── PropertyPopover.tsx      # Popover header colonne (rename, options select, supprimer)
 │       ├── AddPropertyModal.tsx     # Modal création de colonne
 │       ├── SortControls.tsx         # UI de configuration des tris
 │       ├── FilterControls.tsx       # UI de configuration des filtres
 │       └── portal.tsx               # Composant Portal partagé
+│   └── templates/
+│       └── TemplatesManager.tsx     # Liste + éditeur de modèles (colonnes, sections, kanban)
 └── lib/
     ├── prisma.ts                    # Singleton PrismaClient
     ├── session.ts                   # getSession() → user authentifié ou null
     ├── workspace.ts                 # getMembership, checkDatabaseAccess, checkPropertyAccess, checkRecordAccess, checkViewAccess
     ├── positions.ts                 # nextPosition({ model, where }) → MAX(position) + 1000
     ├── pages.ts                     # createPage, setPageSection (synchro récursive visibility)
-    ├── db.ts                        # Types TS (PropertyType, PropertyConfig, ViewConfig, ParsedRecord, etc.)
-    │                                # Parse/serialize helpers (parseDatabaseProperty, serializeRecord, etc.)
+    ├── db.ts                        # Types TS (PropertyType, PropertyConfig, ViewConfig, ParsedRecord, RecordSection…)
+    │                                # Parse/serialize helpers (parseDatabaseProperty, serializeRecord, parseSectionsBody…)
     │                                # mergeRecordProperties, removePropertyKey
+    ├── templates.ts                 # Templates fournis (builtin-ticket/bug), résolution, emptySectionsBody
     ├── tree.ts                      # buildTree(flat) → arbre pour la sidebar
     └── client/
         └── viewFilters.ts           # applyFilters, applySorts, applyViewConfig (côté client uniquement)
@@ -150,6 +162,7 @@ L'éditeur BlockNote debounce 500-600ms sur `onChange` et envoie un PATCH. Même
 - ⚠️ **`src/proxy.ts` est le middleware** (Next 16 a renommé `middleware` → `proxy`). Il s'exécute AVANT les routes et 401-ait tout `/api/*` sans cookie : il **laisse passer** les appels portant `x-mcp-secret` + `x-act-as-email` (la validation autoritaire reste dans `session.ts`). Toute future auth par en-têtes doit aussi être whitelistée là.
 - **Outils — pages/sections** : `notes_list_workspaces`, `notes_list_pages`, `notes_get_page`, `notes_create_page`, `notes_update_page`, `notes_delete_page`, `notes_search`, `notes_list_sections`, `notes_create_section`.
 - **Outils — databases (v2)** : `notes_get_database`, `notes_create_database`, `notes_delete_database`, `notes_create_property`, `notes_update_property`, `notes_delete_property`, `notes_list_records`, `notes_get_record`, `notes_create_record`, `notes_update_record`, `notes_delete_record`, `notes_create_view`, `notes_update_view`, `notes_delete_view`. Une database EST une page → `notes_get_page` renvoie `database: {id}`. Les records se manipulent **par NOM** de propriété (traduit en ids + options select via le schéma, côté `gotyeah_sonar/mcp_remote/notes_tools.py`).
+- **Outils — templates** : `notes_list_templates`, `notes_create_database_from_template` (depuis n'importe quel template), `notes_create_ticket_database` / `notes_create_bug_database` (raccourcis builtins), `notes_set_record_template` (modèle de corps LIBRE d'une database).
 - **Activation** (sur le Pi) : même secret dans les deux `.env` — `MCP_SHARED_SECRET` ici, `NOTES_API_BASE_URL=http://gotyeah_notes:3000` + `NOTES_MCP_SECRET` côté Sonar (les deux conteneurs sont sur le réseau `nginx-proxy-manager_default`) — puis `docker compose up -d` et rafraîchir le connecteur claude.ai. **✅ Actif en prod (2026-06-29)** ; l'email du User a été aligné sur le gmail (= email IdP) car le match est exact.
 - Variables d'env : voir `.env.example`.
 
@@ -157,6 +170,7 @@ L'éditeur BlockNote debounce 500-600ms sur `onChange` et envoie un PATCH. Même
 
 - [x] ~~**Activer le MCP**~~ : fait (2026-06-29). Secrets posés sur le Pi, pont actif, connecteur claude.ai rafraîchi.
 - [x] ~~**MCP v2 — databases/records**~~ : fait (2026-06-29). 14 outils `notes_*` (databases, properties, records, views) côté Sonar, records par nom. Voir section *Intégration MCP*.
+- [x] ~~**Système de modèles (templates)**~~ : fait (2026-06-30). Modèle `Template` (workspace), page `/templates`, corps sectionné à libellés fixes, menu de template par carte, scaffold `POST /api/databases {templateId}`. ticket/bug = templates fournis. Outils MCP templates côté Sonar.
 - [ ] **Match email IdP→User insensible à la casse** : actuellement exact (SQLite ne supporte pas `mode: "insensitive"`). À traiter si la casse diffère entre Pocket ID et le compte.
 - [ ] **MCP v3 (optionnel)** : `update_property` ne gère que rename/position (changer type/options d'un select casserait les records). Édition des options select par nom à ajouter si besoin.
 - [ ] **Builds hors Pi** : déplacer le build Docker en CI (GitHub Actions) + `docker pull` au déploiement, pour supprimer les pics RAM/swap au déploiement.

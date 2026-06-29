@@ -48,7 +48,7 @@ Le schéma Prisma est appliqué automatiquement par le service one-shot `migrate
 
 ## Intégration MCP
 
-Les outils MCP `notes_*` (gérer pages, sections, recherche… depuis Claude) sont **greffés sur
-le serveur MCP distant Sonar** et réutilisent son auth OIDC (Pocket ID) — pas de serveur séparé.
+Les outils MCP `notes_*` (gérer pages, sections, databases, records, modèles… depuis Claude) sont
+**greffés sur le serveur MCP distant Sonar** et réutilisent son auth OIDC (Pocket ID) — pas de serveur séparé.
 L'API accepte un appel de confiance du MCP (`X-MCP-Secret` + `X-Act-As-Email`), désactivé tant
 que `MCP_SHARED_SECRET` est vide. Détails, outils et roadmap : voir `CLAUDE.md`.
