@@ -9,15 +9,11 @@ import {
   parseManyDatabaseProperties,
   parseManyViews,
 } from "@/lib/db";
-import {
-  TICKET_BODY_TEMPLATE_JSON,
-  TICKET_PROPERTY_PRESET,
-  TICKET_KANBAN_GROUP_PROPERTY,
-} from "@/lib/templates";
+import { DATABASE_TEMPLATES } from "@/lib/templates";
 
 const createDatabaseSchema = z.object({
   pageId: z.string().min(1),
-  template: z.enum(["ticket"]).optional(),
+  template: z.enum(["ticket", "bug"]).optional(),
 });
 
 export async function POST(req: Request) {
@@ -49,11 +45,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Page already has a database" }, { status: 409 });
   }
 
+  const tpl = template ? DATABASE_TEMPLATES[template] : null;
+
   const db = await prisma.$transaction(async (tx) => {
     const database = await tx.database.create({
       data: {
         pageId,
-        ...(template === "ticket" && { recordTemplate: TICKET_BODY_TEMPLATE_JSON }),
+        ...(tpl && { recordTemplate: tpl.body }),
       },
     });
 
@@ -80,11 +78,11 @@ export async function POST(req: Request) {
     const properties = [titleProperty];
     const views = [tableView];
 
-    // Scaffolding « Tickets » : colonnes standard + vue kanban groupée par Statut.
-    if (template === "ticket") {
+    // Scaffolding d'un modèle (tickets, bugs…) : colonnes + vue kanban groupée.
+    if (tpl) {
       const idByName: Record<string, string> = {};
       let position = 2000;
-      for (const preset of TICKET_PROPERTY_PRESET) {
+      for (const preset of tpl.properties) {
         const prop = await tx.databaseProperty.create({
           data: {
             databaseId: database.id,
@@ -106,7 +104,7 @@ export async function POST(req: Request) {
           type: "kanban",
           position: 2000,
           ...serializeView({
-            config: { groupByPropertyId: idByName[TICKET_KANBAN_GROUP_PROPERTY] },
+            config: { groupByPropertyId: idByName[tpl.kanbanGroupProperty] },
           }),
         },
       });

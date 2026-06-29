@@ -3,7 +3,7 @@ import useSWR, { mutate } from "swr";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import {
-  ChevronRight, Clock, FileText,
+  ChevronDown, ChevronRight, Clock, FileText,
   Home, LayoutTemplate, Lock, LogOut, Plus, Settings, Trash2, Users,
 } from "lucide-react";
 import { useRef, useState } from "react";
@@ -65,12 +65,14 @@ export default function Sidebar({ user }: { user: SessionUser }) {
     router.push(`/pages/${page.id}`);
   };
 
-  // Crée une page « Tickets » et la scaffold direct en database de tickets
-  // (colonnes + kanban + modèle de corps). Cf. POST /api/databases?template=ticket.
-  const [creatingTicketDb, setCreatingTicketDb] = useState(false);
-  const createTicketDatabase = async () => {
-    if (!workspaceId || creatingTicketDb) return;
-    setCreatingTicketDb(true);
+  // Crée une page puis la scaffold direct en database à partir d'un modèle
+  // (colonnes + kanban + modèle de corps). Cf. POST /api/databases?template=…
+  const [creatingDb, setCreatingDb] = useState(false);
+  const [dbMenuOpen, setDbMenuOpen] = useState(false);
+  const createTemplatedDatabase = async (template: "ticket" | "bug", title: string) => {
+    if (!workspaceId || creatingDb) return;
+    setDbMenuOpen(false);
+    setCreatingDb(true);
     try {
       const sectionId =
         sections.find((s) => s.type === "private")?.id ??
@@ -79,19 +81,19 @@ export default function Sidebar({ user }: { user: SessionUser }) {
       const pageRes = await fetch("/api/pages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ workspaceId, sectionId, title: "Tickets" }),
+        body: JSON.stringify({ workspaceId, sectionId, title }),
       });
       if (!pageRes.ok) return;
       const page = await pageRes.json();
       await fetch("/api/databases", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pageId: page.id, template: "ticket" }),
+        body: JSON.stringify({ pageId: page.id, template }),
       });
       if (pagesKey) mutate(pagesKey);
       router.push(`/pages/${page.id}`);
     } finally {
-      setCreatingTicketDb(false);
+      setCreatingDb(false);
     }
   };
 
@@ -171,15 +173,37 @@ export default function Sidebar({ user }: { user: SessionUser }) {
           <Home size={14} />
           Accueil
         </Link>
-        <button
-          onClick={createTicketDatabase}
-          disabled={creatingTicketDb || !workspaceId}
-          title="Crée une database de tickets (façon Jira) prête à l'emploi"
-          className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-[var(--surface-hover)] text-[var(--text-muted)] disabled:opacity-50 text-left"
-        >
-          <LayoutTemplate size={14} />
-          {creatingTicketDb ? "Création…" : "Database de tickets"}
-        </button>
+        <div className="relative">
+          <button
+            onClick={() => setDbMenuOpen((o) => !o)}
+            disabled={creatingDb || !workspaceId}
+            title="Crée une database prête à l'emploi à partir d'un modèle"
+            className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-[var(--surface-hover)] text-[var(--text-muted)] disabled:opacity-50 text-left"
+          >
+            <LayoutTemplate size={14} />
+            <span className="flex-1">{creatingDb ? "Création…" : "Nouvelle database"}</span>
+            <ChevronDown size={12} />
+          </button>
+          {dbMenuOpen && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setDbMenuOpen(false)} />
+              <div className="absolute left-1 right-1 top-full mt-0.5 z-50 bg-[var(--surface)] border border-[var(--border)] rounded-md shadow-lg py-1">
+                <button
+                  onClick={() => createTemplatedDatabase("ticket", "Tickets")}
+                  className="w-full text-left px-3 py-1.5 hover:bg-[var(--surface-hover)] text-[var(--text)]"
+                >
+                  Tickets
+                </button>
+                <button
+                  onClick={() => createTemplatedDatabase("bug", "Bugs")}
+                  className="w-full text-left px-3 py-1.5 hover:bg-[var(--surface-hover)] text-[var(--text)]"
+                >
+                  Bugs
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Récents */}
