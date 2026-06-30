@@ -93,9 +93,10 @@ function laneOf(lanes: Lane[], id: string): Lane | null {
 // ─── RowMeta (épic / statut / points) ─────────────────────────────────────────
 
 function RowMeta({
-  record, statusProp, epicProp, pointsProp,
+  record, previewProps, statusProp, epicProp, pointsProp,
 }: {
   record: ParsedRecord;
+  previewProps?: ParsedDatabaseProperty[];
   statusProp?: ParsedDatabaseProperty;
   epicProp?: ParsedDatabaseProperty;
   pointsProp?: ParsedDatabaseProperty;
@@ -103,6 +104,15 @@ function RowMeta({
   const pts = pointsProp ? record.properties[pointsProp.id] : undefined;
   return (
     <>
+      {(previewProps ?? []).map((p) => {
+        const v = record.properties[p.id];
+        if (v === undefined || v === null || (Array.isArray(v) && v.length === 0)) return null;
+        return (
+          <span key={p.id} className="shrink-0 max-w-[160px] truncate text-xs text-[var(--text-muted)]">
+            <CellDisplay property={p} record={record} />
+          </span>
+        );
+      })}
       {epicProp && record.properties[epicProp.id] != null && (
         <span className="shrink-0"><CellDisplay property={epicProp} record={record} /></span>
       )}
@@ -154,10 +164,11 @@ function RowMenu({
 // ─── BacklogRow (issue) ───────────────────────────────────────────────────────
 
 function BacklogRow({
-  record, statusProp, epicProp, pointsProp, autoEdit,
+  record, previewProps, statusProp, epicProp, pointsProp, autoEdit,
   onTitleSave, onRowClick, onDelete, onDuplicate,
 }: {
   record: ParsedRecord;
+  previewProps?: ParsedDatabaseProperty[];
   statusProp?: ParsedDatabaseProperty;
   epicProp?: ParsedDatabaseProperty;
   pointsProp?: ParsedDatabaseProperty;
@@ -238,7 +249,7 @@ function BacklogRow({
       )}
 
       <div className="flex items-center gap-1.5 shrink-0">
-        <RowMeta record={record} statusProp={statusProp} epicProp={epicProp} pointsProp={pointsProp} />
+        <RowMeta record={record} previewProps={previewProps} statusProp={statusProp} epicProp={epicProp} pointsProp={pointsProp} />
       </div>
 
       <button
@@ -263,9 +274,10 @@ function BacklogRow({
 }
 
 function BacklogRowOverlay({
-  record, statusProp, epicProp, pointsProp,
+  record, previewProps, statusProp, epicProp, pointsProp,
 }: {
   record: ParsedRecord;
+  previewProps?: ParsedDatabaseProperty[];
   statusProp?: ParsedDatabaseProperty;
   epicProp?: ParsedDatabaseProperty;
   pointsProp?: ParsedDatabaseProperty;
@@ -277,7 +289,7 @@ function BacklogRowOverlay({
         {record.title || "Sans titre"}
       </span>
       <div className="flex items-center gap-1.5 shrink-0">
-        <RowMeta record={record} statusProp={statusProp} epicProp={epicProp} pointsProp={pointsProp} />
+        <RowMeta record={record} previewProps={previewProps} statusProp={statusProp} epicProp={epicProp} pointsProp={pointsProp} />
       </div>
     </div>
   );
@@ -341,7 +353,7 @@ function SprintMenu({
 
 function SprintLane({
   lane, collapsed, onToggleCollapse,
-  statusProp, epicProp, pointsProp, doneOptionId, newRecordId,
+  statusProp, epicProp, pointsProp, previewProps, doneOptionId, newRecordId,
   onAddRecord, onTitleSave, onRowClick, onDeleteRecord, onDuplicateRecord,
   onRenameSprint, onSprintAction, onEditSprint, onDeleteSprint,
 }: {
@@ -351,6 +363,7 @@ function SprintLane({
   statusProp?: ParsedDatabaseProperty;
   epicProp?: ParsedDatabaseProperty;
   pointsProp?: ParsedDatabaseProperty;
+  previewProps?: ParsedDatabaseProperty[];
   doneOptionId?: string;
   newRecordId: string | null;
   onAddRecord: (lane: Lane) => void;
@@ -498,6 +511,7 @@ function SprintLane({
               <BacklogRow
                 key={record.id}
                 record={record}
+                previewProps={previewProps}
                 statusProp={statusProp}
                 epicProp={epicProp}
                 pointsProp={pointsProp}
@@ -677,6 +691,18 @@ export default function BacklogView({ databaseId, view, properties }: Props) {
   const statusProp = cfg.statusPropertyId ? properties.find((p) => p.id === cfg.statusPropertyId) : undefined;
   const pointsProp = cfg.pointsPropertyId ? properties.find((p) => p.id === cfg.pointsPropertyId) : undefined;
   const epicProp = cfg.epicPropertyId ? properties.find((p) => p.id === cfg.epicPropertyId) : undefined;
+
+  // Autres colonnes affichées sur chaque ligne (type, priorité, assigné, échéance…),
+  // hors titre et hors propriétés déjà rendues à part (statut / épic / points).
+  const previewProps = properties
+    .filter(
+      (p) =>
+        p.type !== "title" &&
+        p.id !== statusProp?.id &&
+        p.id !== epicProp?.id &&
+        p.id !== pointsProp?.id
+    )
+    .sort((a, b) => a.position - b.position);
 
   // ── Records filtrés (filtres de vue, sans tri → on garde l'ordre manuel) ───
   const baseRecords = useMemo(() => {
@@ -1137,6 +1163,7 @@ export default function BacklogView({ databaseId, view, properties }: Props) {
                 statusProp={statusProp}
                 epicProp={epicProp}
                 pointsProp={pointsProp}
+                previewProps={previewProps}
                 doneOptionId={cfg.doneStatusOptionId}
                 newRecordId={newRecordId}
                 onAddRecord={handleAddRecord}
@@ -1156,6 +1183,7 @@ export default function BacklogView({ databaseId, view, properties }: Props) {
             {activeRecord ? (
               <BacklogRowOverlay
                 record={activeRecord}
+                previewProps={previewProps}
                 statusProp={statusProp}
                 epicProp={epicProp}
                 pointsProp={pointsProp}
