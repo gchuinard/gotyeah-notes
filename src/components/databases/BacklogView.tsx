@@ -980,17 +980,77 @@ export default function BacklogView({ databaseId, view, properties }: Props) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(patch),
         });
-        if (!res.ok) throw new Error();
+        if (!res.ok) {
+          const b = await res.json().catch(() => ({}));
+          throw new Error((b as { error?: string }).error ?? `Erreur ${res.status}`);
+        }
         mutateSprints();
-      } catch {
+      } catch (e) {
         mutateSprints(snapshot, { revalidate: false });
+        alert(e instanceof Error ? e.message : "Échec.");
       }
     },
     [sprints, mutateSprints]
   );
 
   const renameSprint = useCallback((id: string, name: string) => patchSprint(id, { name }), [patchSprint]);
-  const sprintAction = useCallback((id: string, state: SprintState) => patchSprint(id, { state }), [patchSprint]);
+
+  // Clôture : passe le sprint en "completed" ET renvoie les issues non terminées
+  // au backlog (statut != doneStatusOptionId). Atomique côté serveur.
+  const completeSprint = useCallback(
+    async (id: string) => {
+      if (!window.confirm("Terminer le sprint ? Les issues non terminées retournent au backlog.")) return;
+      const snapSprints = sprints;
+      const snapRecords = records;
+      const statusId = cfg.statusPropertyId;
+      const done = cfg.doneStatusOptionId;
+      if (sprints) {
+        mutateSprints(
+          sprints.map((s) => (s.id === id ? ({ ...s, state: "completed" } as ParsedSprint) : s)),
+          { revalidate: false }
+        );
+      }
+      if (records && statusId && done) {
+        mutate(
+          records.map((r) =>
+            r.sprintId === id && r.properties[statusId] !== done ? { ...r, sprintId: null } : r
+          ),
+          { revalidate: false }
+        );
+      }
+      try {
+        const res = await fetch(`/api/sprints/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            state: "completed",
+            moveIncompleteToBacklog: true,
+            ...(statusId && { statusPropertyId: statusId }),
+            ...(done && { doneStatusOptionId: done }),
+          }),
+        });
+        if (!res.ok) {
+          const b = await res.json().catch(() => ({}));
+          throw new Error((b as { error?: string }).error ?? `Erreur ${res.status}`);
+        }
+        mutateSprints();
+        mutate();
+      } catch (e) {
+        mutateSprints(snapSprints, { revalidate: false });
+        mutate(snapRecords, { revalidate: false });
+        alert(e instanceof Error ? e.message : "Échec de la clôture.");
+      }
+    },
+    [sprints, records, cfg.statusPropertyId, cfg.doneStatusOptionId, mutateSprints, mutate]
+  );
+
+  const sprintAction = useCallback(
+    (id: string, state: SprintState) => {
+      if (state === "completed") return completeSprint(id);
+      return patchSprint(id, { state });
+    },
+    [completeSprint, patchSprint]
+  );
 
   const deleteSprint = useCallback(
     async (id: string) => {

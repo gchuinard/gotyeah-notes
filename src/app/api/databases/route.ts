@@ -121,13 +121,21 @@ export async function POST(req: Request) {
         ? idByName[tpl.kanbanGroupProperty]
         : undefined;
       if (groupId) {
+        // Pour un template scrum (backlog défini), le board est scopé au sprint actif
+        // (Scrum board) et connaît l'option « terminé » pour la clôture.
+        const isScrum = !!tpl.backlog;
+        const kanbanConfig: ViewConfig = { groupByPropertyId: groupId };
+        if (isScrum) {
+          kanbanConfig.sprintScope = "active";
+          if (tpl.backlog?.doneOptionId) kanbanConfig.doneStatusOptionId = tpl.backlog.doneOptionId;
+        }
         const kanbanView = await tx.view.create({
           data: {
             databaseId: database.id,
-            name: "Par statut",
+            name: isScrum ? "Sprint actif" : "Par statut",
             type: "kanban",
             position: 2000,
-            ...serializeView({ config: { groupByPropertyId: groupId } }),
+            ...serializeView({ config: kanbanConfig }),
           },
         });
         views.push(kanbanView);

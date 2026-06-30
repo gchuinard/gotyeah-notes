@@ -18,11 +18,12 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Plus, MoreHorizontal, Trash2, Copy } from "lucide-react";
+import { Plus, MoreHorizontal, Trash2, Copy, ChevronDown, Play, CheckCircle2 } from "lucide-react";
 import type {
   ParsedDatabaseProperty,
   ParsedRecord,
   ParsedView,
+  ParsedSprint,
   SelectOption,
 } from "@/lib/db";
 import { SelectBadge, CellDisplay } from "@/components/databases/Cell";
@@ -472,6 +473,88 @@ function KanbanColView({
   );
 }
 
+// ─── SprintBoardHeader (board scopé à un sprint) ──────────────────────────────
+
+function SprintBoardHeader({
+  sprints, scope, targetSprint, onScopeChange, onStart, onComplete,
+}: {
+  sprints: ParsedSprint[];
+  scope: string;
+  targetSprint: ParsedSprint | null;
+  onScopeChange: (scope: string) => void;
+  onStart: () => void;
+  onComplete: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
+
+  const stateLabel = (s: ParsedSprint) =>
+    s.state === "active" ? "actif" : s.state === "completed" ? "terminé" : "à venir";
+
+  const label =
+    scope === "all"
+      ? "Toutes les issues"
+      : scope === "active"
+        ? targetSprint ? targetSprint.name : "Sprint actif"
+        : targetSprint ? targetSprint.name : "Sprint";
+
+  return (
+    <div className="flex items-center gap-2 px-4 py-2 border-b border-[var(--border)] shrink-0">
+      <button
+        ref={btnRef}
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-1.5 px-2.5 py-1 text-sm rounded-md bg-[var(--surface)] border border-[var(--border)] hover:bg-[var(--surface-hover)] text-[var(--text)]"
+      >
+        {label}
+        <ChevronDown size={14} />
+      </button>
+      {open && (
+        <Portal anchor={btnRef} onClose={() => setOpen(false)} minWidth={210}>
+          <button
+            className="w-full text-left px-3 py-1.5 text-sm hover:bg-[var(--surface-hover)] text-[var(--text)]"
+            onMouseDown={(e) => { e.preventDefault(); setOpen(false); onScopeChange("active"); }}
+          >
+            Sprint actif
+          </button>
+          {sprints.map((s) => (
+            <button
+              key={s.id}
+              className="w-full text-left px-3 py-1.5 text-sm hover:bg-[var(--surface-hover)] text-[var(--text)] flex items-center gap-2"
+              onMouseDown={(e) => { e.preventDefault(); setOpen(false); onScopeChange(s.id); }}
+            >
+              <span className="truncate">{s.name}</span>
+              <span className="ml-auto text-xs text-[var(--text-muted)] shrink-0">{stateLabel(s)}</span>
+            </button>
+          ))}
+          <button
+            className="w-full text-left px-3 py-1.5 text-sm hover:bg-[var(--surface-hover)] text-[var(--text-muted)] border-t border-[var(--border)]"
+            onMouseDown={(e) => { e.preventDefault(); setOpen(false); onScopeChange("all"); }}
+          >
+            Toutes les issues
+          </button>
+        </Portal>
+      )}
+
+      {targetSprint?.state === "future" && (
+        <button
+          onClick={onStart}
+          className="flex items-center gap-1.5 px-2.5 py-1 text-sm rounded-md bg-[var(--accent)] text-white hover:opacity-90"
+        >
+          <Play size={14} /> Démarrer
+        </button>
+      )}
+      {targetSprint?.state === "active" && (
+        <button
+          onClick={onComplete}
+          className="flex items-center gap-1.5 px-2.5 py-1 text-sm rounded-md bg-[var(--surface)] border border-[var(--border)] hover:bg-[var(--surface-hover)] text-[var(--text)]"
+        >
+          <CheckCircle2 size={14} /> Terminer le sprint
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ─── KanbanView (main) ────────────────────────────────────────────────────────
 
 export default function KanbanView({ databaseId, view, properties }: Props) {
@@ -481,6 +564,20 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
     isLoading,
     mutate,
   } = useSWR<ParsedRecord[]>(`/api/databases/${databaseId}/records`, fetcher);
+
+  // Board « sprint-aware » : ne fetch les sprints QUE si la vue est scopée
+  // (kanban classique → key null → aucune requête, comportement inchangé).
+  const sprintScope = view.config.sprintScope;
+  const { data: sprints, mutate: mutateSprints } = useSWR<ParsedSprint[]>(
+    sprintScope ? `/api/databases/${databaseId}/sprints` : null,
+    fetcher
+  );
+  const targetSprint = useMemo(() => {
+    if (!sprintScope || sprintScope === "all") return null;
+    const list = sprints ?? [];
+    if (sprintScope === "active") return list.find((s) => s.state === "active") ?? null;
+    return list.find((s) => s.id === sprintScope) ?? null;
+  }, [sprintScope, sprints]);
 
   const [activeId, setActiveId] = useState<string | null>(null);
   const [newRecordId, setNewRecordId] = useState<string | null>(null);
@@ -502,9 +599,13 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
 
   const displayedRecords = useMemo(() => {
     if (!records) return [];
-    const byPosition = [...records].sort((a, b) => a.position - b.position);
+    let scoped: ParsedRecord[] = records;
+    if (sprintScope && sprintScope !== "all") {
+      scoped = targetSprint ? records.filter((r) => r.sprintId === targetSprint.id) : [];
+    }
+    const byPosition = [...scoped].sort((a, b) => a.position - b.position);
     return applyViewConfig(byPosition, view.config, properties);
-  }, [records, view.config, properties]);
+  }, [records, sprintScope, targetSprint, view.config, properties]);
 
   const columns = useMemo(
     () => (groupByProp ? buildCols(displayedRecords, groupByProp) : []),
@@ -653,7 +754,7 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
         content: "[]",
         templateId: null,
         sectionsBody: null,
-        sprintId: null,
+        sprintId: targetSprint?.id ?? null,
         createdBy: null,
         createdAt: now,
         updatedAt: now,
@@ -666,9 +767,10 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
       setNewRecordId(tempId);
 
       try {
-        const body = col.optionId === null
+        const body: Record<string, unknown> = col.optionId === null
           ? {}
           : { properties: { [groupByPropId]: col.optionId } };
+        if (targetSprint) body.sprintId = targetSprint.id;
 
         const res = await fetch(`/api/databases/${databaseId}/records`, {
           method: "POST",
@@ -711,7 +813,7 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
         console.error("Échec de la création du record (kanban)", err);
       }
     },
-    [databaseId, groupByPropId, records, mutate]
+    [databaseId, groupByPropId, records, mutate, targetSprint]
   );
 
   // ── Drag start ──────────────────────────────────────────────────────────────
@@ -791,6 +893,57 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
     [columns, records, groupByPropId, mutate]
   );
 
+  // ── Sprint board : scope + démarrer / terminer ─────────────────────────────
+
+  const handleScopeChange = useCallback(
+    async (scope: string) => {
+      await fetch(`/api/views/${view.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ config: { ...view.config, sprintScope: scope } }),
+      });
+      globalMutate(`/api/databases/${databaseId}`);
+    },
+    [view.id, view.config, databaseId]
+  );
+
+  const handleStartSprint = useCallback(async () => {
+    if (!targetSprint) return;
+    const res = await fetch(`/api/sprints/${targetSprint.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ state: "active" }),
+    });
+    if (!res.ok) {
+      const b = await res.json().catch(() => ({}));
+      alert((b as { error?: string }).error ?? "Échec du démarrage.");
+      return;
+    }
+    mutateSprints();
+  }, [targetSprint, mutateSprints]);
+
+  const handleCompleteSprint = useCallback(async () => {
+    if (!targetSprint) return;
+    if (!window.confirm("Terminer le sprint ? Les issues non terminées retournent au backlog.")) return;
+    const res = await fetch(`/api/sprints/${targetSprint.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        state: "completed",
+        moveIncompleteToBacklog: true,
+        statusPropertyId: groupByPropId,
+        ...(view.config.doneStatusOptionId && { doneStatusOptionId: view.config.doneStatusOptionId }),
+      }),
+    });
+    if (!res.ok) {
+      const b = await res.json().catch(() => ({}));
+      alert((b as { error?: string }).error ?? "Échec de la clôture.");
+      return;
+    }
+    mutateSprints();
+    mutate(); // des records ont changé de sprint (incomplètes → backlog)
+  }, [targetSprint, groupByPropId, view.config.doneStatusOptionId, mutateSprints, mutate]);
+
   // ─── Render ─────────────────────────────────────────────────────────────────
 
   if (isLoading) {
@@ -823,39 +976,59 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
     ? records.find((r) => r.id === selectedRecordId) ?? null
     : null;
 
-  return (
-    <>
-      <DndContext
-        sensors={sensors}
-        collisionDetection={closestCorners}
-        onDragStart={handleDragStart}
-        onDragEnd={handleDragEnd}
-      >
-        <div className="flex gap-4 p-4 overflow-x-auto h-full">
-          {columns.map((col) => (
-            <KanbanColView
-              key={col.id}
-              col={col}
-              previewProps={previewProps}
-              onAddRecord={handleAddRecord}
-              newRecordId={newRecordId}
-              onTitleSave={handleTitleSave}
-              onCardClick={handleCardClick}
-              onDeleteRecord={handleDeleteRecord}
-              onDuplicateRecord={handleDuplicateRecord}
-              onRenameOption={handleRenameOption}
-            />
-          ))}
-        </div>
+  const scopedEmpty = !!sprintScope && sprintScope !== "all" && !targetSprint;
 
-        <DragOverlay>
-          {activeRecord ? (
-            <div className="cursor-grabbing shadow-xl">
-              <KanbanCardContent record={activeRecord} previewProps={previewProps} />
-            </div>
-          ) : null}
-        </DragOverlay>
-      </DndContext>
+  return (
+    <div className="flex flex-col h-full">
+      {sprintScope && (
+        <SprintBoardHeader
+          sprints={sprints ?? []}
+          scope={sprintScope}
+          targetSprint={targetSprint}
+          onScopeChange={handleScopeChange}
+          onStart={handleStartSprint}
+          onComplete={handleCompleteSprint}
+        />
+      )}
+
+      {scopedEmpty ? (
+        <div className="flex flex-col items-center justify-center flex-1 gap-1.5 text-[var(--text-muted)]">
+          <p className="text-sm">Aucun sprint actif.</p>
+          <p className="text-xs">Démarre un sprint depuis la vue Backlog, ou choisis-en un ci-dessus.</p>
+        </div>
+      ) : (
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCorners}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+        >
+          <div className="flex gap-4 p-4 overflow-x-auto flex-1">
+            {columns.map((col) => (
+              <KanbanColView
+                key={col.id}
+                col={col}
+                previewProps={previewProps}
+                onAddRecord={handleAddRecord}
+                newRecordId={newRecordId}
+                onTitleSave={handleTitleSave}
+                onCardClick={handleCardClick}
+                onDeleteRecord={handleDeleteRecord}
+                onDuplicateRecord={handleDuplicateRecord}
+                onRenameOption={handleRenameOption}
+              />
+            ))}
+          </div>
+
+          <DragOverlay>
+            {activeRecord ? (
+              <div className="cursor-grabbing shadow-xl">
+                <KanbanCardContent record={activeRecord} previewProps={previewProps} />
+              </div>
+            ) : null}
+          </DragOverlay>
+        </DndContext>
+      )}
 
       {selectedRecord && (
         <RecordPanel
@@ -866,6 +1039,6 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
           onClose={() => setSelectedRecordId(null)}
         />
       )}
-    </>
+    </div>
   );
 }

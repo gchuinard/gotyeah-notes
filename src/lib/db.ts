@@ -132,6 +132,9 @@ export type ViewConfig = {
   statusPropertyId?: string;
   epicPropertyId?: string;
   doneStatusOptionId?: string;
+  // Kanban « sprint-aware » (board Scrum). undefined = "all" (kanban classique, toutes
+  // les issues). "active" = le sprint en cours. Sinon un id de Sprint précis.
+  sprintScope?: "all" | "active" | string;
 };
 
 // ─── Types : modèles parsés ───────────────────────────────────────────────────
