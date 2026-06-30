@@ -6,7 +6,7 @@ import { checkDatabaseAccess } from "@/lib/workspace";
 import { nextPosition } from "@/lib/positions";
 import { serializeView, parseView, type ViewConfig } from "@/lib/db";
 
-const VIEW_TYPES = ["table", "kanban", "calendar", "gallery"] as const;
+const VIEW_TYPES = ["table", "kanban", "calendar", "gallery", "backlog"] as const;
 
 const createViewSchema = z.object({
   name: z.string().min(1).max(100).optional(),

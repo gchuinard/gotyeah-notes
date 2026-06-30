@@ -40,6 +40,8 @@ const createRecordSchema = z.object({
   // Coherence between properties and the database schema is intentionally
   // left to the client — the server only stores what it receives.
   properties: z.record(z.string(), z.unknown()).optional(),
+  // Sprint d'affectation (création depuis une lane de la vue backlog).
+  sprintId: z.string().nullable().optional(),
 });
 
 export async function POST(
@@ -62,8 +64,19 @@ export async function POST(
     );
   }
 
-  const { title, icon, content, properties: rawProperties = {} } = result.data;
+  const { title, icon, content, properties: rawProperties = {}, sprintId } = result.data;
   const properties = rawProperties as RecordProperties;
+
+  // Garde-fou : un sprint fourni doit appartenir à cette database.
+  if (sprintId) {
+    const sprint = await prisma.sprint.findFirst({
+      where: { id: sprintId, databaseId },
+      select: { id: true },
+    });
+    if (!sprint) {
+      return NextResponse.json({ error: "Sprint introuvable" }, { status: 400 });
+    }
+  }
 
   // Corps du record. Si la database est templatée (recordSections), on estampe un
   // corps SECTIONNÉ vide + le templateId. Sinon, si un modèle de corps LIBRE existe
@@ -96,6 +109,7 @@ export async function POST(
       ...(initialContent !== undefined && { content: initialContent }),
       ...(sectionsBody !== undefined && { sectionsBody }),
       ...(recordTemplateId !== undefined && { templateId: recordTemplateId }),
+      ...(sprintId != null && { sprintId }),
       ...serializeRecord({ properties }),
     },
   });

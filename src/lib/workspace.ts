@@ -92,6 +92,29 @@ export async function checkViewAccess(viewId: string, userId: string) {
   };
 }
 
+/**
+ * Vérifie que userId a accès au sprint via sprint → database → page → workspaceId.
+ * Retourne le sprint dans le résultat pour éviter un 2e findUnique dans les routes.
+ */
+export async function checkSprintAccess(sprintId: string, userId: string) {
+  const row = await prisma.sprint.findUnique({
+    where: { id: sprintId },
+    include: {
+      database: { select: { page: { select: { workspaceId: true } } } },
+    },
+  });
+  if (!row) return null;
+  const membership = await getMembership(userId, row.database.page.workspaceId);
+  if (!membership) return null;
+  const { database: _db, ...sprint } = row;
+  return {
+    workspaceId: row.database.page.workspaceId,
+    membership,
+    databaseId: row.databaseId,
+    sprint,
+  };
+}
+
 export async function getMembership(userId: string, workspaceId: string) {
   return prisma.membership.findUnique({
     where: { userId_workspaceId: { userId, workspaceId } },

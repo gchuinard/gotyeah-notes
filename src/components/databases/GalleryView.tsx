@@ -145,6 +145,7 @@ export default function GalleryView({ databaseId, view, properties }: Props) {
       content: "[]",
       templateId: null,
       sectionsBody: null,
+      sprintId: null,
       createdBy: null,
       createdAt: now,
       updatedAt: now,

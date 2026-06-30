@@ -2,13 +2,14 @@
 import useSWR from "swr";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useRef, useState, useEffect, useMemo } from "react";
-import { Plus, MoreHorizontal, Trash2, Pencil, Table2, Kanban, Calendar, LayoutGrid } from "lucide-react";
+import { Plus, MoreHorizontal, Trash2, Pencil, Table2, Kanban, Calendar, LayoutGrid, ListChecks } from "lucide-react";
 import type { ParsedDatabaseProperty, ParsedRecord, ParsedView } from "@/lib/db";
 import { applyViewConfig } from "@/lib/client/viewFilters";
 import TableView from "@/components/databases/TableView";
 import KanbanView from "@/components/databases/KanbanView";
 import CalendarView from "@/components/databases/CalendarView";
 import GalleryView from "@/components/databases/GalleryView";
+import BacklogView from "@/components/databases/BacklogView";
 import SortControls from "@/components/databases/SortControls";
 import FilterControls from "@/components/databases/FilterControls";
 import Portal from "@/components/databases/portal";
@@ -22,13 +23,14 @@ type DatabaseData = {
   views: ParsedView[];
 };
 
-type ViewType = "table" | "kanban" | "calendar" | "gallery";
+type ViewType = "table" | "kanban" | "calendar" | "gallery" | "backlog";
 
 const VIEW_TYPES: { value: ViewType; label: string }[] = [
   { value: "table",    label: "Tableau" },
   { value: "kanban",   label: "Kanban" },
   { value: "calendar", label: "Calendrier" },
   { value: "gallery",  label: "Galerie" },
+  { value: "backlog",  label: "Backlog" },
 ];
 
 const VIEW_TYPE_ICONS: Record<string, React.ReactNode> = {
@@ -36,6 +38,7 @@ const VIEW_TYPE_ICONS: Record<string, React.ReactNode> = {
   kanban:   <Kanban size={13} />,
   calendar: <Calendar size={13} />,
   gallery:  <LayoutGrid size={13} />,
+  backlog:  <ListChecks size={13} />,
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -441,6 +444,12 @@ export default function DatabaseShell({ databaseId }: { databaseId: string }) {
           />
         ) : activeView.type === "gallery" ? (
           <GalleryView
+            databaseId={databaseId}
+            view={activeView}
+            properties={data.properties}
+          />
+        ) : activeView.type === "backlog" ? (
+          <BacklogView
             databaseId={databaseId}
             view={activeView}
             properties={data.properties}

@@ -21,7 +21,7 @@ Ce fichier cadre le travail de Claude Code sur ce projet. Lis-le avant toute mod
 
 Pas d'autres libs sans raison forte. Avant d'ajouter une dépendance, demande-toi si on peut faire sans.
 
-## Modèle de données (12 modèles)
+## Modèle de données (13 modèles)
 
 ```
 User            → auth basique (email, passwordHash, displayName)
@@ -36,8 +36,13 @@ Database        → liée 1-1 à une Page (pageId @unique). Une database EST une
 DatabaseProperty → colonnes dynamiques (name, type, position, config JSON)
 Record          → lignes de la database (title, properties JSON indexé par property.id).
                   templateId/sectionsBody = corps SECTIONNÉ (sinon corps libre `content`).
-View            → type table|kanban|calendar|gallery, config JSON (filtres, tris, group-by, columnWidths)
+                  sprintId = sprint d'affectation (vue backlog), null = backlog. onDelete SetNull.
+View            → type table|kanban|calendar|gallery|backlog, config JSON (filtres, tris, group-by,
+                  columnWidths ; backlog : pointsPropertyId/statusPropertyId/epicPropertyId/doneStatusOptionId)
 Template        → modèle réutilisable par workspace : columns + kanbanGroupProperty + sections [{id,label}]
+                  (builtins : backlog? câble la vue Backlog du template scrum)
+Sprint          → sprint d'une Database (vue backlog façon Jira). name, goal, startDate, endDate,
+                  state (future|active|completed), position. Record.sprintId pointe dessus.
 ```
 
 ### Conventions clés du modèle
@@ -50,7 +55,8 @@ Template        → modèle réutilisable par workspace : columns + kanbanGroupP
 - **View.config** : remplacement TOTAL au PATCH (pas de merge). Le client envoie toujours le config complet.
 - **Record.properties au PATCH** : MERGE via `mergeRecordProperties()`, pas écrasement. Une valeur `null` supprime la clé.
 - **Templates (modèles)** : un `Template` (par workspace) définit colonnes + regroupement kanban + sections de corps à libellés FIXES. Templates « fournis » (ticket, bug) en code (`lib/templates.ts`, id `builtin-*`, lecture seule) à côté des templates DB. `POST /api/databases { templateId }` scaffolde colonnes + kanban + estampe `Database.recordSections`. Un record d'une DB templatée a un **corps sectionné** (`Record.sectionsBody` = `[{id,label,content}]`, parse via `lib/db.ts > parseSectionsBody`) — libellés rendus HORS éditeur (non modifiables), un éditeur BlockNote par section. **Opt-in** : sans template, le record garde son corps libre (`content`). Le menu « modèle » du `RecordPanel` change le template par carte (indépendant du kanban).
-- **Position** : Float, gap-based ordering (gap de 1000). Helpers dans `lib/positions.ts > nextPosition()`.
+- **Backlog (façon Jira)** : un 5e type de vue `backlog`. Les **sprints** sont un modèle Prisma `Sprint` (par database) ; un record y est rattaché via `Record.sprintId` (null = backlog). `onDelete: SetNull` → supprimer un sprint renvoie ses issues au backlog (non destructif). Les colonnes story points / statut / épic ne sont PAS un nouveau concept : ce sont des propriétés normales (number / select / select coloré), câblées dans `View.config` (`pointsPropertyId`, `statusPropertyId`, `epicPropertyId`, `doneStatusOptionId`) par le template fourni `builtin-scrum`. Sans câblage, la vue dégrade proprement (lanes par sprint, lignes titre seul). **Terminer un sprint** = `state="completed"` (archivage simple : les issues gardent leur `sprintId`, le sprint sort du board) — pas de migration forcée des issues inachevées. `POST /api/databases/[id]/records` et `PATCH /api/records/[id]` acceptent `sprintId` (garde-fou : le sprint doit appartenir à la même database, sinon 400). API sprints : `GET/POST /api/databases/[id]/sprints`, `PATCH/DELETE /api/sprints/[id]` (le PATCH porte les transitions démarrer/terminer). Accès via `checkSprintAccess` (`lib/workspace.ts`).
+- **Position** : Float, gap-based ordering (gap de 1000). Helpers dans `lib/positions.ts > nextPosition()` (models : databaseProperty, record, view, sprint).
 - **Prisma 7** génère les types avec suffixe `Model` (RecordModel, ViewModel...). `lib/db.ts` les aliase. Le type natif TS `Record` est shadowé → importer comme `import type { Record as DbRecord }`.
 
 ## Architecture
@@ -72,10 +78,12 @@ src/
 │       │   └── [id]/
 │       │       ├── route.ts         # GET, PATCH (recordTemplate), DELETE database
 │       │       ├── properties/route.ts  # POST property
-│       │       ├── records/route.ts     # GET list, POST record (estampe le corps sectionné)
+│       │       ├── records/route.ts     # GET list, POST record (estampe le corps sectionné, accepte sprintId)
+│       │       ├── sprints/route.ts      # GET list, POST sprint (vue backlog)
 │       │       └── views/route.ts       # POST view
 │       ├── properties/[id]/route.ts # PATCH, DELETE property
-│       ├── records/[id]/route.ts    # GET, PATCH (dont sectionsBody/templateId), DELETE
+│       ├── records/[id]/route.ts    # GET, PATCH (dont sectionsBody/templateId/sprintId), DELETE
+│       ├── sprints/[id]/route.ts    # PATCH (rename/dates/état démarrer-terminer), DELETE sprint
 │       └── views/[id]/route.ts      # PATCH, DELETE view
 ├── components/
 │   ├── Sidebar.tsx
@@ -87,6 +95,7 @@ src/
 │       ├── KanbanView.tsx           # Vue kanban (DnD cards, menu ⋯, renommage colonnes)
 │       ├── CalendarView.tsx         # Vue calendrier mensuel
 │       ├── GalleryView.tsx          # Vue grille de cartes
+│       ├── BacklogView.tsx          # Vue backlog (Jira) : lanes sprint + backlog, DnD, panneau épics, points, démarrer/terminer
 │       ├── RecordPanel.tsx          # Slide panel record : props + corps libre OU sectionné + menu modèle par carte
 │       ├── Cell.tsx                 # Édition inline par type (title, text, number, select, etc.)
 │       ├── PropertyPopover.tsx      # Popover header colonne (rename, options select, supprimer)
@@ -99,13 +108,13 @@ src/
 └── lib/
     ├── prisma.ts                    # Singleton PrismaClient
     ├── session.ts                   # getSession() → user authentifié ou null
-    ├── workspace.ts                 # getMembership, checkDatabaseAccess, checkPropertyAccess, checkRecordAccess, checkViewAccess
+    ├── workspace.ts                 # getMembership, checkDatabaseAccess, checkPropertyAccess, checkRecordAccess, checkViewAccess, checkSprintAccess
     ├── positions.ts                 # nextPosition({ model, where }) → MAX(position) + 1000
     ├── pages.ts                     # createPage, setPageSection (synchro récursive visibility)
     ├── db.ts                        # Types TS (PropertyType, PropertyConfig, ViewConfig, ParsedRecord, RecordSection…)
     │                                # Parse/serialize helpers (parseDatabaseProperty, serializeRecord, parseSectionsBody…)
     │                                # mergeRecordProperties, removePropertyKey
-    ├── templates.ts                 # Templates fournis (builtin-ticket/bug), résolution, emptySectionsBody
+    ├── templates.ts                 # Templates fournis (builtin-scrum/ticket/bug), BacklogConfig, résolution, emptySectionsBody
     ├── tree.ts                      # buildTree(flat) → arbre pour la sidebar
     └── client/
         └── viewFilters.ts           # applyFilters, applySorts, applyViewConfig (côté client uniquement)
@@ -171,6 +180,8 @@ L'éditeur BlockNote debounce 500-600ms sur `onChange` et envoie un PATCH. Même
 - [x] ~~**Activer le MCP**~~ : fait (2026-06-29). Secrets posés sur le Pi, pont actif, connecteur claude.ai rafraîchi.
 - [x] ~~**MCP v2 — databases/records**~~ : fait (2026-06-29). 14 outils `notes_*` (databases, properties, records, views) côté Sonar, records par nom. Voir section *Intégration MCP*.
 - [x] ~~**Système de modèles (templates)**~~ : fait (2026-06-30). Modèle `Template` (workspace), page `/templates`, corps sectionné à libellés fixes, menu de template par carte, scaffold `POST /api/databases {templateId}`. ticket/bug = templates fournis. Outils MCP templates côté Sonar.
+- [x] ~~**Backlog (façon Jira)**~~ : fait (2026-06-30). 5e type de vue `backlog` (`BacklogView.tsx`), modèle Prisma `Sprint` + `Record.sprintId` (onDelete SetNull), API sprints (`/api/databases/[id]/sprints`, `/api/sprints/[id]`), template fourni `builtin-scrum` (Sprint absent du template — c'est un modèle, les points/épic/statut sont des colonnes câblées dans `View.config`). Panneau épics (select coloré), DnD issues entre sprints/backlog, story points par sprint, démarrer/terminer un sprint (terminer = archivage simple). Testé e2e back/API (19 assertions). **Front à valider dans le navigateur.**
+- [ ] **MCP — sprints (côté Sonar)** : `notes_create_database_from_template('builtin-scrum')` marche déjà (builtin listé par `notes_list_templates`). Manque côté `gotyeah_sonar/mcp_remote/notes_tools.py` : outils `notes_list_sprints` / `notes_create_sprint` / `notes_update_sprint` (démarrer/terminer) / `notes_delete_sprint`, et `sprintId`/`sprint` (par NOM) dans create/update_record. Hors de CE repo.
 - [ ] **Match email IdP→User insensible à la casse** : actuellement exact (SQLite ne supporte pas `mode: "insensitive"`). À traiter si la casse diffère entre Pocket ID et le compte.
 - [ ] **MCP v3 (optionnel)** : `update_property` ne gère que rename/position (changer type/options d'un select casserait les records). Édition des options select par nom à ajouter si besoin.
 - [ ] **Builds hors Pi** : déplacer le build Docker en CI (GitHub Actions) + `docker pull` au déploiement, pour supprimer les pics RAM/swap au déploiement.

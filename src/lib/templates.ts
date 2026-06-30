@@ -25,6 +25,18 @@ export type PropertyPreset = {
   config: PropertyConfig;
 };
 
+/**
+ * Câblage d'une vue backlog (façon Jira) scaffoldée par le template. Les champs
+ * désignent des colonnes PAR NOM (résolues en property.id à la création) ; la
+ * vue Backlog reçoit alors un View.config points/statut/épic prêt à l'emploi.
+ */
+export type BacklogConfig = {
+  pointsColumn?: string;   // colonne number = story points
+  statusColumn?: string;   // colonne select = statut
+  epicColumn?: string;     // colonne select = épic
+  doneOptionId?: string;   // option de statusColumn considérée « terminé »
+};
+
 export type TemplateShape = {
   id: string;
   name: string;
@@ -33,6 +45,8 @@ export type TemplateShape = {
   kanbanGroupProperty: string | null;
   sections: TemplateSection[];
   builtin: boolean;
+  // Présent (builtins seulement pour l'instant) → scaffolde une vue Backlog.
+  backlog?: BacklogConfig | null;
 };
 
 // ─── Templates fournis ────────────────────────────────────────────────────────
@@ -51,7 +65,60 @@ const BUG_STATUS = [
   { id: "fixed", name: "Corrigé", color: "green" },
 ];
 
+const SCRUM_STATUS = [
+  { id: "todo", name: "À faire", color: "gray" },
+  { id: "doing", name: "En cours", color: "blue" },
+  { id: "review", name: "En revue", color: "orange" },
+  { id: "done", name: "Terminé", color: "green" },
+];
+
+const SCRUM_TYPE = [
+  { id: "story", name: "Story", color: "green" },
+  { id: "bug", name: "Bug", color: "red" },
+  { id: "task", name: "Tâche", color: "blue" },
+  { id: "tech", name: "Tech", color: "gray" },
+];
+
+const SCRUM_PRIORITY = [
+  { id: "low", name: "Basse", color: "gray" },
+  { id: "medium", name: "Moyenne", color: "blue" },
+  { id: "high", name: "Haute", color: "orange" },
+  { id: "critical", name: "Critique", color: "red" },
+];
+
+// Épics seedées pour démarrer (renommables/extensibles par l'utilisateur).
+const SCRUM_EPICS = [
+  { id: "epic-onb", name: "Onboarding", color: "blue" },
+  { id: "epic-bill", name: "Facturation", color: "green" },
+  { id: "epic-perf", name: "Performance", color: "orange" },
+];
+
 export const BUILTIN_TEMPLATES: TemplateShape[] = [
+  {
+    id: "builtin-scrum",
+    name: "Scrum / Backlog",
+    icon: null,
+    builtin: true,
+    kanbanGroupProperty: "Statut",
+    backlog: {
+      statusColumn: "Statut",
+      pointsColumn: "Story points",
+      epicColumn: "Épic",
+      doneOptionId: "done",
+    },
+    columns: [
+      { name: "Statut", type: "select", config: { type: "select", options: SCRUM_STATUS } },
+      { name: "Type", type: "select", config: { type: "select", options: SCRUM_TYPE } },
+      { name: "Priorité", type: "select", config: { type: "select", options: SCRUM_PRIORITY } },
+      { name: "Épic", type: "select", config: { type: "select", options: SCRUM_EPICS } },
+      { name: "Story points", type: "number", config: { type: "number", format: "integer" } },
+      { name: "Assigné", type: "text", config: { type: "text" } },
+    ],
+    sections: [
+      { id: "desc", label: "Description" },
+      { id: "ac", label: "Critères d'acceptation" },
+    ],
+  },
   {
     id: "builtin-ticket",
     name: "Tickets",

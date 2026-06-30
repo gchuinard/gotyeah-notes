@@ -15,6 +15,25 @@ import type {
   ViewModel as View,
 } from "../../generated/prisma/models";
 
+// ─── Types : sprints (vue backlog façon Jira) ─────────────────────────────────
+
+export type SprintState = "future" | "active" | "completed";
+
+/**
+ * Sprint tel que renvoyé par l'API (dates sérialisées en string ISO).
+ * Record.sprintId pointe dessus ; null = backlog (issue non planifiée).
+ */
+export type ParsedSprint = {
+  id: string;
+  databaseId: string;
+  name: string;
+  goal: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  state: SprintState;
+  position: number;
+};
+
 // ─── Types : valeurs de propriétés ───────────────────────────────────────────
 
 export type PropertyType =
@@ -94,6 +113,13 @@ export type ViewFilter = {
  * - filters             : filtres actifs (tous en AND pour l'instant)
  * - groupByPropertyId   : colonne de regroupement (kanban)
  * - calendarPropertyId  : propriété date utilisée pour le calendrier
+ *
+ * Backlog (façon Jira) — propriétés câblées par le template scrum à la création.
+ * Toutes optionnelles : la vue dégrade proprement si elles manquent.
+ * - pointsPropertyId    : propriété number = story points (somme par sprint)
+ * - statusPropertyId    : propriété select = statut (badge + avancement done/total)
+ * - epicPropertyId      : propriété select = épic (panneau de filtrage latéral)
+ * - doneStatusOptionId  : option de statusProperty considérée « terminé »
  */
 export type ViewConfig = {
   visiblePropertyIds?: string[];
@@ -102,6 +128,10 @@ export type ViewConfig = {
   groupByPropertyId?: string;
   calendarPropertyId?: string;
   columnWidths?: Record<string, number>;
+  pointsPropertyId?: string;
+  statusPropertyId?: string;
+  epicPropertyId?: string;
+  doneStatusOptionId?: string;
 };
 
 // ─── Types : modèles parsés ───────────────────────────────────────────────────

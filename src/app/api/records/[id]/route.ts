@@ -45,6 +45,8 @@ const patchRecordSchema = z.object({
     .nullable()
     .optional(),
   templateId: z.string().nullable().optional(),
+  // Affectation à un sprint (vue backlog). null = renvoyer au backlog.
+  sprintId: z.string().nullable().optional(),
 });
 
 export async function PATCH(
@@ -76,12 +78,25 @@ export async function PATCH(
     position,
     sectionsBody,
     templateId,
+    sprintId,
   } = result.data;
 
   let mergedProperties: RecordProperties | undefined;
   if (rawProperties !== undefined) {
     const existing = parseRecord(access.record).properties;
     mergedProperties = mergeRecordProperties(existing, rawProperties as RecordProperties);
+  }
+
+  // Garde-fou : un sprint affecté doit appartenir à la même database (sinon FK 500
+  // ou affectation incohérente entre bases).
+  if (sprintId) {
+    const sprint = await prisma.sprint.findFirst({
+      where: { id: sprintId, databaseId: access.databaseId },
+      select: { id: true },
+    });
+    if (!sprint) {
+      return NextResponse.json({ error: "Sprint introuvable" }, { status: 400 });
+    }
   }
 
   const updated = await prisma.record.update({
@@ -99,6 +114,7 @@ export async function PATCH(
           sectionsBody === null ? null : serializeSectionsBody(sectionsBody as RecordSection[]),
       }),
       ...(templateId !== undefined && { templateId }),
+      ...(sprintId !== undefined && { sprintId }),
     },
   });
 

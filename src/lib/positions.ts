@@ -1,6 +1,6 @@
 import { prisma } from "./prisma";
 
-type PositionModel = "databaseProperty" | "record" | "view";
+type PositionModel = "databaseProperty" | "record" | "view" | "sprint";
 
 type AggregateDelegate = {
   aggregate(args: {
@@ -11,7 +11,7 @@ type AggregateDelegate = {
 
 /**
  * Calcule la prochaine position pour un modèle ordonné (DatabaseProperty,
- * Record, View) dans une database donnée.
+ * Record, View, Sprint) dans une database donnée.
  * Formule : MAX(position) + 1000, ou 1000 si la database est vide.
  * Le gap de 1000 permet d'insérer entre deux items sans renuméroter.
  */

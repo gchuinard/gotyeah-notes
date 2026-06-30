@@ -8,6 +8,7 @@ import {
   serializeView,
   parseManyDatabaseProperties,
   parseManyViews,
+  type ViewConfig,
 } from "@/lib/db";
 import {
   resolveBuiltinTemplate,
@@ -130,6 +131,28 @@ export async function POST(req: Request) {
           },
         });
         views.push(kanbanView);
+      }
+
+      // Vue Backlog (façon Jira) : câblée sur les colonnes points/statut/épic.
+      // Position 500 < table (1000) → onglet par défaut pour une DB scrum.
+      if (tpl.backlog) {
+        const b = tpl.backlog;
+        const config: ViewConfig = {};
+        if (b.statusColumn && idByName[b.statusColumn]) config.statusPropertyId = idByName[b.statusColumn];
+        if (b.pointsColumn && idByName[b.pointsColumn]) config.pointsPropertyId = idByName[b.pointsColumn];
+        if (b.epicColumn && idByName[b.epicColumn]) config.epicPropertyId = idByName[b.epicColumn];
+        if (b.doneOptionId) config.doneStatusOptionId = b.doneOptionId;
+
+        const backlogView = await tx.view.create({
+          data: {
+            databaseId: database.id,
+            name: "Backlog",
+            type: "backlog",
+            position: 500,
+            ...serializeView({ config }),
+          },
+        });
+        views.push(backlogView);
       }
     }
 

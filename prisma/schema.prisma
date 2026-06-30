@@ -151,6 +151,7 @@ model Database {
   properties DatabaseProperty[]
   records    Record[]
   views      View[]
+  sprints    Sprint[]
   // Modèle de corps LIBRE (document BlockNote JSON) pré-rempli à la création d'un
   // record quand aucun `content` n'est fourni. null = pas de modèle.
   recordTemplate String?
@@ -195,8 +196,34 @@ model Record {
   templateId  String?
   sectionsBody String?
 
+  // Sprint d'affectation (vue backlog façon Jira). null = backlog (non planifié).
+  // onDelete SetNull : supprimer un sprint renvoie ses issues au backlog.
+  sprintId   String?
+  sprint     Sprint?  @relation(fields: [sprintId], references: [id], onDelete: SetNull)
+
   @@index([databaseId])
   @@index([createdBy])
+  @@index([sprintId])
+}
+
+// Sprint (vue backlog façon Jira). Lié à une Database. Les records y sont
+// rattachés via Record.sprintId (null = backlog). state : "future" planifié,
+// "active" en cours, "completed" terminé (sort du board, conserve ses records).
+model Sprint {
+  id         String    @id @default(cuid())
+  databaseId String
+  database   Database  @relation(fields: [databaseId], references: [id], onDelete: Cascade)
+  name       String    @default("Sprint")
+  goal       String?
+  startDate  DateTime?
+  endDate    DateTime?
+  state      String    @default("future") // "future" | "active" | "completed"
+  position   Float     @default(0)
+  records    Record[]
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([databaseId])
 }
 
 model View {
@@ -204,7 +231,7 @@ model View {
   databaseId String
   database   Database @relation(fields: [databaseId], references: [id], onDelete: Cascade)
   name       String   @default("Vue")
-  type       String   @default("table") // "table" | "kanban" | "calendar" | "gallery"
+  type       String   @default("table") // "table" | "kanban" | "calendar" | "gallery" | "backlog"
   position   Float    @default(0)
   config     String   @default("{}")
   createdAt  DateTime @default(now())
