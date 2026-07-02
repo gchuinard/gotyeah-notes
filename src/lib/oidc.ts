@@ -22,6 +22,12 @@ export function oidcEnabled(): boolean {
   return !!(ISSUER && CLIENT_ID && CLIENT_SECRET && REDIRECT_URI);
 }
 
+/** Login par mot de passe (formulaire email). Désactivable via LEGACY_LOGIN=off quand
+ *  l'app passe en « comptes GotYeah uniquement ». Réactivable (break-glass). */
+export function legacyLoginEnabled(): boolean {
+  return (process.env.LEGACY_LOGIN || "on").trim().toLowerCase() !== "off";
+}
+
 /** Origine publique de l'app, dérivée du redirect_uri → base fiable pour les redirections
  *  (derrière NPM/Cloudflare, l'origine de la requête interne n'est pas publique). */
 export function appOrigin(): string {

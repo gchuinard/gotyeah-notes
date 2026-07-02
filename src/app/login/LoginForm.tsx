@@ -23,12 +23,17 @@ function ssoErrorMessage(code: string): string {
 export default function LoginForm({
   oidcEnabled = false,
   oidcLabel = "Se connecter avec GotYeah",
+  legacyLogin = true,
   ssoError,
 }: {
   oidcEnabled?: boolean;
   oidcLabel?: string;
+  legacyLogin?: boolean;
   ssoError?: string;
 }) {
+  // Fail-safe : on garde le formulaire tant que l'OIDC n'est pas confirmé actif,
+  // pour ne jamais présenter une page sans aucune entrée possible.
+  const showPasswordForm = legacyLogin || !oidcEnabled;
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState(ssoError ? ssoErrorMessage(ssoError) : "");
@@ -60,62 +65,78 @@ export default function LoginForm({
         <h1 className="text-2xl font-bold text-center text-[var(--text)] mb-8">
           📝 Notes
         </h1>
-        <form onSubmit={submit} className="flex flex-col gap-4">
-          <div className="flex flex-col gap-1.5">
-            <label className="text-sm font-medium text-[var(--text-muted)]">
-              Email
-            </label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              autoFocus
-              className="border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 transition-colors"
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <label className="text-sm font-medium text-[var(--text-muted)]">
-              Mot de passe
-            </label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              className="border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 transition-colors"
-            />
-          </div>
-          {error && <p className="text-sm text-red-500">{error}</p>}
-          <button
-            type="submit"
-            disabled={loading}
-            className="bg-blue-500 hover:bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-50 transition-colors mt-1"
-          >
-            {loading ? "Connexion…" : "Se connecter"}
-          </button>
-        </form>
+
+        {error && (
+          <p className="text-sm text-red-500 mb-4 text-center">{error}</p>
+        )}
+
+        {showPasswordForm && (
+          <form onSubmit={submit} className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium text-[var(--text-muted)]">
+                Email
+              </label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                autoFocus
+                className="border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 transition-colors"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium text-[var(--text-muted)]">
+                Mot de passe
+              </label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                className="border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 transition-colors"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={loading}
+              className="bg-blue-500 hover:bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-50 transition-colors mt-1"
+            >
+              {loading ? "Connexion…" : "Se connecter"}
+            </button>
+          </form>
+        )}
+
         {oidcEnabled && (
           <>
-            <div className="flex items-center gap-3 my-5 text-xs text-[var(--text-muted)]">
-              <span className="h-px flex-1 bg-[var(--border)]" />
-              ou
-              <span className="h-px flex-1 bg-[var(--border)]" />
-            </div>
+            {showPasswordForm && (
+              <div className="flex items-center gap-3 my-5 text-xs text-[var(--text-muted)]">
+                <span className="h-px flex-1 bg-[var(--border)]" />
+                ou
+                <span className="h-px flex-1 bg-[var(--border)]" />
+              </div>
+            )}
             <a
               href="/api/auth/oidc/login"
-              className="block text-center border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-hover)] text-[var(--text)] rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+              className={
+                showPasswordForm
+                  ? "block text-center border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-hover)] text-[var(--text)] rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+                  : "block text-center bg-blue-500 hover:bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+              }
             >
               {oidcLabel}
             </a>
           </>
         )}
-        <p className="text-sm text-center text-[var(--text-muted)] mt-6">
-          Pas encore de compte ?{" "}
-          <Link href="/register" className="text-blue-500 hover:underline">
-            Créer un compte
-          </Link>
-        </p>
+
+        {showPasswordForm && (
+          <p className="text-sm text-center text-[var(--text-muted)] mt-6">
+            Pas encore de compte ?{" "}
+            <Link href="/register" className="text-blue-500 hover:underline">
+              Créer un compte
+            </Link>
+          </p>
+        )}
       </div>
     </div>
   );

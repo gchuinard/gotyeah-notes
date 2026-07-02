@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
-import { oidcEnabled, OIDC_BUTTON_LABEL } from "@/lib/oidc";
+import { oidcEnabled, OIDC_BUTTON_LABEL, legacyLoginEnabled } from "@/lib/oidc";
 import LoginForm from "./LoginForm";
 
 export default async function LoginPage({
@@ -15,6 +15,7 @@ export default async function LoginPage({
     <LoginForm
       oidcEnabled={oidcEnabled()}
       oidcLabel={OIDC_BUTTON_LABEL}
+      legacyLogin={legacyLoginEnabled()}
       ssoError={sso_error}
     />
   );

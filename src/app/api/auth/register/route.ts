@@ -3,8 +3,15 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
 import { createWorkspaceWithDefaults } from "@/lib/workspace";
+import { legacyLoginEnabled } from "@/lib/oidc";
 
 export async function POST(req: Request) {
+  if (!legacyLoginEnabled()) {
+    return NextResponse.json(
+      { error: "Inscription désactivée. Cette instance utilise les comptes GotYeah." },
+      { status: 403 },
+    );
+  }
   const { firstName, lastName, displayName, email, password } =
     await req.json().catch(() => ({}));
 

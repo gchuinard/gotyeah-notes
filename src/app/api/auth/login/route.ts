@@ -2,8 +2,15 @@ import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { legacyLoginEnabled } from "@/lib/oidc";
 
 export async function POST(req: Request) {
+  if (!legacyLoginEnabled()) {
+    return NextResponse.json(
+      { error: "Connexion par mot de passe désactivée. Utilisez « Se connecter avec GotYeah »." },
+      { status: 403 },
+    );
+  }
   const { email, password } = await req.json().catch(() => ({}));
 
   if (!email || !password) {
