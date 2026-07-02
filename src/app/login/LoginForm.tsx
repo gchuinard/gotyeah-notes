@@ -3,10 +3,35 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
-export default function LoginForm() {
+function ssoErrorMessage(code: string): string {
+  switch (code) {
+    case "provider":
+      return "Connexion via GotYeah refusée ou annulée.";
+    case "nosignup":
+      return "Aucun compte n'est associé à cet identifiant.";
+    case "unverified":
+      return "Adresse email non vérifiée côté fournisseur d'identité.";
+    case "noemail":
+      return "Le fournisseur d'identité n'a pas transmis d'adresse email.";
+    case "disabled":
+      return "La connexion via GotYeah est désactivée.";
+    default:
+      return "Échec de la connexion via GotYeah. Réessayez.";
+  }
+}
+
+export default function LoginForm({
+  oidcEnabled = false,
+  oidcLabel = "Se connecter avec GotYeah",
+  ssoError,
+}: {
+  oidcEnabled?: boolean;
+  oidcLabel?: string;
+  ssoError?: string;
+}) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState(ssoError ? ssoErrorMessage(ssoError) : "");
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
@@ -70,6 +95,21 @@ export default function LoginForm() {
             {loading ? "Connexion…" : "Se connecter"}
           </button>
         </form>
+        {oidcEnabled && (
+          <>
+            <div className="flex items-center gap-3 my-5 text-xs text-[var(--text-muted)]">
+              <span className="h-px flex-1 bg-[var(--border)]" />
+              ou
+              <span className="h-px flex-1 bg-[var(--border)]" />
+            </div>
+            <a
+              href="/api/auth/oidc/login"
+              className="block text-center border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-hover)] text-[var(--text)] rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+            >
+              {oidcLabel}
+            </a>
+          </>
+        )}
         <p className="text-sm text-center text-[var(--text-muted)] mt-6">
           Pas encore de compte ?{" "}
           <Link href="/register" className="text-blue-500 hover:underline">
