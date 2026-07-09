@@ -24,6 +24,7 @@ import Cell, { CellDisplay } from "@/components/databases/Cell";
 import AddPropertyModal from "@/components/databases/AddPropertyModal";
 import PropertyPopover from "@/components/databases/PropertyPopover";
 import RecordPanel from "@/components/databases/RecordPanel";
+import { useRecordDeepLink } from "@/lib/client/useRecordDeepLink";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -343,7 +344,7 @@ export default function TableView({ databaseId, view: _view, properties: initial
   const [openPopoverId, setOpenPopoverId] = useState<string | null>(null);
   const [showAddProperty, setShowAddProperty] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
+  const [selectedRecordId, setSelectedRecordId] = useRecordDeepLink(records);
   const pendingIds = useRef<Set<string>>(new Set());
 
   const sensors = useSensors(

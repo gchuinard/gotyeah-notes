@@ -6,6 +6,7 @@ import type { ParsedDatabaseProperty, ParsedRecord, ParsedView } from "@/lib/db"
 import { applyViewConfig } from "@/lib/client/viewFilters";
 import { CellDisplay } from "@/components/databases/Cell";
 import RecordPanel from "@/components/databases/RecordPanel";
+import { useRecordDeepLink } from "@/lib/client/useRecordDeepLink";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -115,7 +116,7 @@ export default function GalleryView({ databaseId, view, properties }: Props) {
     fetcher
   );
 
-  const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
+  const [selectedRecordId, setSelectedRecordId] = useRecordDeepLink(records);
   const pendingIds = useRef<Set<string>>(new Set());
 
   const previewProps = useMemo(

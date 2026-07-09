@@ -30,6 +30,7 @@ import { SelectBadge, CellDisplay } from "@/components/databases/Cell";
 import { applyViewConfig } from "@/lib/client/viewFilters";
 import Portal from "@/components/databases/portal";
 import RecordPanel from "@/components/databases/RecordPanel";
+import { useRecordDeepLink } from "@/lib/client/useRecordDeepLink";
 
 // ─── Constants / types ────────────────────────────────────────────────────────
 
@@ -581,7 +582,7 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
 
   const [activeId, setActiveId] = useState<string | null>(null);
   const [newRecordId, setNewRecordId] = useState<string | null>(null);
-  const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
+  const [selectedRecordId, setSelectedRecordId] = useRecordDeepLink(records);
 
   const pendingIds = useRef<Set<string>>(new Set());
   const pendingTitles = useRef<Map<string, string>>(new Map());
