@@ -204,3 +204,54 @@ export async function setPageSection(
     return { ok: true, page };
   });
 }
+
+// ─── Suppression de section (réaffectation des racines) ──────────────────────
+
+export type DeleteSectionResult =
+  | { ok: true }
+  | { ok: false; code: "section_not_found" | "no_fallback" };
+
+/**
+ * Supprime une section en réaffectant d'abord ses pages RACINES vers une section
+ * de repli du MÊME type dans le même workspace, le tout en une seule transaction
+ * (réaffectation + suppression atomiques : une erreur en cours annule le tout).
+ *
+ * Le repli same-type garantit que la visibility dénormalisée reste identique →
+ * aucune resync récursive des descendants n'est nécessaire (ils héritent via la
+ * racine). Si aucune section de repli du même type n'existe → refus "no_fallback"
+ * (409 côté route) : on ne supprime jamais au prix de pages orphelines.
+ *
+ * Respecte la convention « ne jamais écrire Page.sectionId hors d'un helper lib/ ».
+ */
+export async function deleteSectionReassigningRoots(
+  sectionId: string
+): Promise<DeleteSectionResult> {
+  return prisma.$transaction(async (tx): Promise<DeleteSectionResult> => {
+    const section = await tx.section.findUnique({
+      where: { id: sectionId },
+      select: { id: true, workspaceId: true, type: true },
+    });
+    if (!section) return { ok: false, code: "section_not_found" };
+
+    // Repli déterministe : autre section du MÊME type dans le workspace.
+    const fallback = await tx.section.findFirst({
+      where: {
+        workspaceId: section.workspaceId,
+        type: section.type,
+        id: { not: sectionId },
+      },
+      orderBy: [{ position: "asc" }, { id: "asc" }],
+      select: { id: true },
+    });
+    if (!fallback) return { ok: false, code: "no_fallback" };
+
+    // Repli same-type → visibility inchangée → réaffecter les seules racines.
+    await tx.page.updateMany({
+      where: { sectionId, parentId: null },
+      data: { sectionId: fallback.id },
+    });
+
+    await tx.section.delete({ where: { id: sectionId } });
+    return { ok: true };
+  });
+}
