@@ -45,6 +45,7 @@ export default async function PageView({
         <DatabaseShell databaseId={database.id} />
       ) : (
         <EditorClient
+          key={page.id}
           pageId={page.id}
           initialContent={page.content}
           initialTitle={page.title}
