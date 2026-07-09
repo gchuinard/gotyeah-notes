@@ -1,4 +1,5 @@
 import { prisma } from "./prisma";
+import type { Prisma } from "../../generated/prisma/client";
 
 type CreatePageInput = {
   title?: string;
@@ -71,5 +72,135 @@ export async function createPage({
       visibility,
       position,
     },
+  });
+}
+
+// ─── Déplacement de page (parent / section) ──────────────────────────────────
+
+export type SetPageSectionInput = {
+  // Présence de la clé = intention de la modifier. Absente = inchangée.
+  parentId?: string | null;
+  sectionId?: string | null;
+};
+
+export type SetPageSectionResult =
+  | { ok: true; page: Awaited<ReturnType<typeof prisma.page.findUniqueOrThrow>> }
+  | { ok: false; code: "page_not_found" | "section_on_child" | "cycle" | "target_not_found" };
+
+/**
+ * Collecte tous les descendants (récursivement) d'une page, par vagues de parentId.
+ */
+async function collectDescendantIds(
+  tx: Prisma.TransactionClient,
+  rootId: string
+): Promise<string[]> {
+  const all: string[] = [];
+  let frontier = [rootId];
+  while (frontier.length > 0) {
+    const children = await tx.page.findMany({
+      where: { parentId: { in: frontier } },
+      select: { id: true },
+    });
+    const ids = children.map((c) => c.id);
+    all.push(...ids);
+    frontier = ids;
+  }
+  return all;
+}
+
+/**
+ * Déplace une page vers un autre parent et/ou une autre section, de façon SÛRE :
+ * - sectionId n'est valide que sur une RACINE (parentId final null), sinon la
+ *   section est héritée via la racine → refus "section_on_child".
+ * - garde anti-cycle : le nouveau parent ne peut pas être la page elle-même ni
+ *   l'un de ses descendants → refus "cycle".
+ * - la cible (parent ou section) doit appartenir au même workspace → refus
+ *   "target_not_found" (mappé en 404 côté route, anti-leak).
+ * - la visibility est RE-DÉRIVÉE (racine : depuis le type de section ; enfant :
+ *   depuis le parent) et PROPAGÉE récursivement à tout le sous-arbre, le tout
+ *   dans une seule transaction.
+ */
+export async function setPageSection(
+  pageId: string,
+  input: SetPageSectionInput
+): Promise<SetPageSectionResult> {
+  return prisma.$transaction(async (tx): Promise<SetPageSectionResult> => {
+    const current = await tx.page.findUnique({
+      where: { id: pageId },
+      select: { id: true, parentId: true, sectionId: true, workspaceId: true },
+    });
+    if (!current) return { ok: false, code: "page_not_found" };
+
+    const hasParent = "parentId" in input;
+    const hasSection = "sectionId" in input;
+    const nextParentId = hasParent ? input.parentId ?? null : current.parentId;
+
+    let nextSectionId: string | null;
+    let nextVisibility: string;
+
+    if (nextParentId) {
+      // Devient (ou reste) un ENFANT : la section est héritée, pas définie ici.
+      if (hasSection && input.sectionId != null) {
+        return { ok: false, code: "section_on_child" };
+      }
+      // Anti-cycle : le parent ne doit pas être la page ni un de ses descendants.
+      if (nextParentId === pageId) return { ok: false, code: "cycle" };
+      const descendants = await collectDescendantIds(tx, pageId);
+      if (descendants.includes(nextParentId)) return { ok: false, code: "cycle" };
+
+      const parent = await tx.page.findUnique({
+        where: { id: nextParentId },
+        select: { workspaceId: true, visibility: true },
+      });
+      if (!parent || parent.workspaceId !== current.workspaceId) {
+        return { ok: false, code: "target_not_found" };
+      }
+      nextSectionId = null;
+      nextVisibility = parent.visibility;
+    } else {
+      // Devient (ou reste) une RACINE : résoudre la section et en dériver la visibility.
+      const targetSectionId = hasSection
+        ? input.sectionId ?? null
+        : current.sectionId;
+
+      let resolved = targetSectionId;
+      if (!resolved) {
+        const privateSection = await tx.section.findFirst({
+          where: { workspaceId: current.workspaceId, type: "private" },
+          select: { id: true },
+        });
+        resolved = privateSection?.id ?? null;
+      }
+
+      if (resolved) {
+        const section = await tx.section.findUnique({
+          where: { id: resolved },
+          select: { type: true, workspaceId: true },
+        });
+        if (!section || section.workspaceId !== current.workspaceId) {
+          return { ok: false, code: "target_not_found" };
+        }
+        nextVisibility = section.type === "private" ? "private" : "team";
+      } else {
+        nextVisibility = "team";
+      }
+      nextSectionId = resolved;
+    }
+
+    const page = await tx.page.update({
+      where: { id: pageId },
+      data: { parentId: nextParentId, sectionId: nextSectionId, visibility: nextVisibility },
+    });
+
+    // Propager la visibility à tout le sous-arbre (dénormalisation).
+    const descendants = await collectDescendantIds(tx, pageId);
+    if (descendants.length > 0) {
+      await tx.page.updateMany({
+        where: { id: { in: descendants } },
+        data: { visibility: nextVisibility },
+      });
+    }
+
+    return { ok: true, page };
   });
 }
