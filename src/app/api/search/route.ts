@@ -12,14 +12,25 @@ export async function GET(req: Request) {
   const workspaceId = searchParams.get("workspaceId") ?? undefined;
   if (!q || q.length < 1) return NextResponse.json([]);
 
+  // Scope workspace : soit celui demandé (après vérif Membership), soit — à défaut —
+  // l'ensemble des workspaces dont l'user est membre. Sans ce garde, une recherche
+  // sans workspaceId remonterait les pages "team" de TOUTE l'instance.
+  let workspaceIds: string[];
   if (workspaceId) {
     const membership = await getMembership(user.id, workspaceId);
     if (!membership) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    workspaceIds = [workspaceId];
+  } else {
+    const memberships = await prisma.membership.findMany({
+      where: { userId: user.id },
+      select: { workspaceId: true },
+    });
+    workspaceIds = memberships.map((m) => m.workspaceId);
   }
 
   const pages = await prisma.page.findMany({
     where: {
-      ...(workspaceId ? { workspaceId } : {}),
+      workspaceId: { in: workspaceIds },
       OR: [
         { visibility: "team" },
         { visibility: "private", ownerId: user.id },
