@@ -7,3 +7,10 @@ prisma/dev.db-journal
 dev.db
 dev.db-journal
 tsconfig.tsbuildinfo
+
+# tests
+tests/.tmp
+test-results
+playwright-report
+blob-report
+playwright/.cache
