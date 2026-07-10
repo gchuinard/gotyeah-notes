@@ -77,7 +77,9 @@ export function applyFilters(
           return true;
         }
 
-        case "multiselect": {
+        // relation = tableau d'ids de records cibles → mêmes opérateurs que multiselect.
+        case "multiselect":
+        case "relation": {
           const arr = Array.isArray(raw) ? (raw as string[]) : [];
           if (op === "isEmpty")     return arr.length === 0;
           if (op === "isNotEmpty")  return arr.length > 0;
@@ -156,7 +158,9 @@ export function applySorts(
           cmp = an.localeCompare(bn, "fr");
           break;
         }
-        case "multiselect": {
+        // relation : tri par nombre de liens, comme un multiselect.
+        case "multiselect":
+        case "relation": {
           const al = Array.isArray(av) ? (av as string[]).length : 0;
           const bl = Array.isArray(bv) ? (bv as string[]).length : 0;
           cmp = al - bl;

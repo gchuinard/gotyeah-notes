@@ -21,6 +21,7 @@ const PROPERTY_TYPES = [
   "checkbox",
   "url",
   "email",
+  "relation",
 ] as const;
 
 const createPropertySchema = z.object({
@@ -91,6 +92,25 @@ export async function POST(
       { error: "Validation failed", details: validation.details },
       { status: 400 }
     );
+  }
+
+  // relation : la database cible doit exister, être accessible, et vivre dans le
+  // MÊME workspace (sinon on créerait un lien traversant une frontière d'accès).
+  if (type === "relation") {
+    const targetDatabaseId = (config as { targetDatabaseId?: unknown }).targetDatabaseId;
+    if (typeof targetDatabaseId !== "string" || targetDatabaseId.length === 0) {
+      return NextResponse.json(
+        { error: "config.targetDatabaseId requis pour une propriété relation" },
+        { status: 400 }
+      );
+    }
+    const targetAccess = await checkDatabaseAccess(targetDatabaseId, user.id);
+    if (!targetAccess || targetAccess.workspaceId !== access.workspaceId) {
+      return NextResponse.json(
+        { error: "Database cible introuvable, inaccessible, ou hors du workspace" },
+        { status: 400 }
+      );
+    }
   }
 
   const position = await nextPosition("databaseProperty", { databaseId });

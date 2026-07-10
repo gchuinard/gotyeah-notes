@@ -16,6 +16,7 @@ import {
 } from "@/lib/db";
 import { applyFilters } from "@/lib/client/viewFilters";
 import { emptySectionsBody } from "@/lib/templates";
+import { validateRelationValues } from "@/lib/relations";
 
 // Params de requête OPTIONNELS (consommateurs sans applyViewConfig, ex. MCP).
 // Aucun param → réponse historique intégrale (le front n'est pas impacté).
@@ -138,6 +139,12 @@ export async function POST(
 
   const { title, icon, content, properties: rawProperties = {}, sprintId } = result.data;
   const properties = rawProperties as RecordProperties;
+
+  // Garde-fou : les ids d'une propriété relation doivent appartenir à sa database cible.
+  const relationCheck = await validateRelationValues(databaseId, properties);
+  if (!relationCheck.ok) {
+    return NextResponse.json({ error: relationCheck.error }, { status: 400 });
+  }
 
   // Garde-fou : un sprint fourni doit appartenir à cette database.
   if (sprintId) {

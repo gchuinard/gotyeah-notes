@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 import { checkRecordAccess } from "@/lib/workspace";
+import { validateRelationValues } from "@/lib/relations";
 import {
   serializeRecord,
   parseRecord,
@@ -83,6 +84,15 @@ export async function PATCH(
 
   let mergedProperties: RecordProperties | undefined;
   if (rawProperties !== undefined) {
+    // Garde-fou : les ids d'une propriété relation doivent appartenir à sa database
+    // cible. On valide le PATCH entrant (une valeur null = suppression, tolérée).
+    const relationCheck = await validateRelationValues(
+      access.databaseId,
+      rawProperties as RecordProperties
+    );
+    if (!relationCheck.ok) {
+      return NextResponse.json({ error: relationCheck.error }, { status: 400 });
+    }
     const existing = parseRecord(access.record).properties;
     mergedProperties = mergeRecordProperties(existing, rawProperties as RecordProperties);
   }
