@@ -125,7 +125,8 @@ model Page {
   visits      PageVisit[]
 
   @@index([parentId])
-  @@index([workspaceId])
+  // Composite : les pages sont listées par workspace et triées par position (sidebar).
+  @@index([workspaceId, position])
   @@index([sectionId])
   @@index([ownerId])
   @@index([visibility])
@@ -174,7 +175,9 @@ model DatabaseProperty {
   position   Float    @default(0)
   config     String   @default("{}")
 
-  @@index([databaseId])
+  // Composite : les colonnes sont TOUJOURS lues filtrées par databaseId ET triées
+  // par position (cf. lib/positions.ts). Couvre aussi le filtre databaseId seul.
+  @@index([databaseId, position])
 }
 
 model Record {
@@ -201,7 +204,8 @@ model Record {
   sprintId   String?
   sprint     Sprint?  @relation(fields: [sprintId], references: [id], onDelete: SetNull)
 
-  @@index([databaseId])
+  // Composite : les records sont lus filtrés par databaseId ET triés par position.
+  @@index([databaseId, position])
   @@index([createdBy])
   @@index([sprintId])
 }
@@ -223,7 +227,8 @@ model Sprint {
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
 
-  @@index([databaseId])
+  // Composite : les sprints sont lus filtrés par databaseId ET triés par position.
+  @@index([databaseId, position])
 }
 
 model View {
@@ -236,5 +241,6 @@ model View {
   config     String   @default("{}")
   createdAt  DateTime @default(now())
 
-  @@index([databaseId])
+  // Composite : les vues sont lues filtrées par databaseId ET triées par position.
+  @@index([databaseId, position])
 }

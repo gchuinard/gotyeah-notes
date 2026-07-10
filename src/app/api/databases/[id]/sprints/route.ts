@@ -53,18 +53,21 @@ export async function POST(
   }
 
   const { name, goal, startDate, endDate, state } = result.data;
-  const position = await nextPosition("sprint", { databaseId });
 
-  const sprint = await prisma.sprint.create({
-    data: {
-      databaseId,
-      position,
-      ...(name !== undefined && { name }),
-      ...(goal !== undefined && { goal }),
-      ...(state !== undefined && { state }),
-      ...(startDate !== undefined && { startDate: startDate ? new Date(startDate) : null }),
-      ...(endDate !== undefined && { endDate: endDate ? new Date(endDate) : null }),
-    },
+  // MAX(position) + create atomiques : évite deux positions identiques sous concurrence.
+  const sprint = await prisma.$transaction(async (tx) => {
+    const position = await nextPosition("sprint", { databaseId }, tx);
+    return tx.sprint.create({
+      data: {
+        databaseId,
+        position,
+        ...(name !== undefined && { name }),
+        ...(goal !== undefined && { goal }),
+        ...(state !== undefined && { state }),
+        ...(startDate !== undefined && { startDate: startDate ? new Date(startDate) : null }),
+        ...(endDate !== undefined && { endDate: endDate ? new Date(endDate) : null }),
+      },
+    });
   });
 
   return NextResponse.json(sprint, { status: 201 });
