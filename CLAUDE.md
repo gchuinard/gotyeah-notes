@@ -79,7 +79,8 @@ src/
 │       │   └── [id]/
 │       │       ├── route.ts         # GET, PATCH (recordTemplate), DELETE database
 │       │       ├── properties/route.ts  # POST property
-│       │       ├── records/route.ts     # GET list, POST record (estampe le corps sectionné, accepte sprintId)
+│       │       ├── records/route.ts     # GET list (params optionnels filter/limit/offset/includeContent + X-Total-Count),
+│       │       │                        #   POST record (estampe le corps sectionné, accepte sprintId)
 │       │       ├── sprints/route.ts      # GET list, POST sprint (vue backlog)
 │       │       └── views/route.ts       # POST view
 │       ├── properties/[id]/route.ts # PATCH, DELETE property
@@ -130,7 +131,7 @@ src/
 - **Réponse succès** : objet parsé direct (pas wrappé dans `{ data: ... }`)
 - **Réponse erreur** : `{ error: "message" }` ou `{ error: "Validation failed", details: zodFlattenedErrors }`
 - **Position** : automatique via `nextPosition()` pour properties/records/views
-- **Pas de filtres/tris côté serveur** : tous les records sont retournés, le client filtre en JS via `applyViewConfig()`
+- **Pas de filtres/tris côté serveur** : tous les records sont retournés, le client filtre en JS via `applyViewConfig()`. **Exception assumée** — `GET /api/databases/[id]/records` accepte des params **optionnels** pour les consommateurs sans `applyViewConfig` (MCP) : `filter` (JSON `ViewFilter[]`, appliqué via `applyFilters` — pas de réimplémentation), `limit`/`offset` (total pré-pagination dans l'en-tête `X-Total-Count` ; le corps reste un **tableau nu**), `includeContent=false` (omet `content`/`sectionsBody` via `stripRecordBody`). **Sans aucun param, la réponse est identique à l'historique** → le front n'est pas impacté.
 
 ## Conventions UI
 
