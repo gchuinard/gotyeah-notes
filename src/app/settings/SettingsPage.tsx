@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft, User, Users, HardDrive, Palette,
-  Eye, EyeOff, Check, ChevronDown,
+  Eye, EyeOff, Check,
 } from "lucide-react";
 import type { SessionUser } from "@/lib/session";
 
@@ -315,117 +315,84 @@ function UsersSection() {
 }
 
 function StorageSection() {
-  const [storageType, setStorageType] = useState<"local" | "cloud">("local");
-  const [provider, setProvider]       = useState("s3");
-  const [showSecret, setShowSecret]   = useState(false);
+  const [maxMb, setMaxMb]   = useState<number | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved]   = useState(false);
 
-  const providers = [
-    { id: "s3",  label: "Amazon S3" },
-    { id: "r2",  label: "Cloudflare R2" },
-    { id: "gcs", label: "Google Cloud Storage" },
-    { id: "b2",  label: "Backblaze B2" },
-  ];
+  useEffect(() => {
+    fetch("/api/config")
+      .then((r) => r.json())
+      .then((d) => setMaxMb(typeof d.uploadMaxMb === "number" ? d.uploadMaxMb : 10))
+      .catch(() => setMaxMb(10));
+  }, []);
+
+  const save = async () => {
+    if (maxMb == null) return;
+    setSaving(true);
+    setSaved(false);
+    try {
+      const res = await fetch("/api/config", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uploadMaxMb: maxMb }),
+      });
+      if (res.ok) {
+        const d = await res.json();
+        setMaxMb(d.uploadMaxMb);
+        setSaved(true);
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="max-w-lg">
-      <SectionTitle title="Stockage" description="Configurez où sont stockés les fichiers et médias." />
+      <SectionTitle
+        title="Stockage"
+        description="Fichiers et médias (captures d'écran collées dans l'éditeur)."
+      />
 
-      {/* Type */}
-      <div className="flex flex-col gap-2 mb-6">
-        {(["local", "cloud"] as const).map((type) => (
-          <label
-            key={type}
-            className={`flex items-center gap-3 p-4 rounded-lg border cursor-pointer transition-colors ${
-              storageType === type
-                ? "border-blue-400 bg-blue-50"
-                : "border-[var(--border)] hover:border-gray-300"
-            }`}
-          >
-            <input
-              type="radio"
-              name="storage"
-              value={type}
-              checked={storageType === type}
-              onChange={() => setStorageType(type)}
-              className="accent-blue-500"
-            />
-            <div>
-              <p className="text-sm font-medium text-[var(--text)]">
-                {type === "local" ? "Disque local" : "Cloud"}
-              </p>
-              <p className="text-xs text-[var(--text-muted)] mt-0.5">
-                {type === "local"
-                  ? "Les fichiers sont stockés sur le serveur."
-                  : "Synchronisation avec un bucket distant."}
-              </p>
-            </div>
-          </label>
-        ))}
+      <div className="flex flex-col gap-5">
+        <div>
+          <p className="text-sm font-medium text-[var(--text)]">Disque local</p>
+          <p className="text-xs text-[var(--text-muted)] mt-1">
+            Les images sont stockées sur le serveur (dossier <code>data/uploads</code>, sur le
+            volume Docker) et servies via <code>/api/files</code> avec session. Le stockage cloud
+            (S3/R2/GCS/B2) n&apos;est pas encore branché.
+          </p>
+        </div>
+
+        <Divider />
+
+        <div className="flex flex-col gap-1.5">
+          <Label>Taille maximale par fichier (Mo)</Label>
+          <input
+            type="number"
+            min={1}
+            max={200}
+            value={maxMb ?? ""}
+            disabled={maxMb == null}
+            onChange={(e) => {
+              setSaved(false);
+              setMaxMb(Math.max(1, Math.min(200, Math.round(Number(e.target.value)) || 1)));
+            }}
+            className={`${fieldClass} max-w-[160px]`}
+          />
+          <p className="text-xs text-[var(--text-muted)]">
+            Au-delà, l&apos;upload est refusé. Les fichiers orphelins sont purgés après 30 jours.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={save}
+          disabled={saving || maxMb == null}
+          className="mt-2 self-start bg-blue-500 hover:bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50"
+        >
+          {saving ? "Enregistrement…" : saved ? "Enregistré ✓" : "Enregistrer"}
+        </button>
       </div>
-
-      {/* Config locale */}
-      {storageType === "local" && (
-        <div className="flex flex-col gap-3">
-          <div className="flex flex-col gap-1.5">
-            <Label>Chemin de stockage</Label>
-            <input type="text" defaultValue="./storage/uploads" className={fieldClass} />
-          </div>
-          <SaveButton />
-        </div>
-      )}
-
-      {/* Config cloud */}
-      {storageType === "cloud" && (
-        <div className="flex flex-col gap-4">
-          {/* Provider */}
-          <div className="flex flex-col gap-1.5">
-            <Label>Fournisseur</Label>
-            <div className="relative">
-              <select
-                value={provider}
-                onChange={(e) => setProvider(e.target.value)}
-                className={`${fieldClass} appearance-none pr-8`}
-              >
-                {providers.map((p) => (
-                  <option key={p.id} value={p.id}>{p.label}</option>
-                ))}
-              </select>
-              <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" />
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Label>Nom du bucket</Label>
-            <input type="text" placeholder="mon-bucket" className={fieldClass} />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label>Région</Label>
-            <input type="text" placeholder="eu-west-3" className={fieldClass} />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label>Access Key ID</Label>
-            <input type="text" className={fieldClass} />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label>Secret Access Key</Label>
-            <div className="relative">
-              <input
-                type={showSecret ? "text" : "password"}
-                className={`${fieldClass} pr-10`}
-              />
-              <button
-                type="button"
-                onClick={() => setShowSecret((v) => !v)}
-                tabIndex={-1}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text)]"
-              >
-                {showSecret ? <EyeOff size={15} /> : <Eye size={15} />}
-              </button>
-            </div>
-          </div>
-          <SaveButton />
-        </div>
-      )}
     </div>
   );
 }

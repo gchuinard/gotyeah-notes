@@ -244,3 +244,11 @@ model View {
   // Composite : les vues sont lues filtrées par databaseId ET triées par position.
   @@index([databaseId, position])
 }
+
+// Réglages globaux de l'instance (self-host mono-instance). Ligne UNIQUE (id "app").
+model AppConfig {
+  id          String   @id @default("app")
+  // Taille max d'un fichier uploadé, en Mo. Modifiable dans Paramètres.
+  uploadMaxMb Int      @default(10)
+  updatedAt   DateTime @updatedAt
+}

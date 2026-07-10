@@ -14,6 +14,7 @@ import Cell from "@/components/databases/Cell";
 import { useThemeMode } from "@/lib/client/useThemeMode";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { createDebouncedSaver, type DebouncedSaver } from "@/lib/client/debouncedSaver";
+import { uploadFile } from "@/lib/client/upload";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -62,7 +63,7 @@ function SectionEditor({
   const initial =
     Array.isArray(section.content) && section.content.length > 0 ? section.content : undefined;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const editor = useCreateBlockNote({ initialContent: initial as any, dictionary: fr });
+  const editor = useCreateBlockNote({ initialContent: initial as any, dictionary: fr, uploadFile });
   return (
     <div className="mb-3">
       <h3 className="px-3 text-sm font-semibold text-[var(--text)] select-none">
@@ -278,7 +279,7 @@ export default function RecordPanel({ record, properties, databaseId, onClose }:
     if (Array.isArray(arr) && arr.length > 0) parsedContent = arr;
   } catch {}
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const editor = useCreateBlockNote({ initialContent: parsedContent as any, dictionary: fr });
+  const editor = useCreateBlockNote({ initialContent: parsedContent as any, dictionary: fr, uploadFile });
 
   const isSectioned = sections.length > 0;
 
