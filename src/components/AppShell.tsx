@@ -2,6 +2,7 @@
 import { useWorkspace } from "@/contexts/WorkspaceContext";
 import Sidebar from "@/components/Sidebar";
 import Header from "@/components/Header";
+import Breadcrumb from "@/components/Breadcrumb";
 import SearchPalette from "@/components/SearchPalette";
 import EmptyWorkspaceScreen from "@/components/EmptyWorkspaceScreen";
 import type { SessionUser } from "@/lib/session";
@@ -32,6 +33,8 @@ export default function AppShell({ children, user }: Props) {
       <Sidebar user={user} />
       <main className="flex-1 overflow-y-auto">
         <Header user={user} />
+        {/* Fil d'ariane (variante A — au-dessus du contenu) */}
+        <Breadcrumb variant="content" />
         {children}
       </main>
       <SearchPalette />
