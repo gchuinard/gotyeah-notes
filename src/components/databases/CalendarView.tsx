@@ -6,6 +6,7 @@ import type { ParsedDatabaseProperty, ParsedRecord, ParsedView, SelectOption } f
 import { applyViewConfig } from "@/lib/client/viewFilters";
 import { COLOR_MAP } from "@/components/databases/Cell";
 import RecordPanel from "@/components/databases/RecordPanel";
+import { useRecordDeepLink } from "@/lib/client/useRecordDeepLink";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -224,7 +225,7 @@ export default function CalendarView({ databaseId, view, properties }: Props) {
   const today = useMemo(() => new Date(), []);
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
-  const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
+  const [selectedRecordId, setSelectedRecordId] = useRecordDeepLink(records);
 
   const pendingIds = useRef<Set<string>>(new Set());
 
