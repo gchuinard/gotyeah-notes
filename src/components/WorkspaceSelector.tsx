@@ -3,14 +3,14 @@ import { useEffect, useRef, useState } from "react";
 import { mutate } from "swr";
 import { Check, ChevronDown, Plus, Trash2 } from "lucide-react";
 import { useWorkspace, Workspace } from "@/contexts/WorkspaceContext";
-import ConfirmModal from "@/components/ConfirmModal";
+import { useDialog } from "@/contexts/DialogContext";
 
 export default function WorkspaceSelector() {
   const { workspaces, activeWorkspace, switchWorkspace } = useWorkspace();
+  const { confirm } = useDialog();
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
-  const [toDelete, setToDelete] = useState<Workspace | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -46,27 +46,24 @@ export default function WorkspaceSelector() {
     setOpen(false);
   };
 
-  const deleteWorkspace = async () => {
-    if (!toDelete) return;
-    await fetch(`/api/workspaces/${toDelete.id}`, { method: "DELETE" });
-    if (activeWorkspace?.id === toDelete.id) {
-      const remaining = workspaces.filter((w) => w.id !== toDelete.id);
+  const deleteWorkspace = async (workspace: Workspace) => {
+    const ok = await confirm({
+      title: `Supprimer « ${workspace.name} » ?`,
+      message: "Cet espace et toutes ses pages seront supprimés. Cette action est irréversible.",
+      confirmLabel: "Supprimer",
+      tone: "danger",
+    });
+    if (!ok) return;
+    await fetch(`/api/workspaces/${workspace.id}`, { method: "DELETE" });
+    if (activeWorkspace?.id === workspace.id) {
+      const remaining = workspaces.filter((w) => w.id !== workspace.id);
       if (remaining.length > 0) switchWorkspace(remaining[0].id);
     }
-    setToDelete(null);
     await mutate("/api/workspaces");
   };
 
   return (
     <div ref={containerRef} className="relative px-2 py-2">
-      {toDelete && (
-        <ConfirmModal
-          message={`Supprimer "${toDelete.name}" et toutes ses pages ? Cette action est irréversible.`}
-          onConfirm={deleteWorkspace}
-          onCancel={() => setToDelete(null)}
-        />
-      )}
-
       <button
         onClick={() => setOpen((o) => !o)}
         className="w-full flex items-center justify-between gap-1 px-2 py-1.5 rounded hover:bg-[var(--surface-hover)] font-semibold text-[var(--text)] text-base"
@@ -94,7 +91,7 @@ export default function WorkspaceSelector() {
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  setToDelete(ws);
+                  deleteWorkspace(ws);
                 }}
                 className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[var(--surface-hover)] rounded"
                 title="Supprimer l'espace"

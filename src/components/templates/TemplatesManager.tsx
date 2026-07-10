@@ -3,6 +3,7 @@ import { useState } from "react";
 import useSWR from "swr";
 import { Plus, Trash2, ArrowLeft, X } from "lucide-react";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
+import { useDialog } from "@/contexts/DialogContext";
 import { SELECT_COLORS } from "@/lib/propertyColors";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -58,6 +59,7 @@ function configToCsv(config: Record<string, unknown>): string {
 
 export default function TemplatesManager() {
   const { activeWorkspace } = useWorkspace();
+  const { confirm } = useDialog();
   const wsId = activeWorkspace?.id ?? null;
   const key = wsId ? `/api/templates?workspaceId=${wsId}` : null;
   const { data: templates = [], mutate } = useSWR<Template[]>(key, fetcher);
@@ -112,7 +114,13 @@ export default function TemplatesManager() {
   };
 
   const remove = async (id: string) => {
-    if (!confirm("Supprimer ce modèle ?")) return;
+    const ok = await confirm({
+      title: "Supprimer ce modèle ?",
+      message: "Cette action est irréversible.",
+      confirmLabel: "Supprimer",
+      tone: "danger",
+    });
+    if (!ok) return;
     const res = await fetch(`/api/templates/${id}`, { method: "DELETE" });
     if (res.ok) mutate();
   };

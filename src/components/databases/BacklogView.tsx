@@ -32,6 +32,7 @@ import type {
 } from "@/lib/db";
 import { SelectBadge, CellDisplay } from "@/components/databases/Cell";
 import { applyViewConfig } from "@/lib/client/viewFilters";
+import { useDialog } from "@/contexts/DialogContext";
 import Portal from "@/components/databases/portal";
 import RecordPanel from "@/components/databases/RecordPanel";
 import { useRecordDeepLink } from "@/lib/client/useRecordDeepLink";
@@ -659,6 +660,7 @@ function SprintEditModal({
 // ─── BacklogView (main) ───────────────────────────────────────────────────────
 
 export default function BacklogView({ databaseId, view, properties }: Props) {
+  const { confirm, alert } = useDialog();
   const {
     data: records,
     error,
@@ -812,7 +814,12 @@ export default function BacklogView({ databaseId, view, properties }: Props) {
   const handleDeleteRecord = useCallback(
     async (record: ParsedRecord) => {
       if (!records) return;
-      if (!window.confirm("Supprimer cette issue ?")) return;
+      const ok = await confirm({
+        title: "Supprimer cette issue ?",
+        confirmLabel: "Supprimer",
+        tone: "danger",
+      });
+      if (!ok) return;
       if (selectedRecordId === record.id) setSelectedRecordId(null);
       const snapshot = records;
       mutate(records.filter((r) => r.id !== record.id), { revalidate: false });
@@ -824,7 +831,7 @@ export default function BacklogView({ databaseId, view, properties }: Props) {
         mutate(snapshot, { revalidate: false });
       }
     },
-    [records, mutate, selectedRecordId]
+    [records, mutate, selectedRecordId, confirm]
   );
 
   const handleDuplicateRecord = useCallback(
@@ -1014,10 +1021,14 @@ export default function BacklogView({ databaseId, view, properties }: Props) {
         mutateSprints();
       } catch (e) {
         mutateSprints(snapshot, { revalidate: false });
-        alert(e instanceof Error ? e.message : "Échec.");
+        await alert({
+          title: "Échec",
+          message: e instanceof Error ? e.message : "Échec.",
+          tone: "danger",
+        });
       }
     },
-    [sprints, mutateSprints]
+    [sprints, mutateSprints, alert]
   );
 
   const renameSprint = useCallback((id: string, name: string) => patchSprint(id, { name }), [patchSprint]);
@@ -1026,7 +1037,13 @@ export default function BacklogView({ databaseId, view, properties }: Props) {
   // au backlog (statut != doneStatusOptionId). Atomique côté serveur.
   const completeSprint = useCallback(
     async (id: string) => {
-      if (!window.confirm("Terminer le sprint ? Les issues non terminées retournent au backlog.")) return;
+      // Non destructif : les issues non terminées retournent au backlog.
+      const ok = await confirm({
+        title: "Terminer le sprint ?",
+        message: "Les issues non terminées retournent au backlog.",
+        confirmLabel: "Terminer",
+      });
+      if (!ok) return;
       const snapSprints = sprints;
       const snapRecords = records;
       const statusId = cfg.statusPropertyId;
@@ -1065,10 +1082,14 @@ export default function BacklogView({ databaseId, view, properties }: Props) {
       } catch (e) {
         mutateSprints(snapSprints, { revalidate: false });
         mutate(snapRecords, { revalidate: false });
-        alert(e instanceof Error ? e.message : "Échec de la clôture.");
+        await alert({
+          title: "Clôture impossible",
+          message: e instanceof Error ? e.message : "Échec de la clôture.",
+          tone: "danger",
+        });
       }
     },
-    [sprints, records, cfg.statusPropertyId, cfg.doneStatusOptionId, mutateSprints, mutate]
+    [sprints, records, cfg.statusPropertyId, cfg.doneStatusOptionId, mutateSprints, mutate, confirm, alert]
   );
 
   const sprintAction = useCallback(
@@ -1081,7 +1102,13 @@ export default function BacklogView({ databaseId, view, properties }: Props) {
 
   const deleteSprint = useCallback(
     async (id: string) => {
-      if (!window.confirm("Supprimer ce sprint ? Ses issues retournent au backlog.")) return;
+      const ok = await confirm({
+        title: "Supprimer ce sprint ?",
+        message: "Ses issues retournent au backlog.",
+        confirmLabel: "Supprimer",
+        tone: "danger",
+      });
+      if (!ok) return;
       const snapSprints = sprints;
       const snapRecords = records;
       if (sprints) mutateSprints(sprints.filter((s) => s.id !== id), { revalidate: false });
@@ -1096,7 +1123,7 @@ export default function BacklogView({ databaseId, view, properties }: Props) {
         mutate(snapRecords, { revalidate: false });
       }
     },
-    [sprints, records, mutateSprints, mutate]
+    [sprints, records, mutateSprints, mutate, confirm]
   );
 
   // ── Render ──────────────────────────────────────────────────────────────────

@@ -10,6 +10,7 @@ import { Table2 } from "lucide-react";
 import EmojiPicker from "@/components/EmojiPicker";
 import { useThemeMode } from "@/lib/client/useThemeMode";
 import { createDebouncedSaver, type DebouncedSaver } from "@/lib/client/debouncedSaver";
+import { useDialog } from "@/contexts/DialogContext";
 
 type Props = {
   pageId: string;
@@ -28,6 +29,7 @@ export default function Editor({
 }: Props) {
   const router = useRouter();
   const themeMode = useThemeMode();
+  const { confirm, alert } = useDialog();
   const [title, setTitle] = useState(initialTitle);
   const [icon, setIcon] = useState<string | null>(initialIcon ?? null);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -61,7 +63,14 @@ export default function Editor({
   }
 
   const handleConvertToDatabase = async () => {
-    if (!window.confirm("Convertir cette page en database ?\nL'éditeur sera remplacé par une vue tableau.")) return;
+    // Action non destructive : bouton neutre « Convertir », pas un rouge « Supprimer ».
+    const ok = await confirm({
+      title: "Convertir cette page en database ?",
+      message: "L'éditeur sera remplacé par une vue tableau.",
+      confirmLabel: "Convertir",
+    });
+    if (!ok) return;
+
     setConverting(true);
     try {
       const res = await fetch("/api/databases", {
@@ -71,12 +80,20 @@ export default function Editor({
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        alert((body as { error?: string }).error ?? `Erreur ${res.status}`);
+        await alert({
+          title: "Conversion impossible",
+          message: (body as { error?: string }).error ?? `Erreur ${res.status}`,
+          tone: "danger",
+        });
         return;
       }
       router.refresh();
     } catch {
-      alert("Impossible de convertir la page.");
+      await alert({
+        title: "Conversion impossible",
+        message: "Impossible de convertir la page.",
+        tone: "danger",
+      });
     } finally {
       setConverting(false);
     }

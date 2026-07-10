@@ -29,6 +29,7 @@ import type {
 import { SelectBadge, CellDisplay } from "@/components/databases/Cell";
 import { applyViewConfig } from "@/lib/client/viewFilters";
 import { groupValueOnDrop, initialGroupValue, cardDndId, parseDndId } from "@/lib/client/kanban";
+import { useDialog } from "@/contexts/DialogContext";
 import Portal from "@/components/databases/portal";
 import RecordPanel from "@/components/databases/RecordPanel";
 import { useRecordDeepLink } from "@/lib/client/useRecordDeepLink";
@@ -563,6 +564,7 @@ function SprintBoardHeader({
 // ─── KanbanView (main) ────────────────────────────────────────────────────────
 
 export default function KanbanView({ databaseId, view, properties }: Props) {
+  const { confirm, alert } = useDialog();
   const {
     data: records,
     error,
@@ -672,7 +674,12 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
   const handleDeleteRecord = useCallback(
     async (record: ParsedRecord) => {
       if (!records) return;
-      if (!window.confirm("Supprimer cet enregistrement ?")) return;
+      const ok = await confirm({
+        title: "Supprimer cet enregistrement ?",
+        confirmLabel: "Supprimer",
+        tone: "danger",
+      });
+      if (!ok) return;
       if (selectedRecordId === record.id) setSelectedRecordId(null);
       const snapshot = records;
       mutate(records.filter((r) => r.id !== record.id), { revalidate: false });
@@ -684,7 +691,7 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
         mutate(snapshot, { revalidate: false });
       }
     },
-    [records, mutate, selectedRecordId]
+    [records, mutate, selectedRecordId, confirm]
   );
 
   // ── Duplicate record ────────────────────────────────────────────────────────
@@ -941,15 +948,25 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
     });
     if (!res.ok) {
       const b = await res.json().catch(() => ({}));
-      alert((b as { error?: string }).error ?? "Échec du démarrage.");
+      await alert({
+        title: "Démarrage impossible",
+        message: (b as { error?: string }).error ?? "Échec du démarrage.",
+        tone: "danger",
+      });
       return;
     }
     mutateSprints();
-  }, [targetSprint, mutateSprints]);
+  }, [targetSprint, mutateSprints, alert]);
 
   const handleCompleteSprint = useCallback(async () => {
     if (!targetSprint) return;
-    if (!window.confirm("Terminer le sprint ? Les issues non terminées retournent au backlog.")) return;
+    // Non destructif : les issues non terminées retournent au backlog, rien n'est perdu.
+    const ok = await confirm({
+      title: "Terminer le sprint ?",
+      message: "Les issues non terminées retournent au backlog.",
+      confirmLabel: "Terminer",
+    });
+    if (!ok) return;
     const res = await fetch(`/api/sprints/${targetSprint.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -962,12 +979,16 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
     });
     if (!res.ok) {
       const b = await res.json().catch(() => ({}));
-      alert((b as { error?: string }).error ?? "Échec de la clôture.");
+      await alert({
+        title: "Clôture impossible",
+        message: (b as { error?: string }).error ?? "Échec de la clôture.",
+        tone: "danger",
+      });
       return;
     }
     mutateSprints();
     mutate(); // des records ont changé de sprint (incomplètes → backlog)
-  }, [targetSprint, groupByPropId, view.config.doneStatusOptionId, mutateSprints, mutate]);
+  }, [targetSprint, groupByPropId, view.config.doneStatusOptionId, mutateSprints, mutate, confirm, alert]);
 
   // ─── Render ─────────────────────────────────────────────────────────────────
 

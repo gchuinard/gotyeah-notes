@@ -22,7 +22,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { buildTree, FlatPage, TreeNode } from "@/lib/tree";
-import ConfirmModal from "@/components/ConfirmModal";
+import { useDialog } from "@/contexts/DialogContext";
 import WorkspaceSelector from "@/components/WorkspaceSelector";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
 import type { SessionUser } from "@/lib/session";
@@ -385,9 +385,9 @@ function TreeItem({
   const [open, setOpen] = useState(true);
   const [editing, setEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState(node.title);
-  const [confirmOpen, setConfirmOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
+  const { confirm } = useDialog();
   const hasChildren = node.children.length > 0;
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
@@ -419,14 +419,16 @@ function TreeItem({
     if (pagesKey) mutate(pagesKey);
   };
 
-  const onDelete = (e: React.MouseEvent) => {
+  const onDelete = async (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setConfirmOpen(true);
-  };
-
-  const confirmDelete = async () => {
-    setConfirmOpen(false);
+    const ok = await confirm({
+      title: `Supprimer « ${node.title || "Sans titre"} » ?`,
+      message: "Cette page et toutes ses sous-pages seront supprimées.",
+      confirmLabel: "Supprimer",
+      tone: "danger",
+    });
+    if (!ok) return;
     await fetch(`/api/pages/${node.id}`, { method: "DELETE" });
     if (pagesKey) mutate(pagesKey);
     if (currentId === node.id) router.push("/");
@@ -436,13 +438,6 @@ function TreeItem({
 
   return (
     <div ref={setNodeRef} style={style}>
-      {confirmOpen && (
-        <ConfirmModal
-          message={`Supprimer "${node.title || "Sans titre"}" et toutes ses sous-pages ?`}
-          onConfirm={confirmDelete}
-          onCancel={() => setConfirmOpen(false)}
-        />
-      )}
       <div
         {...attributes}
         {...listeners}
