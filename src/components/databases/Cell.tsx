@@ -7,6 +7,7 @@ import type {
   PropertyValue,
   SelectOption,
 } from "@/lib/db";
+import type { SelectColor } from "@/lib/propertyColors";
 import Portal from "@/components/databases/portal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -22,7 +23,9 @@ type CellProps = {
 
 // ─── Badge ────────────────────────────────────────────────────────────────────
 
-export const COLOR_MAP: Record<string, string> = {
+// Typé sur la palette partagée (lib/propertyColors, source de vérité aussi côté
+// serveur) : ajouter une couleur sans son style ici devient une erreur de compil.
+export const COLOR_MAP: Record<SelectColor, string> = {
   red:    "bg-red-100    text-red-700",
   orange: "bg-orange-100 text-orange-700",
   yellow: "bg-yellow-100 text-yellow-700",
@@ -33,8 +36,13 @@ export const COLOR_MAP: Record<string, string> = {
   gray:   "bg-[var(--surface)] text-[var(--text-muted)]",
 };
 
+/** Classes du badge pour une couleur d'option (repli gris si hors palette). */
+export function colorClass(color: string): string {
+  return COLOR_MAP[color as SelectColor] ?? COLOR_MAP.gray;
+}
+
 export function SelectBadge({ option }: { option: SelectOption }) {
-  const cls = COLOR_MAP[option.color] ?? COLOR_MAP.gray;
+  const cls = colorClass(option.color);
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${cls}`}>
       {option.name}

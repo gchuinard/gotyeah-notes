@@ -10,6 +10,7 @@ import {
   type PropertyType,
   type PropertyConfig,
 } from "@/lib/db";
+import { validatePropertyConfig } from "@/lib/propertyConfig";
 
 const PROPERTY_TYPES = [
   "text",
@@ -78,6 +79,16 @@ export async function POST(
   if (config.type !== type) {
     return NextResponse.json(
       { error: "config.type must match type" },
+      { status: 400 }
+    );
+  }
+
+  // select/multiselect : options validées strictement (id/name non vides, couleur
+  // dans la palette) — les ids fournis sont préservés tels quels.
+  const validation = validatePropertyConfig(config);
+  if (!validation.ok) {
+    return NextResponse.json(
+      { error: "Validation failed", details: validation.details },
       { status: 400 }
     );
   }
