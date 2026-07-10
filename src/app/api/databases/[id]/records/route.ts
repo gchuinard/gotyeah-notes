@@ -176,21 +176,23 @@ export async function POST(
     initialContent = dbRow.recordTemplate;
   }
 
-  const position = await nextPosition("record", { databaseId });
-
-  const record = await prisma.record.create({
-    data: {
-      databaseId,
-      createdBy: user.id,
-      position,
-      ...(title !== undefined && { title }),
-      ...(icon !== undefined && { icon }),
-      ...(initialContent !== undefined && { content: initialContent }),
-      ...(sectionsBody !== undefined && { sectionsBody }),
-      ...(recordTemplateId !== undefined && { templateId: recordTemplateId }),
-      ...(sprintId != null && { sprintId }),
-      ...serializeRecord({ properties }),
-    },
+  // MAX(position) + create atomiques : évite deux positions identiques sous concurrence.
+  const record = await prisma.$transaction(async (tx) => {
+    const position = await nextPosition("record", { databaseId }, tx);
+    return tx.record.create({
+      data: {
+        databaseId,
+        createdBy: user.id,
+        position,
+        ...(title !== undefined && { title }),
+        ...(icon !== undefined && { icon }),
+        ...(initialContent !== undefined && { content: initialContent }),
+        ...(sectionsBody !== undefined && { sectionsBody }),
+        ...(recordTemplateId !== undefined && { templateId: recordTemplateId }),
+        ...(sprintId != null && { sprintId }),
+        ...serializeRecord({ properties }),
+      },
+    });
   });
 
   return NextResponse.json(parseRecord(record), { status: 201 });

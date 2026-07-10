@@ -51,20 +51,6 @@ export async function PATCH(
     moveIncompleteToBacklog, statusPropertyId, doneStatusOptionId,
   } = result.data;
 
-  // Single active : un seul sprint actif par database.
-  if (state === "active") {
-    const other = await prisma.sprint.findFirst({
-      where: { databaseId: access.databaseId, state: "active", id: { not: id } },
-      select: { id: true },
-    });
-    if (other) {
-      return NextResponse.json(
-        { error: "Un sprint est déjà actif. Termine-le d'abord." },
-        { status: 409 }
-      );
-    }
-  }
-
   const data = {
     ...(name !== undefined && { name }),
     ...(goal !== undefined && { goal }),
@@ -74,30 +60,57 @@ export async function PATCH(
     ...(endDate !== undefined && { endDate: endDate ? new Date(endDate) : null }),
   };
 
-  // Clôture avec renvoi des incomplètes au backlog (atomique).
-  if (state === "completed" && moveIncompleteToBacklog && statusPropertyId && doneStatusOptionId) {
+  // Le garde-fou « un seul sprint actif » ET l'update vivent dans la MÊME transaction :
+  // sinon deux PATCH state=active concurrents (UI + MCP) passent tous les deux le
+  // findFirst avant que l'un n'écrive → deux sprints actifs. La transaction sérialise
+  // le check+write. Le conflit remonte via une exception typée (→ 409 hors transaction).
+  try {
     const sprint = await prisma.$transaction(async (tx) => {
-      const updated = await tx.sprint.update({ where: { id }, data });
-      const recs = await tx.record.findMany({
-        where: { databaseId: access.databaseId, sprintId: id },
-      });
-      const incompleteIds = parseManyRecords(recs)
-        .filter((r) => r.properties[statusPropertyId] !== doneStatusOptionId)
-        .map((r) => r.id);
-      if (incompleteIds.length > 0) {
-        await tx.record.updateMany({
-          where: { id: { in: incompleteIds } },
-          data: { sprintId: null },
+      if (state === "active") {
+        const other = await tx.sprint.findFirst({
+          where: { databaseId: access.databaseId, state: "active", id: { not: id } },
+          select: { id: true },
         });
+        if (other) throw new SprintAlreadyActiveError();
       }
+
+      const updated = await tx.sprint.update({ where: { id }, data });
+
+      // Clôture avec renvoi des incomplètes au backlog, dans la même transaction.
+      if (
+        state === "completed" && moveIncompleteToBacklog &&
+        statusPropertyId && doneStatusOptionId
+      ) {
+        const recs = await tx.record.findMany({
+          where: { databaseId: access.databaseId, sprintId: id },
+        });
+        const incompleteIds = parseManyRecords(recs)
+          .filter((r) => r.properties[statusPropertyId] !== doneStatusOptionId)
+          .map((r) => r.id);
+        if (incompleteIds.length > 0) {
+          await tx.record.updateMany({
+            where: { id: { in: incompleteIds } },
+            data: { sprintId: null },
+          });
+        }
+      }
+
       return updated;
     });
     return NextResponse.json(sprint);
+  } catch (err) {
+    if (err instanceof SprintAlreadyActiveError) {
+      return NextResponse.json(
+        { error: "Un sprint est déjà actif. Termine-le d'abord." },
+        { status: 409 }
+      );
+    }
+    throw err;
   }
-
-  const sprint = await prisma.sprint.update({ where: { id }, data });
-  return NextResponse.json(sprint);
 }
+
+/** Levée dans la transaction quand un autre sprint est déjà actif → 409. */
+class SprintAlreadyActiveError extends Error {}
 
 export async function DELETE(
   _: Request,

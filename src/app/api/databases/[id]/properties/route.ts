@@ -113,16 +113,18 @@ export async function POST(
     }
   }
 
-  const position = await nextPosition("databaseProperty", { databaseId });
-
-  const property = await prisma.databaseProperty.create({
-    data: {
-      databaseId,
-      name,
-      type,
-      position,
-      ...serializeDatabaseProperty({ config }),
-    },
+  // MAX(position) + create atomiques : évite deux positions identiques sous concurrence.
+  const property = await prisma.$transaction(async (tx) => {
+    const position = await nextPosition("databaseProperty", { databaseId }, tx);
+    return tx.databaseProperty.create({
+      data: {
+        databaseId,
+        name,
+        type,
+        position,
+        ...serializeDatabaseProperty({ config }),
+      },
+    });
   });
 
   return NextResponse.json(parseDatabaseProperty(property), { status: 201 });

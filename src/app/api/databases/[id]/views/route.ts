@@ -36,16 +36,18 @@ export async function POST(
 
   const { name, type, config = {} } = result.data;
 
-  const position = await nextPosition("view", { databaseId });
-
-  const view = await prisma.view.create({
-    data: {
-      databaseId,
-      type,
-      position,
-      ...(name !== undefined && { name }),
-      ...serializeView({ config: config as ViewConfig }),
-    },
+  // MAX(position) + create atomiques : évite deux positions identiques sous concurrence.
+  const view = await prisma.$transaction(async (tx) => {
+    const position = await nextPosition("view", { databaseId }, tx);
+    return tx.view.create({
+      data: {
+        databaseId,
+        type,
+        position,
+        ...(name !== undefined && { name }),
+        ...serializeView({ config: config as ViewConfig }),
+      },
+    });
   });
 
   return NextResponse.json(parseView(view), { status: 201 });
