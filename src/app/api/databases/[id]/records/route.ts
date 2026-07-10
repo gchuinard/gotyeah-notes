@@ -12,6 +12,7 @@ import {
   type RecordProperties,
 } from "@/lib/db";
 import { emptySectionsBody } from "@/lib/templates";
+import { validateRelationValues } from "@/lib/relations";
 
 export async function GET(
   _: Request,
@@ -66,6 +67,12 @@ export async function POST(
 
   const { title, icon, content, properties: rawProperties = {}, sprintId } = result.data;
   const properties = rawProperties as RecordProperties;
+
+  // Garde-fou : les ids d'une propriété relation doivent appartenir à sa database cible.
+  const relationCheck = await validateRelationValues(databaseId, properties);
+  if (!relationCheck.ok) {
+    return NextResponse.json({ error: relationCheck.error }, { status: 400 });
+  }
 
   // Garde-fou : un sprint fourni doit appartenir à cette database.
   if (sprintId) {
