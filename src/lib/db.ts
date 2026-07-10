@@ -177,6 +177,19 @@ export const parseManyDatabaseProperties = (raws: DatabaseProperty[]): ParsedDat
 export const parseManyRecords = (raws: PrismaRecord[]): ParsedRecord[] =>
   raws.map(parseRecord);
 
+/**
+ * Projection : record sans les corps lourds (content BlockNote + sectionsBody).
+ * Utilisée par GET /records?includeContent=false (payloads MCP allégés).
+ */
+export function stripRecordBody(
+  record: ParsedRecord
+): Omit<ParsedRecord, "content" | "sectionsBody"> {
+  const clone: Record<string, unknown> = { ...record };
+  delete clone.content;
+  delete clone.sectionsBody;
+  return clone as Omit<ParsedRecord, "content" | "sectionsBody">;
+}
+
 export const parseManyViews = (raws: View[]): ParsedView[] =>
   raws.map(parseView);
 

@@ -8,13 +8,32 @@ import {
   serializeRecord,
   parseRecord,
   parseManyRecords,
+  parseManyDatabaseProperties,
+  stripRecordBody,
   serializeSectionsBody,
   type RecordProperties,
+  type ViewFilter,
 } from "@/lib/db";
+import { applyFilters } from "@/lib/client/viewFilters";
 import { emptySectionsBody } from "@/lib/templates";
 
+// Params de requête OPTIONNELS (consommateurs sans applyViewConfig, ex. MCP).
+// Aucun param → réponse historique intégrale (le front n'est pas impacté).
+const listQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  offset: z.coerce.number().int().min(0).optional(),
+  includeContent: z.enum(["true", "false"]).optional(),
+  filter: z.string().optional(),
+});
+
+const filterItemSchema = z.object({
+  propertyId: z.string(),
+  operator: z.string(),
+  value: z.unknown().optional(),
+});
+
 export async function GET(
-  _: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const user = await getSession();
@@ -24,12 +43,65 @@ export async function GET(
   const access = await checkDatabaseAccess(databaseId, user.id);
   if (!access) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const records = await prisma.record.findMany({
+  const { searchParams } = new URL(req.url);
+  const parsed = listQuerySchema.safeParse({
+    limit: searchParams.get("limit") ?? undefined,
+    offset: searchParams.get("offset") ?? undefined,
+    includeContent: searchParams.get("includeContent") ?? undefined,
+    filter: searchParams.get("filter") ?? undefined,
+  });
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Validation failed", details: parsed.error.flatten() },
+      { status: 400 }
+    );
+  }
+  const { limit, offset, includeContent: incRaw, filter: filterRaw } = parsed.data;
+  const includeContent = incRaw !== "false";
+
+  let filters: ViewFilter[] = [];
+  if (filterRaw) {
+    let json: unknown;
+    try {
+      json = JSON.parse(filterRaw);
+    } catch {
+      return NextResponse.json(
+        { error: "Validation failed", details: "filter: JSON invalide" },
+        { status: 400 }
+      );
+    }
+    const fp = z.array(filterItemSchema).safeParse(json);
+    if (!fp.success) {
+      return NextResponse.json(
+        { error: "Validation failed", details: fp.error.flatten() },
+        { status: 400 }
+      );
+    }
+    filters = fp.data as ViewFilter[];
+  }
+
+  const rows = await prisma.record.findMany({
     where: { databaseId },
     orderBy: { position: "asc" },
   });
+  let records = parseManyRecords(rows);
 
-  return NextResponse.json(parseManyRecords(records));
+  // Filtre optionnel : réutilise applyFilters (mêmes opérateurs que le front).
+  if (filters.length > 0) {
+    const props = await prisma.databaseProperty.findMany({
+      where: { databaseId },
+      orderBy: { position: "asc" },
+    });
+    records = applyFilters(records, filters, parseManyDatabaseProperties(props));
+  }
+
+  // Total AVANT pagination (le corps reste un tableau nu : contrat SWR inchangé).
+  const total = records.length;
+  if (offset !== undefined) records = records.slice(offset);
+  if (limit !== undefined) records = records.slice(0, limit);
+
+  const body = includeContent ? records : records.map(stripRecordBody);
+  return NextResponse.json(body, { headers: { "X-Total-Count": String(total) } });
 }
 
 const createRecordSchema = z.object({
