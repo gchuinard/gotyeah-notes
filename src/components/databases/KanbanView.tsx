@@ -708,11 +708,14 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
   const handleRenameOption = useCallback(
     async (optionId: string, newName: string) => {
       if (!groupByProp) return;
+      // Un nom vide est refusé par la validation serveur (400) : ne rien envoyer.
+      const trimmed = newName.trim();
+      if (!trimmed) return;
       const config = groupByProp.config as { type: string; options?: SelectOption[] };
       const options = config.options ?? [];
       const updatedConfig = {
         ...config,
-        options: options.map((o) => o.id === optionId ? { ...o, name: newName } : o),
+        options: options.map((o) => o.id === optionId ? { ...o, name: trimmed } : o),
       };
       try {
         const res = await fetch(`/api/properties/${groupByProp.id}`, {
