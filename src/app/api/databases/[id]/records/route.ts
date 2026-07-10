@@ -82,7 +82,7 @@ export async function GET(
   }
 
   const rows = await prisma.record.findMany({
-    where: { databaseId },
+    where: { databaseId, trashedAt: null }, // exclut la corbeille
     orderBy: { position: "asc" },
   });
   let records = parseManyRecords(rows);

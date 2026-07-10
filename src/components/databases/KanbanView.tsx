@@ -770,6 +770,7 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
         content: "[]",
         templateId: null,
         sectionsBody: null,
+        trashedAt: null,
         sprintId: targetSprint?.id ?? null,
         createdBy: null,
         createdAt: now,

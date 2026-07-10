@@ -4,8 +4,9 @@ import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 import { getMembership } from "@/lib/workspace";
 import { setPageSection, type SetPageSectionInput } from "@/lib/pages";
+import { trashPageSubtree } from "@/lib/trash";
 
-async function getPageWithMembership(pageId: string, userId: string) {
+async function getPageWithMembership(pageId: string, userId: string, includeTrashed = false) {
   const page = await prisma.page.findUnique({
     where: { id: pageId },
     select: {
@@ -13,9 +14,13 @@ async function getPageWithMembership(pageId: string, userId: string) {
       workspaceId: true,
       visibility: true,
       ownerId: true,
+      trashedAt: true,
     },
   });
   if (!page) return null;
+
+  // Page en corbeille → inaccessible en accès normal (restore/purge passent includeTrashed).
+  if (!includeTrashed && page.trashedAt) return null;
 
   const membership = await getMembership(userId, page.workspaceId);
   if (!membership) return null;
@@ -109,16 +114,26 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
 
   const { id } = await params;
-  const page = await getPageWithMembership(id, user.id);
+  // ?permanent=1 : suppression DÉFINITIVE (depuis la corbeille) — accède aux pages trashées.
+  const permanent = new URL(req.url).searchParams.get("permanent") === "1";
+
+  const page = await getPageWithMembership(id, user.id, permanent);
   if (!page) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  await prisma.page.delete({ where: { id } });
+  if (permanent) {
+    // Hard delete : cascade FK sur le sous-arbre + database + records.
+    await prisma.page.delete({ where: { id } });
+    return NextResponse.json({ ok: true });
+  }
+
+  // Soft delete : estampe trashedAt sur toute la page + son sous-arbre (corbeille).
+  await trashPageSubtree(id);
   return NextResponse.json({ ok: true });
 }

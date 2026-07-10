@@ -25,9 +25,10 @@ export default async function PageView({
       workspaceId: true,
       visibility: true,
       ownerId: true,
+      trashedAt: true,
     },
   });
-  if (!page) notFound();
+  if (!page || page.trashedAt) notFound(); // page en corbeille → 404
 
   const membership = await getMembership(user.id, page.workspaceId);
   if (!membership) notFound();

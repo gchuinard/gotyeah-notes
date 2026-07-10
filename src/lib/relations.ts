@@ -45,7 +45,7 @@ export async function validateRelationValues(
     }
 
     const found = await prisma.record.count({
-      where: { databaseId: targetDatabaseId, id: { in: ids } },
+      where: { databaseId: targetDatabaseId, id: { in: ids }, trashedAt: null },
     });
     if (found !== ids.length) {
       return {

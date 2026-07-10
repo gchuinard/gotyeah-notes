@@ -82,7 +82,7 @@ export async function PATCH(
         statusPropertyId && doneStatusOptionId
       ) {
         const recs = await tx.record.findMany({
-          where: { databaseId: access.databaseId, sprintId: id },
+          where: { databaseId: access.databaseId, sprintId: id, trashedAt: null },
         });
         const incompleteIds = parseManyRecords(recs)
           .filter((r) => r.properties[statusPropertyId] !== doneStatusOptionId)

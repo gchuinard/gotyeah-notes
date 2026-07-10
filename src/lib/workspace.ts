@@ -21,15 +21,21 @@ export function isPageAccessible(
  * Retourne null si la database n'existe pas, si l'user n'a pas accès, ou si la
  * page est privée et n'appartient pas à l'user.
  */
-export async function checkDatabaseAccess(databaseId: string, userId: string) {
+export async function checkDatabaseAccess(
+  databaseId: string,
+  userId: string,
+  includeTrashed = false
+) {
   const db = await prisma.database.findUnique({
     where: { id: databaseId },
     select: {
       id: true,
-      page: { select: { workspaceId: true, visibility: true, ownerId: true } },
+      page: { select: { workspaceId: true, visibility: true, ownerId: true, trashedAt: true } },
     },
   });
   if (!db) return null;
+  // Une database sur une page en corbeille est inaccessible (cascade logique).
+  if (!includeTrashed && db.page.trashedAt) return null;
   const membership = await getMembership(userId, db.page.workspaceId);
   if (!membership) return null;
   if (!isPageAccessible(db.page, userId)) return null;
@@ -49,11 +55,14 @@ export async function checkPropertyAccess(propertyId: string, userId: string) {
       databaseId: true,
       type: true,
       database: {
-        select: { page: { select: { workspaceId: true, visibility: true, ownerId: true } } },
+        select: {
+          page: { select: { workspaceId: true, visibility: true, ownerId: true, trashedAt: true } },
+        },
       },
     },
   });
   if (!row) return null;
+  if (row.database.page.trashedAt) return null;
   const membership = await getMembership(userId, row.database.page.workspaceId);
   if (!membership) return null;
   if (!isPageAccessible(row.database.page, userId)) return null;
@@ -70,16 +79,24 @@ export async function checkPropertyAccess(propertyId: string, userId: string) {
  * Vérifie que userId a accès au record via record → database → page → workspaceId.
  * Retourne le record inclus pour éviter un 2e findUnique dans les routes PATCH/DELETE.
  */
-export async function checkRecordAccess(recordId: string, userId: string) {
+export async function checkRecordAccess(
+  recordId: string,
+  userId: string,
+  includeTrashed = false
+) {
   const row = await prisma.record.findUnique({
     where: { id: recordId },
     include: {
       database: {
-        select: { page: { select: { workspaceId: true, visibility: true, ownerId: true } } },
+        select: {
+          page: { select: { workspaceId: true, visibility: true, ownerId: true, trashedAt: true } },
+        },
       },
     },
   });
   if (!row) return null;
+  // Record trashé OU sous une page trashée → inaccessible (sauf lifecycle corbeille).
+  if (!includeTrashed && (row.trashedAt || row.database.page.trashedAt)) return null;
   const membership = await getMembership(userId, row.database.page.workspaceId);
   if (!membership) return null;
   if (!isPageAccessible(row.database.page, userId)) return null;
@@ -102,11 +119,14 @@ export async function checkViewAccess(viewId: string, userId: string) {
     where: { id: viewId },
     include: {
       database: {
-        select: { page: { select: { workspaceId: true, visibility: true, ownerId: true } } },
+        select: {
+          page: { select: { workspaceId: true, visibility: true, ownerId: true, trashedAt: true } },
+        },
       },
     },
   });
   if (!row) return null;
+  if (row.database.page.trashedAt) return null;
   const membership = await getMembership(userId, row.database.page.workspaceId);
   if (!membership) return null;
   if (!isPageAccessible(row.database.page, userId)) return null;
@@ -128,11 +148,14 @@ export async function checkSprintAccess(sprintId: string, userId: string) {
     where: { id: sprintId },
     include: {
       database: {
-        select: { page: { select: { workspaceId: true, visibility: true, ownerId: true } } },
+        select: {
+          page: { select: { workspaceId: true, visibility: true, ownerId: true, trashedAt: true } },
+        },
       },
     },
   });
   if (!row) return null;
+  if (row.database.page.trashedAt) return null;
   const membership = await getMembership(userId, row.database.page.workspaceId);
   if (!membership) return null;
   if (!isPageAccessible(row.database.page, userId)) return null;

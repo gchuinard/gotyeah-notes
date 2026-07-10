@@ -40,6 +40,7 @@ export async function GET(req: Request) {
   // sans workspaceId remonterait les fiches "team" de toute l'instance).
   const pageVisibility = {
     workspaceId: { in: workspaceIds },
+    trashedAt: null, // exclut la corbeille (pages, et pages hôtes des records)
     OR: [
       { visibility: "team" },
       { visibility: "private", ownerId: user.id },
@@ -59,7 +60,8 @@ export async function GET(req: Request) {
     prisma.record.findMany({
       where: {
         title: { contains: q },
-        database: { page: pageVisibility },
+        trashedAt: null, // record lui-même hors corbeille
+        database: { page: pageVisibility }, // + page hôte hors corbeille
       },
       select: {
         id: true,

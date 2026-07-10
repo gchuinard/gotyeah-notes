@@ -40,9 +40,9 @@ export async function POST(req: Request) {
 
   const page = await prisma.page.findUnique({
     where: { id: pageId },
-    select: { workspaceId: true, visibility: true, ownerId: true },
+    select: { workspaceId: true, visibility: true, ownerId: true, trashedAt: true },
   });
-  if (!page) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!page || page.trashedAt) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const membership = await getMembership(user.id, page.workspaceId);
   if (!membership) return NextResponse.json({ error: "Not found" }, { status: 404 });

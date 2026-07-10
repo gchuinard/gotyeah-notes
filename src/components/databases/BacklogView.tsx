@@ -874,6 +874,7 @@ export default function BacklogView({ databaseId, view, properties }: Props) {
         content: "[]",
         templateId: null,
         sectionsBody: null,
+        trashedAt: null,
         sprintId,
         createdBy: null,
         createdAt: now,
