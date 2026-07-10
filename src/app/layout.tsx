@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import "./globals.css";
 import { WorkspaceProvider } from "@/contexts/WorkspaceContext";
+import { DialogProvider } from "@/contexts/DialogContext";
 import AppShell from "@/components/AppShell";
 import { getSession } from "@/lib/session";
 
@@ -17,13 +18,15 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang="fr" data-theme={theme}>
       <body className="flex h-screen bg-[var(--bg)] text-[var(--text)]">
-        {user ? (
-          <WorkspaceProvider initialWorkspaceId={user.currentWorkspaceId}>
-            <AppShell user={user}>{children}</AppShell>
-          </WorkspaceProvider>
-        ) : (
-          children
-        )}
+        <DialogProvider>
+          {user ? (
+            <WorkspaceProvider initialWorkspaceId={user.currentWorkspaceId}>
+              <AppShell user={user}>{children}</AppShell>
+            </WorkspaceProvider>
+          ) : (
+            children
+          )}
+        </DialogProvider>
       </body>
     </html>
   );

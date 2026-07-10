@@ -5,6 +5,7 @@ import { useCallback, useRef, useState, useEffect, useMemo } from "react";
 import { Plus, MoreHorizontal, Trash2, Pencil, Table2, Kanban, Calendar, LayoutGrid, ListChecks } from "lucide-react";
 import type { ParsedDatabaseProperty, ParsedRecord, ParsedView } from "@/lib/db";
 import { applyViewConfig } from "@/lib/client/viewFilters";
+import { useDialog } from "@/contexts/DialogContext";
 import TableView from "@/components/databases/TableView";
 import KanbanView from "@/components/databases/KanbanView";
 import CalendarView from "@/components/databases/CalendarView";
@@ -202,6 +203,7 @@ function AddViewPopover({
 export default function DatabaseShell({ databaseId }: { databaseId: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { confirm, alert } = useDialog();
 
   const { data, error, isLoading, mutate } = useSWR<DatabaseData>(
     `/api/databases/${databaseId}`,
@@ -320,11 +322,20 @@ export default function DatabaseShell({ databaseId }: { databaseId: string }) {
 
   const handleDeleteView = async (view: ParsedView) => {
     setTabMenuOpenId(null);
-    if (!window.confirm(`Supprimer la vue "${view.name}" ?`)) return;
+    const ok = await confirm({
+      title: `Supprimer la vue « ${view.name} » ?`,
+      confirmLabel: "Supprimer",
+      tone: "danger",
+    });
+    if (!ok) return;
     const res = await fetch(`/api/views/${view.id}`, { method: "DELETE" });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      alert((body as { error?: string }).error ?? `Erreur ${res.status}`);
+      await alert({
+        title: "Suppression impossible",
+        message: (body as { error?: string }).error ?? `Erreur ${res.status}`,
+        tone: "danger",
+      });
       return;
     }
     // Switch to first remaining view if the deleted one was active

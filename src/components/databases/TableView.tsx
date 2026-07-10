@@ -20,6 +20,7 @@ import {
 } from "@dnd-kit/sortable";
 import type { ParsedDatabaseProperty, ParsedRecord, ParsedView, PropertyValue } from "@/lib/db";
 import { applyViewConfig } from "@/lib/client/viewFilters";
+import { useDialog } from "@/contexts/DialogContext";
 import Cell, { CellDisplay } from "@/components/databases/Cell";
 import AddPropertyModal from "@/components/databases/AddPropertyModal";
 import PropertyPopover from "@/components/databases/PropertyPopover";
@@ -229,6 +230,7 @@ function DragRow({ record }: { record: ParsedRecord }) {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function TableView({ databaseId, view: _view, properties: initialProperties }: Props) {
+  const { confirm } = useDialog();
   const { data: records, error, isLoading, mutate } = useSWR<ParsedRecord[]>(
     `/api/databases/${databaseId}/records`,
     fetcher
@@ -454,7 +456,12 @@ export default function TableView({ databaseId, view: _view, properties: initial
   const handleDeleteRecord = useCallback(
     async (record: ParsedRecord) => {
       if (!records) return;
-      if (!window.confirm(`Supprimer cet enregistrement ?`)) return;
+      const ok = await confirm({
+        title: "Supprimer cet enregistrement ?",
+        confirmLabel: "Supprimer",
+        tone: "danger",
+      });
+      if (!ok) return;
       if (selectedRecordId === record.id) setSelectedRecordId(null);
       const snapshot = records;
       mutate(records.filter((r) => r.id !== record.id), { revalidate: false });
@@ -466,7 +473,7 @@ export default function TableView({ databaseId, view: _view, properties: initial
         mutate(snapshot, { revalidate: false });
       }
     },
-    [records, mutate, selectedRecordId]
+    [records, mutate, selectedRecordId, confirm]
   );
 
   // ── Drag handlers ─────────────────────────────────────────────────────────
