@@ -3,11 +3,11 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { Trash2, Plus } from "lucide-react";
 import type { ParsedDatabaseProperty, SelectOption } from "@/lib/db";
 import Portal from "@/components/databases/portal";
-import { COLOR_MAP } from "@/components/databases/Cell";
+import { SELECT_COLORS } from "@/lib/propertyColors";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const COLORS = Object.keys(COLOR_MAP);
+const COLORS: readonly string[] = SELECT_COLORS;
 
 // Solid dot colors for the mini color-picker grid
 const SWATCH_BG: Record<string, string> = {
@@ -112,6 +112,9 @@ export default function PropertyPopover({
   const [newOptionId, setNewOptionId] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [optionsError, setOptionsError] = useState<string | null>(null);
+  // Dernier état réellement persisté : cible de restauration si le serveur refuse.
+  const savedOptionsRef = useRef<SelectOption[]>(options);
 
   const hasOptions = property.type === "select" || property.type === "multiselect";
 
@@ -135,8 +138,12 @@ export default function PropertyPopover({
   }, [property, onPropertyUpdated]);
 
   // ── PATCH options (called after every option change) ─────────────────────
+  // Écriture optimiste : en cas de refus serveur (ex. 400 « option référencée »),
+  // on RESTAURE le dernier état réellement enregistré — sinon l'UI afficherait une
+  // option supprimée qui existe toujours en base.
   const saveOptions = useCallback(async (nextOptions: SelectOption[]) => {
     setSaving(true);
+    setOptionsError(null);
     try {
       const res = await fetch(`/api/properties/${property.id}`, {
         method: "PATCH",
@@ -145,10 +152,16 @@ export default function PropertyPopover({
       });
       if (res.ok) {
         const updated: ParsedDatabaseProperty = await res.json();
+        savedOptionsRef.current = nextOptions;
         onPropertyUpdated(updated);
+      } else {
+        const body = await res.json().catch(() => ({}));
+        setOptions(savedOptionsRef.current);
+        setOptionsError((body as { error?: string }).error ?? "Modification refusée");
       }
     } catch {
-      // silent
+      setOptions(savedOptionsRef.current);
+      setOptionsError("Réseau indisponible");
     } finally {
       setSaving(false);
     }
@@ -157,11 +170,19 @@ export default function PropertyPopover({
   const handleOptionChange = (idx: number, next: SelectOption) => {
     const updated = options.map((o, i) => (i === idx ? next : o));
     setOptions(updated);
+    // Un PATCH part à chaque frappe : vider le champ pour retaper produirait un
+    // name="" que le serveur refuse (400). On garde la saisie en local et on
+    // n'enregistre qu'une fois tous les noms renseignés.
+    if (updated.some((o) => !o.name.trim())) {
+      setOptionsError(null);
+      return;
+    }
     saveOptions(updated);
   };
 
   const handleOptionDelete = (idx: number) => {
-    // Records that referenced this option keep the stale id; they'll display "—".
+    // Le serveur refuse (400) si l'option est encore référencée (record, filtre de
+    // vue, doneStatusOptionId) : saveOptions restaure alors la liste.
     const updated = options.filter((_, i) => i !== idx);
     setOptions(updated);
     saveOptions(updated);
@@ -222,6 +243,9 @@ export default function PropertyPopover({
           <p className="px-3 py-1 text-xs text-[var(--text-muted)] font-medium uppercase tracking-wide">
             Options {saving && <span className="opacity-50">· enreg.</span>}
           </p>
+          {optionsError && (
+            <p className="px-3 pb-1 text-xs text-red-500 normal-case">{optionsError}</p>
+          )}
           {options.map((opt, idx) => (
             <OptionRow
               key={opt.id}

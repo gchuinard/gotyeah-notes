@@ -6,10 +6,18 @@ import { checkPropertyAccess } from "@/lib/workspace";
 import {
   serializeDatabaseProperty,
   parseDatabaseProperty,
+  parseManyRecords,
+  parseManyViews,
   removePropertyKey,
   type PropertyConfig,
   type ParsedDatabaseProperty,
+  type SelectOption,
 } from "@/lib/db";
+import {
+  validatePropertyConfig,
+  removedOptionIds,
+  findReferencedOptionIds,
+} from "@/lib/propertyConfig";
 
 const patchPropertySchema = z.object({
   name: z.string().min(1).max(100).optional(),
@@ -46,16 +54,55 @@ export async function PATCH(
   const { name, config: rawConfig, position } = result.data;
 
   if (rawConfig !== undefined) {
-    const existing = await prisma.databaseProperty.findUnique({
-      where: { id },
-      select: { type: true },
-    });
+    const existingRow = await prisma.databaseProperty.findUnique({ where: { id } });
+    if (!existingRow) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
     const cfgType = (rawConfig as { type?: unknown }).type;
-    if (cfgType !== existing!.type) {
+    if (cfgType !== existingRow.type) {
       return NextResponse.json(
         { error: "config.type must match type" },
         { status: 400 }
       );
+    }
+
+    const validation = validatePropertyConfig(rawConfig);
+    if (!validation.ok) {
+      return NextResponse.json(
+        { error: "Validation failed", details: validation.details },
+        { status: 400 }
+      );
+    }
+
+    // v1 : add / rename / recolor seulement. Retirer une option ENCORE référencée
+    // (record ou View.config.doneStatusOptionId) orphelinerait la donnée → 400.
+    if (existingRow.type === "select" || existingRow.type === "multiselect") {
+      const prevConfig = parseDatabaseProperty(existingRow).config as {
+        options?: SelectOption[];
+      };
+      const nextOptions = (rawConfig as { options: SelectOption[] }).options;
+      const removed = removedOptionIds(prevConfig.options ?? [], nextOptions);
+
+      if (removed.length > 0) {
+        const [recordRows, viewRows] = await Promise.all([
+          prisma.record.findMany({ where: { databaseId: access.databaseId } }),
+          prisma.view.findMany({ where: { databaseId: access.databaseId } }),
+        ]);
+        const referenced = findReferencedOptionIds(
+          id,
+          removed,
+          parseManyRecords(recordRows),
+          parseManyViews(viewRows)
+        );
+        if (referenced.length > 0) {
+          return NextResponse.json(
+            {
+              error: "Option référencée : impossible de la supprimer",
+              details: { optionIds: referenced },
+            },
+            { status: 400 }
+          );
+        }
+      }
     }
   }
 

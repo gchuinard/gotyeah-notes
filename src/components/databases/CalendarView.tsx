@@ -4,8 +4,9 @@ import useSWR, { mutate as globalMutate } from "swr";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { ParsedDatabaseProperty, ParsedRecord, ParsedView, SelectOption } from "@/lib/db";
 import { applyViewConfig } from "@/lib/client/viewFilters";
-import { COLOR_MAP } from "@/components/databases/Cell";
+import { colorClass } from "@/components/databases/Cell";
 import RecordPanel from "@/components/databases/RecordPanel";
+import { useRecordDeepLink } from "@/lib/client/useRecordDeepLink";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -61,7 +62,7 @@ function pillColorClass(record: ParsedRecord, properties: ParsedDatabaseProperty
     if (!optId) continue;
     const opts = (prop.config as { options?: SelectOption[] }).options ?? [];
     const opt = opts.find((o) => o.id === optId);
-    if (opt) return COLOR_MAP[opt.color] ?? COLOR_MAP.gray;
+    if (opt) return colorClass(opt.color);
   }
   return "bg-[var(--surface)] text-[var(--text)]";
 }
@@ -224,7 +225,7 @@ export default function CalendarView({ databaseId, view, properties }: Props) {
   const today = useMemo(() => new Date(), []);
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
-  const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
+  const [selectedRecordId, setSelectedRecordId] = useRecordDeepLink(records);
 
   const pendingIds = useRef<Set<string>>(new Set());
 

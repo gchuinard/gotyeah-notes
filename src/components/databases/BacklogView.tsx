@@ -34,6 +34,7 @@ import { SelectBadge, CellDisplay } from "@/components/databases/Cell";
 import { applyViewConfig } from "@/lib/client/viewFilters";
 import Portal from "@/components/databases/portal";
 import RecordPanel from "@/components/databases/RecordPanel";
+import { useRecordDeepLink } from "@/lib/client/useRecordDeepLink";
 
 // ─── Constants / types ────────────────────────────────────────────────────────
 
@@ -673,7 +674,7 @@ export default function BacklogView({ databaseId, view, properties }: Props) {
 
   const [activeId, setActiveId] = useState<string | null>(null);
   const [newRecordId, setNewRecordId] = useState<string | null>(null);
-  const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
+  const [selectedRecordId, setSelectedRecordId] = useRecordDeepLink(records);
   const [epicFilter, setEpicFilter] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [editingSprintId, setEditingSprintId] = useState<string | null>(null);

@@ -45,7 +45,8 @@ export type PropertyType =
   | "date"
   | "checkbox"
   | "url"
-  | "email";
+  | "email"
+  | "relation";
 
 /** Une option d'un champ select ou multiselect. */
 export type SelectOption = {
@@ -57,12 +58,17 @@ export type SelectOption = {
 /**
  * Config JSON stockée dans DatabaseProperty.config.
  * Vide ({}) pour les types qui n'ont pas d'options (text, checkbox, url, email).
+ *
+ * relation : la valeur du record est un string[] d'ids de Record appartenant à
+ * `targetDatabaseId` (même workspace). Pas de backlink en v1 ; un id dont le
+ * record a été supprimé est un « lien mort » toléré à l'affichage.
  */
 export type PropertyConfig =
   | { type: "select";      options: SelectOption[] }
   | { type: "multiselect"; options: SelectOption[] }
   | { type: "number";      format: "integer" | "decimal" | "currency" | "percent" }
   | { type: "date";        includeTime: boolean }
+  | { type: "relation";    targetDatabaseId: string }
   | { type: "title" | "text" | "checkbox" | "url" | "email" };
 
 /**
@@ -72,6 +78,7 @@ export type PropertyConfig =
  * - checkbox        → boolean
  * - select          → string (SelectOption.id)
  * - multiselect     → string[] (SelectOption.id[])
+ * - relation        → string[] (Record.id[] de la database cible)
  * - date            → string ISO 8601
  * - null = la propriété existe dans le schéma mais n'a pas de valeur sur ce record
  */
@@ -176,6 +183,19 @@ export const parseManyDatabaseProperties = (raws: DatabaseProperty[]): ParsedDat
 
 export const parseManyRecords = (raws: PrismaRecord[]): ParsedRecord[] =>
   raws.map(parseRecord);
+
+/**
+ * Projection : record sans les corps lourds (content BlockNote + sectionsBody).
+ * Utilisée par GET /records?includeContent=false (payloads MCP allégés).
+ */
+export function stripRecordBody(
+  record: ParsedRecord
+): Omit<ParsedRecord, "content" | "sectionsBody"> {
+  const clone: Record<string, unknown> = { ...record };
+  delete clone.content;
+  delete clone.sectionsBody;
+  return clone as Omit<ParsedRecord, "content" | "sectionsBody">;
+}
 
 export const parseManyViews = (raws: View[]): ParsedView[] =>
   raws.map(parseView);

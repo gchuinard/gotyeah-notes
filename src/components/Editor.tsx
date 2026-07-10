@@ -9,6 +9,7 @@ import { mutate } from "swr";
 import { Table2 } from "lucide-react";
 import EmojiPicker from "@/components/EmojiPicker";
 import { useThemeMode } from "@/lib/client/useThemeMode";
+import { createDebouncedSaver, type DebouncedSaver } from "@/lib/client/debouncedSaver";
 
 type Props = {
   pageId: string;
@@ -32,7 +33,32 @@ export default function Editor({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [saving, setSaving] = useState<"idle" | "saving" | "saved">("idle");
   const [converting, setConverting] = useState(false);
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Autosave debouncé (600 ms) avec flush au démontage : les champs (title/icon/
+  // content) sont FUSIONNÉS dans un brouillon puis envoyés en un seul PATCH — deux
+  // scheduleSave rapprochés ne s'écrasent donc plus. Editor est monté avec key=pageId
+  // (page.tsx) → pageId stable pour cette instance, le flush au démontage vise la
+  // bonne page en quittant.
+  const draftRef = useRef<Record<string, unknown>>({});
+  const saverRef = useRef<DebouncedSaver<Record<string, unknown>> | null>(null);
+  if (!saverRef.current) {
+    saverRef.current = createDebouncedSaver<Record<string, unknown>>(600, async (payload) => {
+      draftRef.current = {};
+      await fetch(`/api/pages/${pageId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        keepalive: true,
+      });
+      // Le titre et l'icône s'affichent dans la sidebar et les récents : revalider
+      // toutes les clés /api/pages* (scopées par workspaceId, d'où le matcher).
+      if ("title" in payload || "icon" in payload) {
+        mutate((key) => typeof key === "string" && key.startsWith("/api/pages"));
+      }
+      setSaving("saved");
+      setTimeout(() => setSaving("idle"), 1200);
+    });
+  }
 
   const handleConvertToDatabase = async () => {
     if (!window.confirm("Convertir cette page en database ?\nL'éditeur sera remplacé par une vue tableau.")) return;
@@ -67,23 +93,10 @@ export default function Editor({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const editor = useCreateBlockNote({ initialContent: parsed as any, dictionary: fr });
 
-  const scheduleSave = (payload: Record<string, unknown>) => {
+  const scheduleSave = (partial: Record<string, unknown>) => {
     setSaving("saving");
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(async () => {
-      await fetch(`/api/pages/${pageId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      // Le titre et l'icône s'affichent dans la sidebar et les récents : revalider
-      // toutes les clés /api/pages* (scopées par workspaceId, d'où le matcher).
-      if ("title" in payload || "icon" in payload) {
-        mutate((key) => typeof key === "string" && key.startsWith("/api/pages"));
-      }
-      setSaving("saved");
-      setTimeout(() => setSaving("idle"), 1200);
-    }, 600);
+    draftRef.current = { ...draftRef.current, ...partial };
+    saverRef.current!.schedule(draftRef.current);
   };
 
   const handleEmojiSelect = (emoji: string) => {
@@ -97,9 +110,10 @@ export default function Editor({
     scheduleSave({ icon: null });
   };
 
+  // Flush du PATCH en attente au démontage (navigation avant expiration du debounce).
   useEffect(() => {
     return () => {
-      if (saveTimer.current) clearTimeout(saveTimer.current);
+      saverRef.current?.flush();
     };
   }, []);
 

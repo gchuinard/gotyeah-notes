@@ -28,8 +28,10 @@ import type {
 } from "@/lib/db";
 import { SelectBadge, CellDisplay } from "@/components/databases/Cell";
 import { applyViewConfig } from "@/lib/client/viewFilters";
+import { groupValueOnDrop, initialGroupValue, cardDndId, parseDndId } from "@/lib/client/kanban";
 import Portal from "@/components/databases/portal";
 import RecordPanel from "@/components/databases/RecordPanel";
+import { useRecordDeepLink } from "@/lib/client/useRecordDeepLink";
 
 // ─── Constants / types ────────────────────────────────────────────────────────
 
@@ -89,10 +91,9 @@ function buildCols(records: ParsedRecord[], prop: ParsedDatabaseProperty): Kanba
   ];
 }
 
-function colOf(cols: KanbanCol[], id: string): KanbanCol | null {
-  const direct = cols.find((c) => c.id === id);
-  if (direct) return direct;
-  return cols.find((c) => c.records.some((r) => r.id === id)) ?? null;
+function colOf(cols: KanbanCol[], dndId: string): KanbanCol | null {
+  const { colId } = parseDndId(dndId);
+  return cols.find((c) => c.id === colId) ?? null;
 }
 
 // ─── GroupBySelector ──────────────────────────────────────────────────────────
@@ -229,6 +230,7 @@ function KanbanCardContent({
 
 function KanbanCard({
   record,
+  colId,
   previewProps,
   autoEdit,
   onTitleSave,
@@ -237,6 +239,8 @@ function KanbanCard({
   onDuplicate,
 }: {
   record: ParsedRecord;
+  /** Colonne de rendu : un record multiselect apparaît dans plusieurs colonnes. */
+  colId: string;
   previewProps: ParsedDatabaseProperty[];
   autoEdit?: boolean;
   onTitleSave?: (id: string, title: string) => void;
@@ -267,7 +271,7 @@ function KanbanCard({
   };
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id: record.id });
+    useSortable({ id: cardDndId(colId, record.id) });
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -439,13 +443,14 @@ function KanbanColView({
         ].join(" ")}
       >
         <SortableContext
-          items={col.records.map((r) => r.id)}
+          items={col.records.map((r) => cardDndId(col.id, r.id))}
           strategy={verticalListSortingStrategy}
         >
           {col.records.map((record) => (
             <KanbanCard
               key={record.id}
               record={record}
+              colId={col.id}
               previewProps={previewProps}
               autoEdit={record.id === newRecordId}
               onTitleSave={onTitleSave}
@@ -581,7 +586,7 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
 
   const [activeId, setActiveId] = useState<string | null>(null);
   const [newRecordId, setNewRecordId] = useState<string | null>(null);
-  const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
+  const [selectedRecordId, setSelectedRecordId] = useRecordDeepLink(records);
 
   const pendingIds = useRef<Set<string>>(new Set());
   const pendingTitles = useRef<Map<string, string>>(new Map());
@@ -621,8 +626,9 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
     [properties, groupByPropId]
   );
 
+  // activeId est un id composite « colonne::record » → extraire le record.
   const activeRecord = useMemo(
-    () => records?.find((r) => r.id === activeId) ?? null,
+    () => (activeId ? records?.find((r) => r.id === parseDndId(activeId).recordId) ?? null : null),
     [records, activeId]
   );
 
@@ -708,11 +714,14 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
   const handleRenameOption = useCallback(
     async (optionId: string, newName: string) => {
       if (!groupByProp) return;
+      // Un nom vide est refusé par la validation serveur (400) : ne rien envoyer.
+      const trimmed = newName.trim();
+      if (!trimmed) return;
       const config = groupByProp.config as { type: string; options?: SelectOption[] };
       const options = config.options ?? [];
       const updatedConfig = {
         ...config,
-        options: options.map((o) => o.id === optionId ? { ...o, name: newName } : o),
+        options: options.map((o) => o.id === optionId ? { ...o, name: trimmed } : o),
       };
       try {
         const res = await fetch(`/api/properties/${groupByProp.id}`, {
@@ -733,7 +742,7 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
 
   const handleAddRecord = useCallback(
     async (col: KanbanCol) => {
-      if (!groupByPropId) return;
+      if (!groupByPropId || !groupByProp) return;
 
       const tempId = crypto.randomUUID();
       const now = new Date();
@@ -741,9 +750,9 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
         ? Math.max(...col.records.map((r) => r.position))
         : (records ?? []).reduce((max, r) => Math.max(max, r.position), 0);
 
-      const initProperties = col.optionId !== null
-        ? { [groupByPropId]: col.optionId }
-        : {};
+      // string (select) ou tableau d'un id (multiselect) ; null = « Sans valeur ».
+      const initValue = initialGroupValue(groupByProp.type, col.optionId);
+      const initProperties = initValue !== null ? { [groupByPropId]: initValue } : {};
 
       const tempRecord: ParsedRecord = {
         id: tempId,
@@ -767,9 +776,9 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
       setNewRecordId(tempId);
 
       try {
-        const body: Record<string, unknown> = col.optionId === null
+        const body: Record<string, unknown> = initValue === null
           ? {}
-          : { properties: { [groupByPropId]: col.optionId } };
+          : { properties: { [groupByPropId]: initValue } };
         if (targetSprint) body.sprintId = targetSprint.id;
 
         const res = await fetch(`/api/databases/${databaseId}/records`, {
@@ -813,7 +822,7 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
         console.error("Échec de la création du record (kanban)", err);
       }
     },
-    [databaseId, groupByPropId, records, mutate, targetSprint]
+    [databaseId, groupByPropId, groupByProp, records, mutate, targetSprint]
   );
 
   // ── Drag start ──────────────────────────────────────────────────────────────
@@ -831,21 +840,28 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
       setTimeout(() => { dragJustEndedRef.current = false; }, 50);
 
       const { active, over } = event;
-      if (!over || !records || !groupByPropId) return;
+      if (!over || !records || !groupByPropId || !groupByProp) return;
 
-      const activeRecordId = active.id as string;
+      const activeDndId = active.id as string;
       const overId = over.id as string;
-      if (activeRecordId === overId) return;
+      if (activeDndId === overId) return;
 
-      const sourceCol = colOf(columns, activeRecordId);
+      // Ids composites « colonne::record » → la colonne source est celle DEPUIS
+      // laquelle on glisse (déterminant en multiselect, où la carte est dans
+      // plusieurs colonnes), pas la première qui contient le record.
+      const activeRecordId = parseDndId(activeDndId).recordId;
+      if (!activeRecordId) return;
+      const overRecordId = parseDndId(overId).recordId;
+
+      const sourceCol = colOf(columns, activeDndId);
       const targetCol = colOf(columns, overId);
       if (!sourceCol || !targetCol) return;
 
       const targetRecords = targetCol.records.filter((r) => r.id !== activeRecordId);
-      const overIsColumn = targetCol.id === overId;
+      const overIsColumn = overRecordId === null;
       const insertIndex = overIsColumn
         ? targetRecords.length
-        : Math.max(0, targetRecords.findIndex((r) => r.id === overId));
+        : Math.max(0, targetRecords.findIndex((r) => r.id === overRecordId));
 
       const prev = targetRecords[insertIndex - 1];
       const next = targetRecords[insertIndex];
@@ -857,16 +873,25 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
 
       const isNewColumn = sourceCol.id !== targetCol.id;
 
+      // Valeur d'axe après le drop : string (select) ou TABLEAU d'ids (multiselect).
+      // null = retirer la clé (colonne « Sans valeur »).
+      const activeRecord = records.find((r) => r.id === activeRecordId);
+      const nextGroupValue = isNewColumn
+        ? groupValueOnDrop(
+            groupByProp.type,
+            activeRecord?.properties[groupByPropId],
+            sourceCol.optionId,
+            targetCol.optionId
+          )
+        : null;
+
       const snapshot = records;
       const optimistic = records.map((r) => {
         if (r.id !== activeRecordId) return r;
         const props = { ...r.properties };
         if (isNewColumn) {
-          if (targetCol.optionId === null) {
-            delete props[groupByPropId];
-          } else {
-            props[groupByPropId] = targetCol.optionId;
-          }
+          if (nextGroupValue === null) delete props[groupByPropId];
+          else props[groupByPropId] = nextGroupValue;
         }
         return { ...r, position: newPosition, properties: props };
       });
@@ -874,7 +899,7 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
 
       const patchBody: Record<string, unknown> = { position: newPosition };
       if (isNewColumn) {
-        patchBody.properties = { [groupByPropId]: targetCol.optionId };
+        patchBody.properties = { [groupByPropId]: nextGroupValue };
       }
 
       fetch(`/api/records/${activeRecordId}`, {
@@ -890,7 +915,7 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
           mutate(snapshot, { revalidate: false });
         });
     },
-    [columns, records, groupByPropId, mutate]
+    [columns, records, groupByPropId, groupByProp, mutate]
   );
 
   // ── Sprint board : scope + démarrer / terminer ─────────────────────────────

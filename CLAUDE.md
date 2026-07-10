@@ -79,7 +79,8 @@ src/
 │       │   └── [id]/
 │       │       ├── route.ts         # GET, PATCH (recordTemplate), DELETE database
 │       │       ├── properties/route.ts  # POST property
-│       │       ├── records/route.ts     # GET list, POST record (estampe le corps sectionné, accepte sprintId)
+│       │       ├── records/route.ts     # GET list (params optionnels filter/limit/offset/includeContent + X-Total-Count),
+│       │       │                        #   POST record (estampe le corps sectionné, accepte sprintId)
 │       │       ├── sprints/route.ts      # GET list, POST sprint (vue backlog)
 │       │       └── views/route.ts       # POST view
 │       ├── properties/[id]/route.ts # PATCH, DELETE property
@@ -130,7 +131,7 @@ src/
 - **Réponse succès** : objet parsé direct (pas wrappé dans `{ data: ... }`)
 - **Réponse erreur** : `{ error: "message" }` ou `{ error: "Validation failed", details: zodFlattenedErrors }`
 - **Position** : automatique via `nextPosition()` pour properties/records/views
-- **Pas de filtres/tris côté serveur** : tous les records sont retournés, le client filtre en JS via `applyViewConfig()`
+- **Pas de filtres/tris côté serveur** : tous les records sont retournés, le client filtre en JS via `applyViewConfig()`. **Exception assumée** — `GET /api/databases/[id]/records` accepte des params **optionnels** pour les consommateurs sans `applyViewConfig` (MCP) : `filter` (JSON `ViewFilter[]`, appliqué via `applyFilters` — pas de réimplémentation), `limit`/`offset` (total pré-pagination dans l'en-tête `X-Total-Count` ; le corps reste un **tableau nu**), `includeContent=false` (omet `content`/`sectionsBody` via `stripRecordBody`). **Sans aucun param, la réponse est identique à l'historique** → le front n'est pas impacté.
 
 ## Conventions UI
 
@@ -160,7 +161,7 @@ L'éditeur BlockNote debounce 500-600ms sur `onChange` et envoie un PATCH. Même
 
 ## Déploiement
 
-- **CI** : `.github/workflows/ci.yml` (build Next + Prisma) sur push/PR.
+- **CI** : `.github/workflows/ci.yml` — jobs `build` (Next + Prisma), `test` (Vitest unit/API) et `e2e` (Playwright) sur push/PR. Un test rouge bloque la CI (condition DoD).
 - **CD** : `.github/workflows/deploy.yml` — sur push `main` (ou `workflow_dispatch`), SSH sur le Pi (secrets repo `SSH_HOST`/`SSH_USER`/`SSH_KEY`), `git reset --hard origin/main` + `docker compose up -d --build`, puis attend que le conteneur `gotyeah_notes` soit `healthy` (healthcheck node défini dans `docker-compose.yml`). ⚠️ **Tout push sur `main` déclenche un déploiement réel.**
 - Le schéma Prisma est appliqué au déploiement par le service one-shot `migrate` (`prisma db push`).
 - ⚠️ Le build Docker tourne **sur le Pi** (RAM-intensif sur arm64 → pics swap au déploiement). Voir *Reste à faire* (builder en CI).
@@ -206,7 +207,15 @@ npm run dev          # dev server (ajouter --turbo pour Turbopack)
 npm run build        # build prod
 npm run db:push      # applique le schema Prisma à la DB
 npm run db:studio    # UI Prisma pour inspecter la DB
+npm test             # tests unitaires + API (Vitest, DB SQLite jetable)
+npm run test:e2e     # tests E2E (Playwright, next dev sur DB jetable)
 ```
+
+## Socle de test
+
+- **Vitest** (`npm test`) : unitaires (`tests/unit/`) + API (`tests/api/`, import direct des Route Handlers, DB SQLite jetable `tests/.tmp/vitest.db` via `tests/setup/global-setup.ts`, auth mockée par `vi.mock("@/lib/session")`, seed via `tests/helpers/seed.ts`). Alias `@/` résolu par `vite-tsconfig-paths`.
+- **Playwright** (`npm run test:e2e`, tests dans `e2e/`) : `tests/e2e-server.mjs` lance `next dev` (et non `next start` : le cookie de session est `secure` en prod → invisible sur http) sur une DB jetable **hors projet** (`os.tmpdir`, évite le watcher WAL).
+- Toute évolution d'un test E2E doit être reflétée dans la database **Cahier de tests** (règle DoD).
 
 ## Règles pour Claude Code
 

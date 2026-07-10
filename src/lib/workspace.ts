@@ -1,20 +1,38 @@
 import { prisma } from "./prisma";
 
 /**
+ * Règle de confidentialité intra-workspace : une page privée n'est accessible
+ * qu'à son propriétaire. Alignée sur getPageWithMembership (api/pages/[id]).
+ * Les databases/records/etc. posés sur une page privée héritent de cette règle
+ * via les check*Access — sinon un membre du workspace lirait le contenu privé
+ * d'un autre membre.
+ */
+export function isPageAccessible(
+  page: { visibility: string; ownerId: string | null },
+  userId: string
+): boolean {
+  return !(page.visibility === "private" && page.ownerId !== userId);
+}
+
+/**
  * Vérifie que userId a une Membership pour le workspace auquel appartient
- * la database. L'accès est vérifié via database → page → workspaceId,
- * indépendamment du workspace "actif" de la session.
+ * la database, ET que la page hôte lui est accessible (privée → propriétaire).
  *
- * Retourne null si la database n'existe pas ou si l'user n'a pas accès.
+ * Retourne null si la database n'existe pas, si l'user n'a pas accès, ou si la
+ * page est privée et n'appartient pas à l'user.
  */
 export async function checkDatabaseAccess(databaseId: string, userId: string) {
   const db = await prisma.database.findUnique({
     where: { id: databaseId },
-    select: { id: true, page: { select: { workspaceId: true } } },
+    select: {
+      id: true,
+      page: { select: { workspaceId: true, visibility: true, ownerId: true } },
+    },
   });
   if (!db) return null;
   const membership = await getMembership(userId, db.page.workspaceId);
   if (!membership) return null;
+  if (!isPageAccessible(db.page, userId)) return null;
   return { workspaceId: db.page.workspaceId, membership };
 }
 
@@ -30,12 +48,15 @@ export async function checkPropertyAccess(propertyId: string, userId: string) {
       id: true,
       databaseId: true,
       type: true,
-      database: { select: { page: { select: { workspaceId: true } } } },
+      database: {
+        select: { page: { select: { workspaceId: true, visibility: true, ownerId: true } } },
+      },
     },
   });
   if (!row) return null;
   const membership = await getMembership(userId, row.database.page.workspaceId);
   if (!membership) return null;
+  if (!isPageAccessible(row.database.page, userId)) return null;
   const { database: _db, ...property } = row;
   return {
     workspaceId: row.database.page.workspaceId,
@@ -53,12 +74,15 @@ export async function checkRecordAccess(recordId: string, userId: string) {
   const row = await prisma.record.findUnique({
     where: { id: recordId },
     include: {
-      database: { select: { page: { select: { workspaceId: true } } } },
+      database: {
+        select: { page: { select: { workspaceId: true, visibility: true, ownerId: true } } },
+      },
     },
   });
   if (!row) return null;
   const membership = await getMembership(userId, row.database.page.workspaceId);
   if (!membership) return null;
+  if (!isPageAccessible(row.database.page, userId)) return null;
   // Strip the nested relation so routes can pass `record` straight to parseRecord.
   const { database: _db, ...record } = row;
   return {
@@ -77,12 +101,15 @@ export async function checkViewAccess(viewId: string, userId: string) {
   const row = await prisma.view.findUnique({
     where: { id: viewId },
     include: {
-      database: { select: { page: { select: { workspaceId: true } } } },
+      database: {
+        select: { page: { select: { workspaceId: true, visibility: true, ownerId: true } } },
+      },
     },
   });
   if (!row) return null;
   const membership = await getMembership(userId, row.database.page.workspaceId);
   if (!membership) return null;
+  if (!isPageAccessible(row.database.page, userId)) return null;
   const { database: _db, ...view } = row;
   return {
     workspaceId: row.database.page.workspaceId,
@@ -100,12 +127,15 @@ export async function checkSprintAccess(sprintId: string, userId: string) {
   const row = await prisma.sprint.findUnique({
     where: { id: sprintId },
     include: {
-      database: { select: { page: { select: { workspaceId: true } } } },
+      database: {
+        select: { page: { select: { workspaceId: true, visibility: true, ownerId: true } } },
+      },
     },
   });
   if (!row) return null;
   const membership = await getMembership(userId, row.database.page.workspaceId);
   if (!membership) return null;
+  if (!isPageAccessible(row.database.page, userId)) return null;
   const { database: _db, ...sprint } = row;
   return {
     workspaceId: row.database.page.workspaceId,

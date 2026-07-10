@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
-import { getMembership } from "@/lib/workspace";
+import { getMembership, isPageAccessible } from "@/lib/workspace";
 import {
   serializeDatabaseProperty,
   serializeView,
@@ -40,12 +40,17 @@ export async function POST(req: Request) {
 
   const page = await prisma.page.findUnique({
     where: { id: pageId },
-    select: { workspaceId: true },
+    select: { workspaceId: true, visibility: true, ownerId: true },
   });
   if (!page) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const membership = await getMembership(user.id, page.workspaceId);
   if (!membership) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  // Une database posée sur une page privée d'autrui reste inaccessible (404 anti-leak).
+  if (!isPageAccessible(page, user.id)) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
 
   const existing = await prisma.database.findUnique({ where: { pageId } });
   if (existing) {

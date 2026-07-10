@@ -26,7 +26,21 @@ npm run dev       # serveur de développement
 npm run build     # build de production
 npm run db:push   # synchroniser le schéma Prisma
 npm run db:studio # UI Prisma pour inspecter la DB
+npm test          # tests unitaires + API (Vitest)
+npm run test:e2e  # tests end-to-end (Playwright)
 ```
+
+## Tests
+
+- **Unitaires + API** : Vitest (`npm test`). Les tests API importent les Route
+  Handlers et tournent contre une **DB SQLite jetable** (`tests/.tmp/vitest.db`,
+  créée par `tests/setup/global-setup.ts`) — jamais la `dev.db`. L'auth est mockée
+  (`vi.mock("@/lib/session")`) ; le seed des données passe par `tests/helpers/seed.ts`.
+- **E2E** : Playwright (`npm run test:e2e`). `tests/e2e-server.mjs` démarre `next dev`
+  sur une DB jetable **hors du dossier projet** (le cookie de session n'est `secure`
+  qu'en production ; en dev il circule sur `http://localhost`).
+- **CI** : `.github/workflows/ci.yml` exécute `build`, `test` (Vitest) et `e2e`
+  (Playwright) sur chaque push/PR. Un test rouge bloque la CI (condition DoD).
 
 ## Configuration
 

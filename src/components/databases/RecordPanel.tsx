@@ -13,6 +13,7 @@ import type { ParsedDatabaseProperty, ParsedRecord, PropertyValue, RecordSection
 import Cell from "@/components/databases/Cell";
 import { useThemeMode } from "@/lib/client/useThemeMode";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
+import { createDebouncedSaver, type DebouncedSaver } from "@/lib/client/debouncedSaver";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -100,11 +101,59 @@ export default function RecordPanel({ record, properties, databaseId, onClose }:
     return () => cancelAnimationFrame(id);
   }, []);
 
-  // ── Close on Esc ─────────────────────────────────────────────────────────────
+  // ── Autosave debouncé, flushé à la fermeture / au démontage ───────────────────
+  const contentSaverRef = useRef<DebouncedSaver<string> | null>(null);
+  if (!contentSaverRef.current) {
+    contentSaverRef.current = createDebouncedSaver<string>(500, (content) => {
+      fetch(`/api/records/${record.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content }),
+        keepalive: true,
+      });
+    });
+  }
+  const sectionsSaverRef = useRef<DebouncedSaver<RecordSection[]> | null>(null);
+  if (!sectionsSaverRef.current) {
+    sectionsSaverRef.current = createDebouncedSaver<RecordSection[]>(600, (body) => {
+      fetch(`/api/records/${record.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sectionsBody: body }),
+        keepalive: true,
+      });
+    });
+  }
+  const flushSaves = () => {
+    sectionsSaverRef.current?.flush();
+    contentSaverRef.current?.flush();
+  };
+  const handleClose = () => {
+    flushSaves();
+    onClose();
+  };
+  // Flush des saisies en attente si le panneau se démonte par un chemin quelconque.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => () => flushSaves(), []);
+
+  // ── Fermeture par Échap : uniquement hors champ/éditeur, après flush ─────────
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      // Un champ qui « consomme » Échap le preventDefault (ex. l'input titre, qui
+      // sort de l'édition). React flushe l'événement discret de façon synchrone et
+      // retire l'input AVANT ce handler (même nœud document → stopPropagation
+      // insuffisant) : on se fie donc à defaultPrevented, robuste au retrait.
+      if (e.defaultPrevented) return;
+      // L'éditeur BlockNote (contentEditable) reste focus et gère lui-même Échap.
+      const el = document.activeElement as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+      flushSaves();
+      onClose();
+    };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onClose]);
 
   // ── Title editing ─────────────────────────────────────────────────────────────
@@ -172,23 +221,11 @@ export default function RecordPanel({ record, properties, databaseId, onClose }:
 
   const sectionsRef = useRef<RecordSection[]>(sections);
   sectionsRef.current = sections;
-  const sectionsSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => { if (sectionsSaveTimer.current) clearTimeout(sectionsSaveTimer.current); }, []);
-
-  const scheduleSectionsSave = () => {
-    if (sectionsSaveTimer.current) clearTimeout(sectionsSaveTimer.current);
-    sectionsSaveTimer.current = setTimeout(() => {
-      fetch(`/api/records/${record.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sectionsBody: sectionsRef.current }),
-      });
-    }, 600);
-  };
 
   const onSectionChange = (id: string, content: unknown[]) => {
-    setSections((prev) => prev.map((s) => (s.id === id ? { ...s, content } : s)));
-    scheduleSectionsSave();
+    const next = sectionsRef.current.map((s) => (s.id === id ? { ...s, content } : s));
+    setSections(next);
+    sectionsSaverRef.current?.schedule(next);
   };
 
   // ── Menu de template (par carte) ─────────────────────────────────────────────
@@ -242,18 +279,6 @@ export default function RecordPanel({ record, properties, databaseId, onClose }:
   } catch {}
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const editor = useCreateBlockNote({ initialContent: parsedContent as any, dictionary: fr });
-  const contentSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => { if (contentSaveTimer.current) clearTimeout(contentSaveTimer.current); }, []);
-  const scheduleContentSave = (content: string) => {
-    if (contentSaveTimer.current) clearTimeout(contentSaveTimer.current);
-    contentSaveTimer.current = setTimeout(() => {
-      fetch(`/api/records/${record.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content }),
-      });
-    }, 500);
-  };
 
   const isSectioned = sections.length > 0;
 
@@ -266,7 +291,7 @@ export default function RecordPanel({ record, properties, databaseId, onClose }:
 
   return (
     <>
-      <div className="fixed inset-0 bg-black/30 z-40" onClick={onClose} />
+      <div className="fixed inset-0 bg-black/30 z-40" onClick={handleClose} />
 
       <div
         className={[
@@ -289,6 +314,7 @@ export default function RecordPanel({ record, properties, databaseId, onClose }:
                   if (e.key === "Enter") { e.preventDefault(); saveTitle(); }
                   if (e.key === "Escape") {
                     e.preventDefault();
+                    e.stopPropagation();
                     setIsEditingTitle(false);
                     setTitleValue(record.title);
                   }
@@ -346,7 +372,7 @@ export default function RecordPanel({ record, properties, databaseId, onClose }:
               )}
             </div>
             <button
-              onClick={onClose}
+              onClick={handleClose}
               className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] rounded transition-colors"
             >
               <X size={18} />
@@ -392,7 +418,7 @@ export default function RecordPanel({ record, properties, databaseId, onClose }:
             <BlockNoteView
               editor={editor}
               theme={themeMode}
-              onChange={() => scheduleContentSave(JSON.stringify(editor.document))}
+              onChange={() => contentSaverRef.current?.schedule(JSON.stringify(editor.document))}
             />
           )}
         </div>

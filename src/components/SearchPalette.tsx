@@ -1,10 +1,16 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Search, FileText } from "lucide-react";
+import { Search, FileText, Rows3 } from "lucide-react";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
 
-type Result = { id: string; title: string; icon: string | null };
+type Result =
+  | { kind: "page"; id: string; title: string; icon: string | null; parentId: string | null }
+  | { kind: "record"; id: string; pageId: string; title: string; icon: string | null };
+
+function hrefFor(r: Result): string {
+  return r.kind === "record" ? `/pages/${r.pageId}?r=${r.id}` : `/pages/${r.id}`;
+}
 
 export default function SearchPalette() {
   const [open, setOpen] = useState(false);
@@ -57,8 +63,8 @@ export default function SearchPalette() {
     return () => clearTimeout(t);
   }, [query, activeWorkspace]);
 
-  const navigate = (id: string) => {
-    router.push(`/pages/${id}`);
+  const navigate = (r: Result) => {
+    router.push(hrefFor(r));
     setOpen(false);
   };
 
@@ -90,10 +96,10 @@ export default function SearchPalette() {
                 setSelected((s) => Math.max(s - 1, 0));
               }
               if (e.key === "Enter" && results[selected]) {
-                navigate(results[selected].id);
+                navigate(results[selected]);
               }
             }}
-            placeholder="Rechercher une page…"
+            placeholder="Rechercher une page ou une fiche…"
             className="flex-1 text-sm outline-none bg-transparent text-[var(--text)] placeholder:text-[var(--text-muted)]"
           />
           <kbd className="hidden sm:block text-xs text-[var(--text-muted)] bg-[var(--surface)] px-1.5 py-0.5 rounded">
@@ -106,8 +112,8 @@ export default function SearchPalette() {
           <ul className="max-h-72 overflow-y-auto py-1">
             {results.map((r, i) => (
               <li
-                key={r.id}
-                onClick={() => navigate(r.id)}
+                key={`${r.kind}-${r.id}`}
+                onClick={() => navigate(r)}
                 onMouseEnter={() => setSelected(i)}
                 className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer text-sm transition-colors ${
                   i === selected
@@ -117,10 +123,17 @@ export default function SearchPalette() {
               >
                 {r.icon ? (
                   <span className="text-base leading-none shrink-0">{r.icon}</span>
+                ) : r.kind === "record" ? (
+                  <Rows3 size={14} className="text-[var(--text-muted)] shrink-0" />
                 ) : (
                   <FileText size={14} className="text-[var(--text-muted)] shrink-0" />
                 )}
                 <span className="truncate">{r.title || "Sans titre"}</span>
+                {r.kind === "record" && (
+                  <span className="ml-auto shrink-0 text-[10px] uppercase tracking-wide text-[var(--text-muted)] bg-[var(--surface)] px-1.5 py-0.5 rounded">
+                    fiche
+                  </span>
+                )}
               </li>
             ))}
           </ul>
@@ -134,7 +147,7 @@ export default function SearchPalette() {
 
         {!query && (
           <p className="px-4 py-3 text-xs text-[var(--text-muted)] text-center">
-            Tape pour rechercher dans tes pages
+            Tape pour rechercher dans tes pages et tes fiches
           </p>
         )}
       </div>

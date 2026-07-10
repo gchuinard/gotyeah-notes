@@ -3,6 +3,7 @@ import { useState } from "react";
 import useSWR from "swr";
 import { Plus, Trash2, ArrowLeft, X } from "lucide-react";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
+import { SELECT_COLORS } from "@/lib/propertyColors";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -27,7 +28,9 @@ type Form = {
 };
 
 const COLUMN_TYPES = ["text", "number", "select", "multiselect", "date", "checkbox", "url", "email"];
-const OPTION_COLORS = ["blue", "green", "yellow", "orange", "red", "pink", "purple", "gray"];
+// Palette partagée (lib/propertyColors) : une couleur hors palette serait refusée
+// par la validation serveur, rendant les options d'une DB scaffoldée non éditables.
+const OPTION_COLORS: readonly string[] = SELECT_COLORS;
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 const rid = () => crypto.randomUUID().slice(0, 8);
