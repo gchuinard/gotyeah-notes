@@ -70,7 +70,16 @@ production sans sauvegarde vérifiée.
 
 - **Emplacement** : `/home/pi/backups/gotyeah-notes/dev-<horodatage>.db` sur le Pi,
   **hors** du volume applicatif `gotyeah-db`.
-- **Rotation** : 7 jours glissants en local (`find … -mtime +7 -delete`).
+- **Rotation** : à planifier via un **cron dédié** sur le Pi (hors du chemin critique de
+  déploiement). Ex. quotidien :
+  ```bash
+  # /etc/cron.daily/gotyeah-backup-rotate (chmod +x)
+  find /home/pi/backups/gotyeah-notes -name 'dev-*.db' -mtime +7 -delete
+  ```
+  > La rotation et la réplication ne sont **volontairement pas** dans `deploy.yml` :
+  > le client SSH (`appleboy/ssh-action`, `script_stop`) arrête la MEP au moindre code
+  > non nul, quelles que soient les gardes shell. Le déploiement se limite donc au
+  > snapshot bloquant + la MEP.
 - **Restauration** :
   ```bash
   cd /home/pi/sites/gotyeah-notes
