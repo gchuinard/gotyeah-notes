@@ -1,8 +1,15 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 import { getMembership } from "@/lib/workspace";
 import { deleteSectionReassigningRoots } from "@/lib/pages";
+
+const patchSectionSchema = z.object({
+  name: z.string().min(1).max(100).optional(),
+  icon: z.string().nullable().optional(),
+  position: z.number().optional(),
+});
 
 async function getSectionWithMembership(sectionId: string, userId: string) {
   const section = await prisma.section.findUnique({
@@ -26,11 +33,23 @@ export async function PATCH(
   const section = await getSectionWithMembership(id, user.id);
   if (!section) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const data = await req.json();
-  const { name, icon, position } = data;
+  // req.json() sans catch renvoyait 500 sur un body vide/malformé → 400 structuré (zod).
+  const body = await req.json().catch(() => null);
+  const parsed = patchSectionSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Validation failed", details: parsed.error.flatten() },
+      { status: 400 }
+    );
+  }
+  const { name, icon, position } = parsed.data;
   const updated = await prisma.section.update({
     where: { id },
-    data: { name, icon, position },
+    data: {
+      ...(name !== undefined && { name }),
+      ...(icon !== undefined && { icon }),
+      ...(position !== undefined && { position }),
+    },
   });
   return NextResponse.json(updated);
 }

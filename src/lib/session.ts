@@ -74,12 +74,30 @@ async function getServiceUser(): Promise<SessionUser | null> {
   const b = Buffer.from(secret);
   if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
 
+  const target = normalizeEmail(email);
+
+  // Allowlist optionnelle des emails que le pont MCP peut incarner. Vide = comportement
+  // historique (n'importe quel User existant). Définie = seuls ces emails, sinon refus + audit.
+  const allow = (process.env.MCP_ACT_AS_ALLOWLIST || "")
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+  if (allow.length > 0 && !allow.includes(target)) {
+    console.warn(`[mcp-act-as] refusé (hors allowlist) : ${target}`);
+    return null;
+  }
+
   const user = await prisma.user.findUnique({
-    where: { email: normalizeEmail(email) },
+    where: { email: target },
     select: { id: true, email: true, displayName: true },
   });
-  if (!user) return null;
+  if (!user) {
+    console.warn(`[mcp-act-as] email inconnu : ${target}`);
+    return null;
+  }
 
+  // Trace d'audit : chaque action MCP au nom d'un utilisateur est journalisée.
+  console.info(`[mcp-act-as] ${target} → user ${user.id}`);
   return { ...user, currentWorkspaceId: await firstWorkspaceId(user.id) };
 }
 
