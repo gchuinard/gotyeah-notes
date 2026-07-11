@@ -30,6 +30,9 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_URL: "file:/data/dev.db"
+      # Uploads (images collées dans l'éditeur) : même volume que la DB SQLite.
+      # À inclure dans les backups (data/uploads/ en plus de dev.db).
+      UPLOAD_DIR: "/data/uploads"
       # Pont de confiance du serveur MCP (cf. lib/session.ts). Doit valoir le même
       # secret que NOTES_MCP_SECRET côté MCP. Vide = chemin act-as désactivé.
       MCP_SHARED_SECRET: "${MCP_SHARED_SECRET:-}"

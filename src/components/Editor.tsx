@@ -10,6 +10,7 @@ import { Table2 } from "lucide-react";
 import EmojiPicker from "@/components/EmojiPicker";
 import { useThemeMode } from "@/lib/client/useThemeMode";
 import { createDebouncedSaver, type DebouncedSaver } from "@/lib/client/debouncedSaver";
+import { uploadFile } from "@/lib/client/upload";
 import { useDialog } from "@/contexts/DialogContext";
 
 type Props = {
@@ -108,7 +109,7 @@ export default function Editor({
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const editor = useCreateBlockNote({ initialContent: parsed as any, dictionary: fr });
+  const editor = useCreateBlockNote({ initialContent: parsed as any, dictionary: fr, uploadFile });
 
   const scheduleSave = (partial: Record<string, unknown>) => {
     setSaving("saving");

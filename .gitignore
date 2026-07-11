@@ -14,3 +14,6 @@ test-results
 playwright-report
 blob-report
 playwright/.cache
+
+# Uploads locaux (dev) — en prod, volume Docker /data/uploads
+/data/
