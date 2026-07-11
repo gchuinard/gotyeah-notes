@@ -44,13 +44,16 @@ jobs:
             # une divergence de nom bloquerait sinon TOUS les déploiements.
             DB_VOL=$(docker volume ls -q | grep -E '(^|_)gotyeah-db$' | head -1)
             [ -n "$DB_VOL" ] || { echo "Volume gotyeah-db introuvable — abandon."; exit 1; }
-            docker run --rm \
+            # --user 0:0 : le dossier de backup appartient à l'utilisateur hôte (pi) ;
+            # l'image keinos tourne en non-root et ne pouvait pas y écrire (« cannot open »).
+            # root lit le volume (world-readable) ET écrit dans le dossier hôte (bypass DAC).
+            docker run --rm --user 0:0 \
               -v "$DB_VOL":/data:ro \
               -v "$BACKUP_DIR":/backup \
               keinos/sqlite3:latest \
               sqlite3 /data/dev.db ".backup '/backup/dev-$STAMP.db'"
             # Vérif d'intégrité du snapshot (grep -q échoue → set -e arrête le déploiement).
-            docker run --rm -v "$BACKUP_DIR":/backup keinos/sqlite3:latest \
+            docker run --rm --user 0:0 -v "$BACKUP_DIR":/backup keinos/sqlite3:latest \
               sh -c "sqlite3 /backup/dev-$STAMP.db 'PRAGMA integrity_check' | grep -q '^ok$'"
             echo "Snapshot OK: $BACKUP_DIR/dev-$STAMP.db"
             # Rotation : 7 jours glissants en local.
