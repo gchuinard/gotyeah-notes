@@ -1,7 +1,15 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 import { getMembership } from "@/lib/workspace";
+
+const createSectionSchema = z.object({
+  workspaceId: z.string().min(1),
+  name: z.string().min(1).max(100),
+  type: z.enum(["team", "private"]).default("team"),
+  icon: z.string().nullable().optional(),
+});
 
 export async function GET(req: Request) {
   const user = await getSession();
@@ -26,11 +34,15 @@ export async function POST(req: Request) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
 
-  const body = await req.json().catch(() => ({}));
-  const { workspaceId, name, type = "team", icon } = body;
-  if (!workspaceId || !name) {
-    return NextResponse.json({ error: "workspaceId et name requis" }, { status: 400 });
+  const body = await req.json().catch(() => null);
+  const parsed = createSectionSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Validation failed", details: parsed.error.flatten() },
+      { status: 400 }
+    );
   }
+  const { workspaceId, name, type, icon } = parsed.data;
 
   const membership = await getMembership(user.id, workspaceId);
   if (!membership) return NextResponse.json({ error: "Not found" }, { status: 404 });
