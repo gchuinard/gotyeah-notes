@@ -28,6 +28,43 @@ export function legacyLoginEnabled(): boolean {
   return (process.env.LEGACY_LOGIN || "on").trim().toLowerCase() !== "off";
 }
 
+/** Inscription par formulaire (POST /api/auth/register). DÉFAUT OFF, découplé du login
+ *  legacy et du provisioning OIDC (OIDC_ALLOW_SIGNUP) : une instance exposée ne rouvre
+ *  pas l'inscription juste parce que le break-glass mot de passe est actif. */
+export function registrationEnabled(): boolean {
+  return (process.env.REGISTRATION || "off").trim().toLowerCase() === "on";
+}
+
+/** Normalisation canonique d'un email : trim + minuscules. Appliquée à l'écriture ET à
+ *  la lecture (register/login/OIDC/pont MCP) pour éviter des comptes doublons de casse. */
+export function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+/**
+ * Plan de la migration one-shot de normalisation des emails existants. Pur → testable.
+ * Signale les COLLISIONS de casse (2 comptes → même email normalisé) SANS les fusionner :
+ * elles doivent être tranchées à la main avant d'appliquer (sinon violation du @unique).
+ */
+export function planEmailNormalization(
+  users: { id: string; email: string }[]
+): { updates: { id: string; email: string }[]; collisions: string[] } {
+  const byNorm = new Map<string, { id: string; email: string }[]>();
+  for (const u of users) {
+    const n = normalizeEmail(u.email);
+    const bucket = byNorm.get(n);
+    if (bucket) bucket.push(u);
+    else byNorm.set(n, [u]);
+  }
+  const updates: { id: string; email: string }[] = [];
+  const collisions: string[] = [];
+  for (const [n, us] of byNorm) {
+    if (us.length > 1) collisions.push(n);
+    else if (us[0].email !== n) updates.push({ id: us[0].id, email: n });
+  }
+  return { updates, collisions };
+}
+
 /** Origine publique de l'app, dérivée du redirect_uri → base fiable pour les redirections
  *  (derrière NPM/Cloudflare, l'origine de la requête interne n'est pas publique). */
 export function appOrigin(): string {

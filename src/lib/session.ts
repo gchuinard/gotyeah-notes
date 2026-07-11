@@ -1,6 +1,7 @@
 import { cookies, headers } from "next/headers";
 import { timingSafeEqual } from "crypto";
 import { prisma } from "./prisma";
+import { normalizeEmail } from "./oidc";
 
 export const SESSION_COOKIE = "session_token";
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
@@ -59,7 +60,7 @@ async function getServiceUser(): Promise<SessionUser | null> {
   if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
 
   const user = await prisma.user.findUnique({
-    where: { email: email.trim() },
+    where: { email: normalizeEmail(email) },
     select: { id: true, email: true, displayName: true },
   });
   if (!user) return null;
