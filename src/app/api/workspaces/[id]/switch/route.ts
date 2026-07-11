@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { getSession, getSessionToken } from "@/lib/session";
+import { getSession, getSessionToken, setSessionWorkspace } from "@/lib/session";
 import { getMembership } from "@/lib/workspace";
 
 export async function POST(
@@ -15,12 +14,7 @@ export async function POST(
   if (!membership) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const token = await getSessionToken();
-  if (token) {
-    await prisma.session.update({
-      where: { id: token },
-      data: { currentWorkspaceId: id },
-    });
-  }
+  if (token) await setSessionWorkspace(token, id);
 
   return NextResponse.json({ ok: true });
 }
