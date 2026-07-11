@@ -34,13 +34,7 @@ export async function POST(req: Request) {
 
   const workspace = await createWorkspaceWithDefaults("Mon espace", user.id);
 
-  const token = await createSession(user.id);
-
-  // Set currentWorkspaceId on the new session
-  await prisma.session.update({
-    where: { id: token },
-    data: { currentWorkspaceId: workspace.id },
-  });
+  const token = await createSession(user.id, workspace.id);
 
   const res = NextResponse.json({ id: user.id, email: user.email, displayName: user.displayName });
   res.cookies.set(SESSION_COOKIE, token, {

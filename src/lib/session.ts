@@ -1,9 +1,19 @@
 import { cookies, headers } from "next/headers";
-import { timingSafeEqual } from "crypto";
+import { createHash, timingSafeEqual } from "crypto";
 import { prisma } from "./prisma";
 
 export const SESSION_COOKIE = "session_token";
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * Le token de session vit en clair dans le cookie mais n'est JAMAIS stocké en clair :
+ * on n'enregistre que son sha256 (Session.id = hashToken(token)). Une fuite de la table
+ * Session ne permet donc pas de forger une session. ⚠️ Ce changement de stockage
+ * invalide les sessions émises avant lui (déconnexion unique — décision assumée au cadrage).
+ */
+export function hashToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
 
 export type SessionUser = {
   id: string;
@@ -22,15 +32,20 @@ async function firstWorkspaceId(userId: string): Promise<string | null> {
 }
 
 async function userFromSessionToken(token: string): Promise<SessionUser | null> {
+  const id = hashToken(token);
   const session = await prisma.session.findUnique({
-    where: { id: token },
+    where: { id },
     select: {
       expiresAt: true,
       currentWorkspaceId: true,
       user: { select: { id: true, email: true, displayName: true } },
     },
   });
-  if (!session || session.expiresAt < new Date()) return null;
+  if (!session) return null;
+  if (session.expiresAt < new Date()) {
+    await prisma.session.deleteMany({ where: { id } }); // purge à la volée
+    return null;
+  }
 
   const currentWorkspaceId =
     session.currentWorkspaceId ?? (await firstWorkspaceId(session.user.id));
@@ -82,18 +97,32 @@ export async function getSessionToken(): Promise<string | null> {
   return cookieStore.get(SESSION_COOKIE)?.value ?? null;
 }
 
-export async function createSession(userId: string): Promise<string> {
+export async function createSession(
+  userId: string,
+  currentWorkspaceId: string | null = null
+): Promise<string> {
   const token = crypto.randomUUID();
   await prisma.session.create({
     data: {
-      id: token,
+      id: hashToken(token),
       userId,
+      currentWorkspaceId,
       expiresAt: new Date(Date.now() + THIRTY_DAYS_MS),
     },
   });
+  // Purge opportuniste des sessions expirées (à chaque login ; peu coûteux via @@index([expiresAt])).
+  await prisma.session.deleteMany({ where: { expiresAt: { lt: new Date() } } });
   return token;
 }
 
+/** Met à jour le workspace courant d'une session, à partir de son token clair (haché en interne). */
+export async function setSessionWorkspace(token: string, workspaceId: string): Promise<void> {
+  await prisma.session.updateMany({
+    where: { id: hashToken(token) },
+    data: { currentWorkspaceId: workspaceId },
+  });
+}
+
 export async function deleteSession(token: string) {
-  await prisma.session.deleteMany({ where: { id: token } });
+  await prisma.session.deleteMany({ where: { id: hashToken(token) } });
 }
