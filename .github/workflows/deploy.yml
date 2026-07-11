@@ -33,6 +33,40 @@ jobs:
             cd /home/pi/sites/gotyeah-notes
             git fetch --prune origin
             git reset --hard origin/main
+
+            # ── Filet de sécurité : SNAPSHOT de la DB SQLite AVANT tout déploiement ──
+            # sqlite3 .backup (pas cp) = cohérent même sous WAL / écritures concurrentes.
+            # Un échec ARRÊTE le déploiement (set -e) : jamais de MEP sans backup vérifié.
+            BACKUP_DIR=/home/pi/backups/gotyeah-notes
+            STAMP=$(date +%Y%m%d-%H%M%S)
+            mkdir -p "$BACKUP_DIR"
+            # Résout le volume réel (…_gotyeah-db) sans coder en dur le préfixe de projet :
+            # une divergence de nom bloquerait sinon TOUS les déploiements.
+            DB_VOL=$(docker volume ls -q | grep -E '(^|_)gotyeah-db$' | head -1)
+            [ -n "$DB_VOL" ] || { echo "Volume gotyeah-db introuvable — abandon."; exit 1; }
+            docker run --rm \
+              -v "$DB_VOL":/data:ro \
+              -v "$BACKUP_DIR":/backup \
+              keinos/sqlite3:latest \
+              sqlite3 /data/dev.db ".backup '/backup/dev-$STAMP.db'"
+            # Vérif d'intégrité du snapshot (grep -q échoue → set -e arrête le déploiement).
+            docker run --rm -v "$BACKUP_DIR":/backup keinos/sqlite3:latest \
+              sh -c "sqlite3 /backup/dev-$STAMP.db 'PRAGMA integrity_check' | grep -q '^ok$'"
+            echo "Snapshot OK: $BACKUP_DIR/dev-$STAMP.db"
+            # Rotation : 7 jours glissants en local.
+            find "$BACKUP_DIR" -name 'dev-*.db' -mtime +7 -delete || true
+            # Réplication HORS-PI (optionnelle) : uniquement si restic est configuré par
+            # l'exploitant (repo + mot de passe dans /home/pi/.gotyeah-backup.env). Non
+            # bloquante : le snapshot local protège déjà. Voir README « Sauvegardes ».
+            [ -f /home/pi/.gotyeah-backup.env ] && . /home/pi/.gotyeah-backup.env || true
+            if command -v restic >/dev/null 2>&1 && [ -n "${RESTIC_REPOSITORY:-}" ]; then
+              restic backup "$BACKUP_DIR/dev-$STAMP.db" --tag gotyeah-notes \
+                && restic forget --keep-daily 7 --prune \
+                || echo "⚠️ Réplication restic échouée (non bloquant)."
+            else
+              echo "restic non configuré → réplication hors-Pi ignorée."
+            fi
+
             docker compose up -d --build
             for i in $(seq 1 60); do
               health=$(docker inspect --format '{{.State.Health.Status}}' gotyeah_notes 2>/dev/null || echo missing)
