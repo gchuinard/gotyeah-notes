@@ -62,7 +62,36 @@ Conteneurisé (Docker Compose) derrière Nginx Proxy Manager. Déploiement conti
 le serveur (`git reset --hard` + `docker compose up -d --build`) avec attente du healthcheck.
 Seule exception : `paths-ignore: ["**.md"]` — un push ne touchant que des `.md` ne déploie
 pas (un commit mêlant doc et code, si).
-Le schéma Prisma est appliqué automatiquement par le service one-shot `migrate`.
+Le schéma Prisma est appliqué par le service one-shot `migrate` via **`prisma migrate deploy`**
+(migrations versionnées, jamais de `db push` en prod).
+
+### Migrations
+
+Le schéma est géré par des **migrations versionnées** (`prisma/migrations/`). Le service
+`migrate` applique `prisma migrate deploy` à chaque déploiement : il ne joue que les
+migrations non encore appliquées, et **ne fait jamais de `db push`** (qui pourrait inférer
+des `DROP` destructifs).
+
+- **Créer une migration** (dev) : modifier `prisma/schema.prisma`, puis
+  `npx prisma migrate dev --name <intitulé>`. La CI (job *Migrations*) échoue si un
+  `schema.prisma` est modifié sans migration correspondante.
+- **Baseline (unique, sur la prod existante)** — la base de prod a été créée
+  historiquement par `db push`, sans historique de migration. Avant le tout premier
+  `migrate deploy`, il faut la « baseliner » **une seule fois** (marque `0_init` comme
+  déjà appliqué, sans le rejouer). Le plus sûr est de passer par le workflow dédié
+  `.github/workflows/baseline-prisma.yml` (`workflow_dispatch`, saisie de confirmation
+  obligatoire) : il prend un snapshot SQLite, joue le `resolve`, puis vérifie qu'il ne
+  reste aucune migration en attente. Équivalent manuel en SSH :
+  ```bash
+  cd /home/pi/sites/gotyeah-notes
+  git fetch && git checkout feat/prisma-migrations   # amène les fichiers de migration
+  docker compose build migrate
+  # snapshot de sécurité avant toute manip (cf. §Sauvegardes) puis :
+  docker compose run --rm --entrypoint sh migrate -c "npx prisma migrate resolve --applied 0_init"
+  docker compose run --rm migrate                    # migrate deploy → doit être « No pending migrations »
+  ```
+  Une fois cette baseline faite, la branche peut être mergée sur `main` : les
+  déploiements suivants appliquent seulement les **nouvelles** migrations.
 
 ### Sauvegardes
 

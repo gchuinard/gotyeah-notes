@@ -13,7 +13,10 @@ services:
     environment:
       DATABASE_URL: "file:/data/dev.db"
       HOME: /tmp
-    command: ["npx", "prisma", "db", "push"]
+    # Applique UNIQUEMENT les migrations versionnées (prisma/migrations), jamais un
+    # `db push` qui inférerait des DROP destructifs. La base de prod doit avoir été
+    # « baselinée » une fois (`migrate resolve --applied 0_init`) — voir README §Migrations.
+    command: ["npx", "prisma", "migrate", "deploy"]
     volumes:
       - gotyeah-db:/data
     restart: "no"
