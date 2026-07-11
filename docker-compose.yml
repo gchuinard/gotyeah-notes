@@ -46,6 +46,9 @@ services:
       OIDC_BUTTON_LABEL: "${OIDC_BUTTON_LABEL:-Se connecter avec GotYeah}"
       # Login mot de passe : "off" pour passer en « comptes GotYeah uniquement ».
       LEGACY_LOGIN: "${LEGACY_LOGIN:-on}"
+      # Inscription par formulaire : "off" par défaut (découplée du login legacy et de
+      # l'OIDC). Mettre "on" pour rouvrir POST /api/auth/register.
+      REGISTRATION: "${REGISTRATION:-off}"
     # Reached by Nginx Proxy Manager over the shared external network, as
     # gotyeah_notes:3000 (no host port published — same convention as the other
     # apps on this Pi). Add `ports: ["30001:3000"]` if you need direct access.

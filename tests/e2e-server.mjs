@@ -17,6 +17,9 @@ const env = {
   ...process.env,
   DATABASE_URL,
   LEGACY_LOGIN: "on",
+  // Env de test jetable : les specs créent leurs users via POST /api/auth/register,
+  // désactivé par défaut en prod (REGISTRATION=off). On le rouvre ici uniquement.
+  REGISTRATION: "on",
   AUTH_SECRET: process.env.AUTH_SECRET ?? "e2e-secret-placeholder-0123456789-abcdefghij",
 };
 

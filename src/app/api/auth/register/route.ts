@@ -3,12 +3,13 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
 import { createWorkspaceWithDefaults } from "@/lib/workspace";
-import { legacyLoginEnabled } from "@/lib/oidc";
+import { registrationEnabled, normalizeEmail } from "@/lib/oidc";
 
 export async function POST(req: Request) {
-  if (!legacyLoginEnabled()) {
+  // Inscription DÉCOUPLÉE du login legacy et du provisioning OIDC : off par défaut.
+  if (!registrationEnabled()) {
     return NextResponse.json(
-      { error: "Inscription désactivée. Cette instance utilise les comptes GotYeah." },
+      { error: "Inscription désactivée." },
       { status: 403 },
     );
   }
@@ -22,14 +23,15 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Le mot de passe ne respecte pas les critères" }, { status: 400 });
   }
 
-  const existing = await prisma.user.findUnique({ where: { email } });
+  const normalized = normalizeEmail(email);
+  const existing = await prisma.user.findUnique({ where: { email: normalized } });
   if (existing) {
     return NextResponse.json({ error: "Cet email est déjà utilisé" }, { status: 409 });
   }
 
   const passwordHash = await bcrypt.hash(password, 12);
   const user = await prisma.user.create({
-    data: { firstName, lastName, displayName, email, passwordHash },
+    data: { firstName, lastName, displayName, email: normalized, passwordHash },
   });
 
   const workspace = await createWorkspaceWithDefaults("Mon espace", user.id);
