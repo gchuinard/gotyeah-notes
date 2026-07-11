@@ -17,7 +17,8 @@ export async function GET(req: Request) {
   const visits = await prisma.pageVisit.findMany({
     where: {
       userId: user.id,
-      page: { workspaceId },
+      // Exclut les pages en corbeille (la ligne PageVisit survit au soft delete).
+      page: { workspaceId, trashedAt: null },
     },
     orderBy: { visitedAt: "desc" },
     take: 5,

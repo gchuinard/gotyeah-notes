@@ -1,0 +1,117 @@
+"use client";
+import { useState } from "react";
+import useSWR, { mutate } from "swr";
+import { ChevronDown, ChevronRight, FileText, RotateCcw, Trash2, X } from "lucide-react";
+import { useWorkspace } from "@/contexts/WorkspaceContext";
+import { useDialog } from "@/contexts/DialogContext";
+
+const fetcher = (url: string) => fetch(url).then((r) => r.json());
+
+type TrashPage = { id: string; title: string; icon: string | null; trashedAt: string };
+type TrashRecord = TrashPage & { pageId: string };
+type TrashData = { pages: TrashPage[]; records: TrashRecord[] };
+
+function Row({
+  icon, title, onRestore, onPurge,
+}: {
+  icon: string | null; title: string; onRestore: () => void; onPurge: () => void;
+}) {
+  return (
+    <div className="group flex items-center gap-1.5 px-2 py-1 rounded hover:bg-[var(--surface-hover)] text-[var(--text-muted)]">
+      {icon ? (
+        <span className="shrink-0 text-sm leading-none">{icon}</span>
+      ) : (
+        <FileText size={12} className="shrink-0" />
+      )}
+      <span className="truncate text-xs flex-1 line-through opacity-70">{title || "Sans titre"}</span>
+      <button
+        onClick={onRestore}
+        title="Restaurer"
+        className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-[var(--surface-active)]"
+      >
+        <RotateCcw size={12} />
+      </button>
+      <button
+        onClick={onPurge}
+        title="Supprimer définitivement"
+        className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-[var(--surface-active)] text-red-500"
+      >
+        <X size={13} />
+      </button>
+    </div>
+  );
+}
+
+/** Corbeille : pages/records supprimés, restaurables ou purgeables (purge auto 30 j). */
+export default function TrashSection() {
+  const { activeWorkspace } = useWorkspace();
+  const wsId = activeWorkspace?.id ?? null;
+  const key = wsId ? `/api/trash?workspaceId=${wsId}` : null;
+  const { data } = useSWR<TrashData>(key, fetcher);
+  const { confirm } = useDialog();
+  const [open, setOpen] = useState(false);
+
+  const count = (data?.pages.length ?? 0) + (data?.records.length ?? 0);
+  if (count === 0) return null;
+
+  const refresh = () => {
+    mutate(key);
+    if (wsId) {
+      mutate(`/api/pages?workspaceId=${wsId}`);
+      mutate(`/api/pages/recent?workspaceId=${wsId}`);
+    }
+  };
+  const restore = async (kind: "pages" | "records", id: string) => {
+    await fetch(`/api/${kind}/${id}/restore`, { method: "POST" });
+    refresh();
+  };
+  const purge = async (kind: "pages" | "records", id: string, title: string) => {
+    const ok = await confirm({
+      title: "Supprimer définitivement ?",
+      message: `« ${title || "Sans titre"} » sera perdu sans retour possible.`,
+      confirmLabel: "Supprimer définitivement",
+      cancelLabel: "Annuler",
+    });
+    if (!ok) return;
+    await fetch(`/api/${kind}/${id}?permanent=1`, { method: "DELETE" });
+    refresh();
+  };
+
+  return (
+    <div className="px-2">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center gap-1.5 px-2 py-1 text-xs font-medium uppercase tracking-wide text-[var(--text-muted)] hover:text-[var(--text)]"
+      >
+        {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+        <Trash2 size={11} />
+        Corbeille
+        <span className="ml-auto text-[10px] px-1.5 rounded-full bg-[var(--surface-active)] text-[var(--text-muted)]">
+          {count}
+        </span>
+      </button>
+      {open && (
+        <div className="mt-0.5">
+          {data!.pages.map((p) => (
+            <Row
+              key={p.id}
+              icon={p.icon}
+              title={p.title}
+              onRestore={() => restore("pages", p.id)}
+              onPurge={() => purge("pages", p.id, p.title)}
+            />
+          ))}
+          {data!.records.map((r) => (
+            <Row
+              key={r.id}
+              icon={r.icon}
+              title={r.title}
+              onRestore={() => restore("records", r.id)}
+              onPurge={() => purge("records", r.id, r.title)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}

@@ -24,6 +24,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { buildTree, FlatPage, TreeNode } from "@/lib/tree";
 import { useDialog } from "@/contexts/DialogContext";
 import WorkspaceSelector from "@/components/WorkspaceSelector";
+import TrashSection from "@/components/TrashSection";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
 import type { SessionUser } from "@/lib/session";
 
@@ -273,6 +274,9 @@ export default function Sidebar({ user }: { user: SessionUser }) {
           />
         ))}
       </div>
+
+      {/* Corbeille (pages/records supprimés, restaurables — purge auto 30 j) */}
+      <TrashSection />
 
       <div className="mt-auto pt-2 border-t border-[var(--border)] flex flex-col gap-0.5">
         <div className="flex items-center gap-1 px-2 py-1">

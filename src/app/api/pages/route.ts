@@ -18,6 +18,7 @@ export async function GET(req: Request) {
   const pages = await prisma.page.findMany({
     where: {
       workspaceId,
+      trashedAt: null, // exclut la corbeille
       OR: [
         { visibility: "team" },
         { visibility: "private", ownerId: user.id },

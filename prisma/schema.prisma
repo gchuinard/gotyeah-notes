@@ -121,6 +121,10 @@ model Page {
   // Pour les pages enfants, copié depuis le parent à la création via createPage().
   visibility  String    @default("team")
 
+  // Corbeille (soft delete). null = active. Trasher une page estampe tout son
+  // sous-arbre (cf. lib/trash.ts) ; purge automatique après 30 j.
+  trashedAt   DateTime?
+
   database    Database?
   visits      PageVisit[]
 
@@ -130,6 +134,7 @@ model Page {
   @@index([sectionId])
   @@index([ownerId])
   @@index([visibility])
+  @@index([trashedAt])
 }
 
 model PageVisit {
@@ -204,10 +209,14 @@ model Record {
   sprintId   String?
   sprint     Sprint?  @relation(fields: [sprintId], references: [id], onDelete: SetNull)
 
+  // Corbeille (soft delete). null = actif ; purge automatique après 30 j.
+  trashedAt  DateTime?
+
   // Composite : les records sont lus filtrés par databaseId ET triés par position.
   @@index([databaseId, position])
   @@index([createdBy])
   @@index([sprintId])
+  @@index([trashedAt])
 }
 
 // Sprint (vue backlog façon Jira). Lié à une Database. Les records y sont

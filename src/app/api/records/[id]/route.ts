@@ -132,17 +132,25 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
 
   const { id } = await params;
-  const access = await checkRecordAccess(id, user.id);
+  // ?permanent=1 : suppression DÉFINITIVE (depuis la corbeille) — accède aux records trashés.
+  const permanent = new URL(req.url).searchParams.get("permanent") === "1";
+
+  const access = await checkRecordAccess(id, user.id, permanent);
   if (!access) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  await prisma.record.delete({ where: { id } });
+  if (permanent) {
+    await prisma.record.delete({ where: { id } });
+  } else {
+    // Soft delete : mise en corbeille (restaurable, purge auto après 30 j).
+    await prisma.record.update({ where: { id }, data: { trashedAt: new Date() } });
+  }
 
   return NextResponse.json({ ok: true });
 }
