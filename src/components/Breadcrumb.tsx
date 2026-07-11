@@ -10,12 +10,11 @@ const fetcher = (url: string) => fetch(url).then((r) => r.json());
 type Section = { id: string; name: string; icon: string | null };
 
 /**
- * Fil d'ariane cliquable (Section / ancêtres / page courante). Deux emplacements
- * pendant l'évaluation : `content` (au-dessus du contenu, cf. AppShell) et `header`
- * (dans le Header). Ne s'affiche que sur une route /pages/[id] existante.
- * Réutilise les listes pages/sections déjà chargées par la sidebar (cache SWR).
+ * Fil d'ariane cliquable (Section / ancêtres / page courante), rendu dans le Header.
+ * Ne s'affiche que sur une route /pages/[id] existante. Réutilise les listes
+ * pages/sections déjà chargées par la sidebar (cache SWR).
  */
-export default function Breadcrumb({ variant = "content" }: { variant?: "content" | "header" }) {
+export default function Breadcrumb() {
   const params = useParams();
   const raw = params?.id;
   const pageId = typeof raw === "string" ? raw : Array.isArray(raw) ? raw[0] : null;
@@ -29,13 +28,8 @@ export default function Breadcrumb({ variant = "content" }: { variant?: "content
   const crumbs = buildBreadcrumb(pages, sections, pageId);
   if (crumbs.length === 0) return null;
 
-  const wrapper =
-    variant === "header"
-      ? "flex items-center gap-1 min-w-0 text-sm"
-      : "flex items-center gap-1 min-w-0 text-sm px-6 h-9 border-b border-[var(--border)] bg-[var(--bg)]";
-
   return (
-    <nav aria-label="Fil d'ariane" className={wrapper}>
+    <nav aria-label="Fil d'ariane" className="flex items-center gap-1 min-w-0 text-sm">
       {crumbs.map((c, i) => (
         <span key={i} className="flex items-center gap-1 min-w-0">
           {i > 0 && <ChevronRight size={13} className="text-[var(--text-muted)] shrink-0" />}

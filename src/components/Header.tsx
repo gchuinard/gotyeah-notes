@@ -12,9 +12,9 @@ export default function Header({ user }: { user: SessionUser }) {
   return (
     <header className="app-header-bg sticky top-0 z-40 flex items-center justify-between px-6 h-14 w-full shrink-0 backdrop-blur-md border-b border-[var(--border)] shadow-sm">
 
-      {/* Fil d'ariane (variante B — dans le Header ; la recherche passe à droite) */}
+      {/* Fil d'ariane dans le Header ; la recherche passe à droite */}
       <div className="flex items-center min-w-0 flex-1">
-        <Breadcrumb variant="header" />
+        <Breadcrumb />
       </div>
 
       {/* Actions droite : recherche + réglages + avatar */}
