@@ -56,22 +56,12 @@ jobs:
             docker run --rm --user 0:0 -v "$BACKUP_DIR":/backup keinos/sqlite3:latest \
               sh -c "sqlite3 /backup/dev-$STAMP.db 'PRAGMA integrity_check' | grep -q '^ok$'"
             echo "Snapshot OK: $BACKUP_DIR/dev-$STAMP.db"
-            # Rotation locale + réplication hors-Pi : best-effort, ne doivent JAMAIS
-            # bloquer le déploiement (la garantie dure, c'est le snapshot vérifié
-            # ci-dessus, sous set -e). On coupe set -e le temps de ce bloc optionnel :
-            # sous `set -euo pipefail`, un `[ -f absent ] && … || true` ou un `find`
-            # peut sinon avorter tout le script.
-            set +e
-            find "$BACKUP_DIR" -name 'dev-*.db' -mtime +7 -delete 2>/dev/null
-            [ -f /home/pi/.gotyeah-backup.env ] && . /home/pi/.gotyeah-backup.env
-            if command -v restic >/dev/null 2>&1 && [ -n "${RESTIC_REPOSITORY:-}" ]; then
-              restic backup "$BACKUP_DIR/dev-$STAMP.db" --tag gotyeah-notes \
-                && restic forget --keep-daily 7 --prune \
-                || echo "Réplication restic échouée (non bloquant)."
-            else
-              echo "restic non configuré → réplication hors-Pi ignorée."
-            fi
-            set -e
+            # IMPORTANT : le client SSH (appleboy/ssh-action, script_stop:true) stoppe le
+            # déploiement au moindre code de retour non nul d'une commande — indépendamment
+            # de `set +e`/`|| true` dans le shell distant. On ne met donc AUCUNE étape
+            # best-effort ici. Rotation des snapshots (7 j) et réplication hors-Pi (restic)
+            # sont à planifier via un cron dédié sur le Pi, HORS du chemin critique de MEP
+            # (voir README « Sauvegardes »). Seul le snapshot vérifié ci-dessus bloque une MEP.
 
             docker compose up -d --build
             for i in $(seq 1 60); do
