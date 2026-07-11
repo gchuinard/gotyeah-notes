@@ -56,19 +56,22 @@ jobs:
             docker run --rm --user 0:0 -v "$BACKUP_DIR":/backup keinos/sqlite3:latest \
               sh -c "sqlite3 /backup/dev-$STAMP.db 'PRAGMA integrity_check' | grep -q '^ok$'"
             echo "Snapshot OK: $BACKUP_DIR/dev-$STAMP.db"
-            # Rotation : 7 jours glissants en local.
-            find "$BACKUP_DIR" -name 'dev-*.db' -mtime +7 -delete || true
-            # Réplication HORS-PI (optionnelle) : uniquement si restic est configuré par
-            # l'exploitant (repo + mot de passe dans /home/pi/.gotyeah-backup.env). Non
-            # bloquante : le snapshot local protège déjà. Voir README « Sauvegardes ».
-            [ -f /home/pi/.gotyeah-backup.env ] && . /home/pi/.gotyeah-backup.env || true
+            # Rotation locale + réplication hors-Pi : best-effort, ne doivent JAMAIS
+            # bloquer le déploiement (la garantie dure, c'est le snapshot vérifié
+            # ci-dessus, sous set -e). On coupe set -e le temps de ce bloc optionnel :
+            # sous `set -euo pipefail`, un `[ -f absent ] && … || true` ou un `find`
+            # peut sinon avorter tout le script.
+            set +e
+            find "$BACKUP_DIR" -name 'dev-*.db' -mtime +7 -delete 2>/dev/null
+            [ -f /home/pi/.gotyeah-backup.env ] && . /home/pi/.gotyeah-backup.env
             if command -v restic >/dev/null 2>&1 && [ -n "${RESTIC_REPOSITORY:-}" ]; then
               restic backup "$BACKUP_DIR/dev-$STAMP.db" --tag gotyeah-notes \
                 && restic forget --keep-daily 7 --prune \
-                || echo "⚠️ Réplication restic échouée (non bloquant)."
+                || echo "Réplication restic échouée (non bloquant)."
             else
               echo "restic non configuré → réplication hors-Pi ignorée."
             fi
+            set -e
 
             docker compose up -d --build
             for i in $(seq 1 60); do

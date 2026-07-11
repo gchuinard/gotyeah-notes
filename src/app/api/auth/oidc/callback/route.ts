@@ -27,13 +27,7 @@ export async function GET(req: NextRequest) {
     return res;
   };
   const finish = async (userId: string, workspaceId: string | null) => {
-    const token = await createSession(userId);
-    if (workspaceId) {
-      await prisma.session.update({
-        where: { id: token },
-        data: { currentWorkspaceId: workspaceId },
-      });
-    }
+    const token = await createSession(userId, workspaceId);
     const res = NextResponse.redirect(`${base}/`);
     res.cookies.set(SESSION_COOKIE, token, {
       httpOnly: true,

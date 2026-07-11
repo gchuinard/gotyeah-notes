@@ -2,7 +2,24 @@ import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
-import { legacyLoginEnabled } from "@/lib/oidc";
+import { legacyLoginEnabled, normalizeEmail } from "@/lib/oidc";
+import { tooManyFailures, recordFailure, clearFailures, retryAfterSeconds } from "@/lib/rateLimit";
+
+// Hash bcrypt factice (coût 12, comme les vrais) : comparé quand l'email est inconnu
+// pour que le temps de réponse soit identique à « mauvais mot de passe » → pas d'oracle
+// d'énumération par timing. Calculé une fois, à la première demande.
+let dummyHash: string | null = null;
+function equalizerHash(): string {
+  if (!dummyHash) dummyHash = bcrypt.hashSync("timing-equalizer-not-a-real-password", 12);
+  return dummyHash;
+}
+
+function clientIp(req: Request): string {
+  const xff = req.headers.get("x-forwarded-for");
+  return (xff ? xff.split(",")[0] : req.headers.get("x-real-ip") || "unknown").trim();
+}
+
+const INVALID = "Email ou mot de passe incorrect";
 
 export async function POST(req: Request) {
   if (!legacyLoginEnabled()) {
@@ -17,16 +34,27 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Email et mot de passe requis" }, { status: 400 });
   }
 
-  const user = await prisma.user.findUnique({ where: { email } });
-  if (!user) {
-    return NextResponse.json({ error: "Email ou mot de passe incorrect" }, { status: 401 });
+  const normalized = normalizeEmail(email);
+  const key = `${clientIp(req)}|${normalized}`;
+
+  // Trop d'échecs récents : rejet AVANT bcrypt (anti brute-force / énumération).
+  if (tooManyFailures(key)) {
+    return NextResponse.json(
+      { error: "Trop de tentatives. Réessaie plus tard." },
+      { status: 429, headers: { "Retry-After": String(retryAfterSeconds(key)) } },
+    );
   }
 
-  const valid = await bcrypt.compare(password, user.passwordHash);
-  if (!valid) {
-    return NextResponse.json({ error: "Email ou mot de passe incorrect" }, { status: 401 });
+  const user = await prisma.user.findUnique({ where: { email: normalized } });
+  // bcrypt.compare TOUJOURS exécuté (hash factice si email inconnu) → temps constant.
+  const valid = await bcrypt.compare(password, user?.passwordHash ?? equalizerHash());
+
+  if (!user || !valid) {
+    recordFailure(key);
+    return NextResponse.json({ error: INVALID }, { status: 401 });
   }
 
+  clearFailures(key);
   const token = await createSession(user.id);
 
   const res = NextResponse.json({ id: user.id, email: user.email });
