@@ -60,6 +60,40 @@ Conteneurisé (Docker Compose) derrière Nginx Proxy Manager. Déploiement conti
 le serveur (`git reset --hard` + `docker compose up -d --build`) avec attente du healthcheck.
 Le schéma Prisma est appliqué automatiquement par le service one-shot `migrate`.
 
+### Sauvegardes
+
+Le déploiement prend un **snapshot de la DB SQLite AVANT chaque MEP** (étape dans
+`deploy.yml`). Le snapshot utilise `sqlite3 .backup` (et non `cp`) → copie cohérente
+même sous WAL / écritures concurrentes, puis un `PRAGMA integrity_check`. **Un échec
+du snapshot ou de son contrôle d'intégrité arrête le déploiement** : jamais de mise en
+production sans sauvegarde vérifiée.
+
+- **Emplacement** : `/home/pi/backups/gotyeah-notes/dev-<horodatage>.db` sur le Pi,
+  **hors** du volume applicatif `gotyeah-db`.
+- **Rotation** : 7 jours glissants en local (`find … -mtime +7 -delete`).
+- **Restauration** :
+  ```bash
+  cd /home/pi/sites/gotyeah-notes
+  docker compose stop app                       # libère la DB
+  BK=/home/pi/backups/gotyeah-notes/dev-<horodatage>.db
+  docker run --rm -v gotyeah-notes_gotyeah-db:/data -v /home/pi/backups/gotyeah-notes:/backup \
+    keinos/sqlite3:latest sh -c "cp /backup/$(basename "$BK") /data/dev.db && rm -f /data/dev.db-wal /data/dev.db-shm"
+  docker compose up -d app
+  ```
+
+**Réplication hors-Pi (optionnelle, recommandée).** L'étape restic ne s'active que si
+un dépôt est configuré — sinon elle est ignorée sans bloquer. Pour l'activer, créer sur
+le Pi `/home/pi/.gotyeah-backup.env` (jamais commité) :
+
+```bash
+export RESTIC_REPOSITORY="…"          # ex. sftp:autre-machine:/backups/gotyeah  ou  s3:…
+export RESTIC_PASSWORD_FILE="/home/pi/.restic-pass"   # mot de passe du dépôt restic
+```
+
+puis `restic init` une fois. Les déploiements suivants répliquent le snapshot
+(`--keep-daily 7`). La réplication hors-Pi est **non bloquante** (le snapshot local
+protège déjà) — un échec est signalé dans les logs de déploiement sans stopper la MEP.
+
 ## Intégration MCP
 
 Les outils MCP `notes_*` (gérer pages, sections, databases, records, modèles… depuis Claude) sont

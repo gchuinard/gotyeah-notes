@@ -12,9 +12,10 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends python3 make g++ \
  && rm -rf /var/lib/apt/lists/*
 
-# `postinstall` runs `prisma db push`, which needs the schema, the prisma config
-# and a DATABASE_URL. Point it at a throwaway file (this layer never reaches the
-# runtime image) so the install step also generates the Prisma client.
+# `postinstall` runs `prisma generate` (schema only, jamais de DB) : jamais de
+# `db push` à l'install — l'application du schéma est réservée au service `migrate`.
+# On garde un DATABASE_URL factice comme filet pour un éventuel accès Prisma
+# incident ; ce layer n'atteint jamais l'image runtime.
 ENV DATABASE_URL="file:/tmp/build.db"
 COPY package.json package-lock.json* .npmrc prisma.config.ts ./
 COPY prisma ./prisma

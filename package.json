@@ -11,7 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "postinstall": "prisma db push"
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@blocknote/core": "^0.48.0",
