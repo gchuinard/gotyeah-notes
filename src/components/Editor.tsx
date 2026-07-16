@@ -11,7 +11,9 @@ import EmojiPicker from "@/components/EmojiPicker";
 import { useThemeMode } from "@/lib/client/useThemeMode";
 import { createDebouncedSaver, type DebouncedSaver } from "@/lib/client/debouncedSaver";
 import { uploadFile } from "@/lib/client/upload";
+import { pageLinkSchema, PageLinkMenu } from "@/lib/client/blocknoteSchema";
 import { useDialog } from "@/contexts/DialogContext";
+import { useWorkspace } from "@/contexts/WorkspaceContext";
 
 type Props = {
   pageId: string;
@@ -31,6 +33,8 @@ export default function Editor({
   const router = useRouter();
   const themeMode = useThemeMode();
   const { confirm, alert } = useDialog();
+  const { activeWorkspace } = useWorkspace();
+  const wsId = activeWorkspace?.id ?? null;
   const [title, setTitle] = useState(initialTitle);
   const [icon, setIcon] = useState<string | null>(initialIcon ?? null);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -109,7 +113,7 @@ export default function Editor({
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const editor = useCreateBlockNote({ initialContent: parsed as any, dictionary: fr, uploadFile });
+  const editor = useCreateBlockNote({ schema: pageLinkSchema, initialContent: parsed as any, dictionary: fr, uploadFile });
 
   const scheduleSave = (partial: Record<string, unknown>) => {
     setSaving("saving");
@@ -210,7 +214,9 @@ export default function Editor({
         onChange={() => {
           scheduleSave({ content: JSON.stringify(editor.document) });
         }}
-      />
+      >
+        <PageLinkMenu editor={editor} workspaceId={wsId} />
+      </BlockNoteView>
     </div>
   );
 }
