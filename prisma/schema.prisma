@@ -233,6 +233,9 @@ model Sprint {
   startDate  DateTime?
   endDate    DateTime?
   state      String    @default("future") // "future" | "active" | "completed"
+  // Notes de version (patch notes) générées à la clôture depuis les issues
+  // livrées. Lecture seule côté UI. null = pas encore générées.
+  releaseNotes String?
   position   Float     @default(0)
   records    Record[]
   createdAt  DateTime  @default(now())

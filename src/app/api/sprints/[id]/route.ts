@@ -95,6 +95,21 @@ export async function PATCH(
         }
       }
 
+      // Notes de version : à la clôture, générées UNE SEULE fois (si pas déjà
+      // présentes) depuis les issues encore dans le sprint — c-à-d les LIVRÉES,
+      // après le renvoi des incomplètes au backlog ci-dessus.
+      if (state === "completed" && !updated.releaseNotes) {
+        const delivered = await tx.record.findMany({
+          where: { databaseId: access.databaseId, sprintId: id, trashedAt: null },
+          orderBy: { position: "asc" },
+          select: { title: true },
+        });
+        return tx.sprint.update({
+          where: { id },
+          data: { releaseNotes: buildReleaseNotes(updated, delivered) },
+        });
+      }
+
       return updated;
     });
     return NextResponse.json(sprint);
@@ -111,6 +126,20 @@ export async function PATCH(
 
 /** Levée dans la transaction quand un autre sprint est déjà actif → 409. */
 class SprintAlreadyActiveError extends Error {}
+
+/** Notes de version auto : nom du sprint, date de clôture, objectif, issues livrées. */
+function buildReleaseNotes(
+  sprint: { name: string; goal: string | null; endDate: Date | null },
+  records: { title: string }[]
+): string {
+  const date = (sprint.endDate ?? new Date()).toISOString().slice(0, 10);
+  const lines = [`# ${sprint.name}`, `Clôturé le ${date}.`];
+  if (sprint.goal) lines.push("", sprint.goal);
+  const n = records.length;
+  lines.push("", `${n} issue${n > 1 ? "s" : ""} livrée${n > 1 ? "s" : ""} :`);
+  for (const r of records) lines.push(`- ${r.title || "Sans titre"}`);
+  return lines.join("\n");
+}
 
 export async function DELETE(
   _: Request,
