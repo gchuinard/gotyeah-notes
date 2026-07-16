@@ -25,8 +25,9 @@ import type {
   ParsedView,
   ParsedSprint,
   SelectOption,
+  PropertyValue,
 } from "@/lib/db";
-import { SelectBadge, CellDisplay } from "@/components/databases/Cell";
+import Cell, { SelectBadge, CellDisplay } from "@/components/databases/Cell";
 import { applyViewConfig } from "@/lib/client/viewFilters";
 import {
   groupValueOnDrop,
@@ -34,6 +35,7 @@ import {
   cardDndId,
   parseDndId,
   shouldShowKanbanAddButton,
+  buildCardProps,
 } from "@/lib/client/kanban";
 import { useDialog } from "@/contexts/DialogContext";
 import Portal from "@/components/databases/portal";
@@ -192,8 +194,11 @@ function KanbanCardContent({
       {visibleProps.length > 0 && (
         <div className="mt-2 flex flex-col gap-1">
           {visibleProps.map((p) => (
-            <div key={p.id} className="flex items-center gap-1 min-w-0 text-xs">
-              <CellDisplay property={p} record={record} />
+            <div key={p.id} className="flex items-center gap-1.5 min-w-0 text-xs">
+              <span className="shrink-0 text-[var(--text-muted)] truncate max-w-[90px]">{p.name}</span>
+              <div className="min-w-0">
+                <CellDisplay property={p} record={record} />
+              </div>
             </div>
           ))}
         </div>
@@ -212,6 +217,7 @@ function KanbanCard({
   selected,
   onToggleSelect,
   onTitleSave,
+  onPropSave,
   onCardClick,
   onDelete,
   onDuplicate,
@@ -224,6 +230,7 @@ function KanbanCard({
   selected: boolean;
   onToggleSelect: () => void;
   onTitleSave?: (id: string, title: string) => void;
+  onPropSave?: (recordId: string, property: ParsedDatabaseProperty, value: PropertyValue | null) => void;
   onCardClick?: (record: ParsedRecord) => void;
   onDelete: () => void;
   onDuplicate: () => void;
@@ -231,6 +238,11 @@ function KanbanCard({
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleValue, setTitleValue] = useState(record.title);
   const titleInputRef = useRef<HTMLInputElement>(null);
+
+  // Une propriété éditée en inline (dropdown/champ ouvert). Comme isEditingTitle,
+  // elle neutralise le drag & le clic d'ouverture du panneau tant qu'elle est active.
+  const [editingPropId, setEditingPropId] = useState<string | null>(null);
+  const isEditing = isEditingTitle || editingPropId !== null;
 
   useEffect(() => {
     if (autoEdit) setIsEditingTitle(true);
@@ -251,25 +263,35 @@ function KanbanCard({
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: cardDndId(colId, record.id) });
 
+  // Après un drag, dnd-kit émet un clic parasite : on l'ignore brièvement pour ne
+  // pas entrer en édition de titre juste après un dépôt.
+  const justDraggedRef = useRef(false);
+  useEffect(() => {
+    if (isDragging) {
+      justDraggedRef.current = true;
+      return;
+    }
+    if (justDraggedRef.current) {
+      const t = setTimeout(() => { justDraggedRef.current = false; }, 60);
+      return () => clearTimeout(t);
+    }
+  }, [isDragging]);
+
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
   };
-
-  const visibleProps = previewProps.filter(
-    (p) => record.properties[p.id] !== undefined && record.properties[p.id] !== null
-  );
 
   return (
     <div
       ref={setNodeRef}
       style={style}
       {...attributes}
-      {...(isEditingTitle ? {} : listeners)}
+      {...(isEditing ? {} : listeners)}
       onClick={() => {
-        if (!isEditingTitle) onCardClick?.(record);
+        if (!isEditing) onCardClick?.(record);
       }}
-      className={`group ${isEditingTitle ? "" : "cursor-pointer"}`}
+      className={`group ${isEditing ? "" : "cursor-pointer"}`}
     >
       <div
         className={[
@@ -283,7 +305,7 @@ function KanbanCard({
       >
         {/* Case de sélection : visible au survol OU quand la carte est cochée.
             Contrôle distinct du clic d'ouverture / du drag (stopPropagation). */}
-        {!isEditingTitle && (
+        {!isEditing && (
           <input
             type="checkbox"
             checked={selected}
@@ -319,15 +341,42 @@ function KanbanCard({
             onClick={(e) => e.stopPropagation()}
           />
         ) : (
-          <p className="text-sm font-semibold text-[var(--text)] leading-snug break-words pl-5 pr-12">
+          // Simple clic sur le titre → édition inline (n'ouvre PAS le panneau).
+          <p
+            className="text-sm font-semibold text-[var(--text)] leading-snug break-words pl-5 pr-12 cursor-text"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (justDraggedRef.current) return;
+              setIsEditingTitle(true);
+            }}
+          >
             {record.title || <span className="text-[var(--text-muted)] font-normal">Sans titre</span>}
           </p>
         )}
-        {visibleProps.length > 0 && (
+        {previewProps.length > 0 && (
           <div className="mt-2 flex flex-col gap-1">
-            {visibleProps.map((p) => (
-              <div key={p.id} className="flex items-center gap-1 min-w-0 text-xs">
-                <CellDisplay property={p} record={record} />
+            {previewProps.map((p) => (
+              // stopPropagation : cliquer une valeur ENTRE en édition (via Cell) sans
+              // ouvrir le panneau (onClick) ni démarrer un drag (onPointerDown).
+              <div
+                key={p.id}
+                className="flex items-center gap-1.5 min-w-0 text-xs"
+                onClick={(e) => e.stopPropagation()}
+                onPointerDown={(e) => e.stopPropagation()}
+              >
+                <span className="shrink-0 text-[var(--text-muted)] truncate max-w-[90px]" title={p.name}>
+                  {p.name}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <Cell
+                    property={p}
+                    record={record}
+                    onSave={(value) => onPropSave?.(record.id, p, value)}
+                    onEditingChange={(editing) =>
+                      setEditingPropId((prev) => (editing ? p.id : prev === p.id ? null : prev))
+                    }
+                  />
+                </div>
               </div>
             ))}
           </div>
@@ -347,6 +396,7 @@ export function KanbanColView({
   selectedIds,
   onToggleSelect,
   onTitleSave,
+  onPropSave,
   onCardClick,
   onDeleteRecord,
   onDuplicateRecord,
@@ -360,6 +410,7 @@ export function KanbanColView({
   selectedIds: Set<string>;
   onToggleSelect: (id: string) => void;
   onTitleSave: (id: string, title: string) => void;
+  onPropSave: (recordId: string, property: ParsedDatabaseProperty, value: PropertyValue | null) => void;
   onCardClick: (record: ParsedRecord) => void;
   onDeleteRecord: (record: ParsedRecord) => void;
   onDuplicateRecord: (record: ParsedRecord) => void;
@@ -462,6 +513,7 @@ export function KanbanColView({
               selected={selectedIds.has(record.id)}
               onToggleSelect={() => onToggleSelect(record.id)}
               onTitleSave={onTitleSave}
+              onPropSave={onPropSave}
               onCardClick={onCardClick}
               onDelete={() => onDeleteRecord(record)}
               onDuplicate={() => onDuplicateRecord(record)}
@@ -633,12 +685,10 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
     [displayedRecords, groupByProp]
   );
 
+  // Propriétés affichées/éditables sur la carte : top-2 par position + « Main à » et
+  // « Projet » garanties (présence non soumise au slice(0,2)).
   const previewProps = useMemo(
-    () =>
-      properties
-        .filter((p) => p.type !== "title" && p.id !== groupByPropId)
-        .sort((a, b) => a.position - b.position)
-        .slice(0, 2),
+    () => buildCardProps(properties, groupByPropId),
     [properties, groupByPropId]
   );
 
@@ -676,6 +726,37 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title }),
+      })
+        .then((res) => { if (!res.ok) throw new Error(); mutate(); })
+        .catch(() => { mutate(snapshot, { revalidate: false }); });
+    },
+    [records, mutate]
+  );
+
+  // ── Property save (inline sur la carte) ─────────────────────────────────────
+  // Même contrat que TableView.handleSave, restreint aux propriétés (le titre a
+  // son propre chemin) : optimistic + rollback, une valeur null retire la clé.
+
+  const handlePropSave = useCallback(
+    (recordId: string, property: ParsedDatabaseProperty, value: PropertyValue | null) => {
+      if (!records) return;
+      // Record temporaire (création en vol) : pas encore d'id serveur → on ignore.
+      if (pendingIds.current.has(recordId)) return;
+
+      const snapshot = records;
+      const optimistic = records.map((r) => {
+        if (r.id !== recordId) return r;
+        const props = { ...r.properties };
+        if (value === null) delete props[property.id];
+        else props[property.id] = value;
+        return { ...r, properties: props };
+      });
+      mutate(optimistic, { revalidate: false });
+
+      fetch(`/api/records/${recordId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ properties: { [property.id]: value } }),
       })
         .then((res) => { if (!res.ok) throw new Error(); mutate(); })
         .catch(() => { mutate(snapshot, { revalidate: false }); });
@@ -1076,6 +1157,7 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
                 selectedIds={selectedIds}
                 onToggleSelect={toggleSelect}
                 onTitleSave={handleTitleSave}
+                onPropSave={handlePropSave}
                 onCardClick={handleCardClick}
                 onDeleteRecord={handleDeleteRecord}
                 onDuplicateRecord={handleDuplicateRecord}

@@ -5,7 +5,16 @@ import {
   cardDndId,
   parseDndId,
   shouldShowKanbanAddButton,
+  buildCardProps,
 } from "@/lib/client/kanban";
+
+type StubProp = { id: string; name: string; type: string; position: number };
+const p = (id: string, name: string, position: number, type = "text"): StubProp => ({
+  id,
+  name,
+  type,
+  position,
+});
 
 describe("identité DnD des cartes (colonne::record)", () => {
   it("une même carte dans deux colonnes a deux ids distincts", () => {
@@ -90,5 +99,68 @@ describe("shouldShowKanbanAddButton (garde du flag createInUnassignedOnly)", () 
   it("flag activé → bouton UNIQUEMENT sur la colonne « Sans valeur » (optionId === null)", () => {
     expect(shouldShowKanbanAddButton(true, null)).toBe(true);
     expect(shouldShowKanbanAddButton(true, "opt-a")).toBe(false);
+  });
+});
+
+describe("buildCardProps — propriétés affichées/éditables sur la carte", () => {
+  it("AC4 : « Main à » et « Projet » en position 3 et 4 sont TOUJOURS présentes (hors slice(0,2))", () => {
+    const props = [
+      p("t", "Nom", 100, "title"),
+      p("axe", "Statut", 200, "select"),
+      p("p1", "Priorité", 300),
+      p("p2", "Estimation", 400),
+      p("main", "Main à", 500),
+      p("proj", "Projet", 600),
+    ];
+    const result = buildCardProps(props, "axe");
+    const names = result.map((r) => r.name);
+    // Top-2 par position (hors title/axe) = Priorité, Estimation → puis forcées.
+    expect(names).toContain("Main à");
+    expect(names).toContain("Projet");
+    expect(names).toEqual(["Priorité", "Estimation", "Main à", "Projet"]);
+  });
+
+  it("exclut la propriété title et l'axe de regroupement", () => {
+    const props = [
+      p("t", "Nom", 100, "title"),
+      p("axe", "Statut", 200, "select"),
+      p("p1", "Priorité", 300),
+    ];
+    const result = buildCardProps(props, "axe");
+    expect(result.map((r) => r.id)).toEqual(["p1"]);
+  });
+
+  it("ne duplique pas une propriété forcée déjà dans le top-2", () => {
+    const props = [
+      p("main", "Main à", 100),
+      p("proj", "Projet", 200),
+      p("p3", "Autre", 300),
+    ];
+    const result = buildCardProps(props, undefined);
+    // Main à + Projet sont déjà le top-2 ; pas de doublon, Autre exclue.
+    expect(result.map((r) => r.id)).toEqual(["main", "proj"]);
+    expect(result.filter((r) => r.name === "Main à")).toHaveLength(1);
+  });
+
+  it("match par nom insensible à la casse et aux accents", () => {
+    const props = [
+      p("x", "Colonne X", 100),
+      p("y", "Colonne Y", 200),
+      p("main", "MAIN A", 300), // sans accent, majuscules
+      p("proj", "projet", 400), // minuscules
+    ];
+    const result = buildCardProps(props, undefined);
+    expect(result.map((r) => r.id)).toContain("main");
+    expect(result.map((r) => r.id)).toContain("proj");
+  });
+
+  it("sans propriété forcée : comportement historique = top-2 par position", () => {
+    const props = [
+      p("p1", "Un", 100),
+      p("p2", "Deux", 200),
+      p("p3", "Trois", 300),
+    ];
+    const result = buildCardProps(props, undefined);
+    expect(result.map((r) => r.id)).toEqual(["p1", "p2"]);
   });
 });

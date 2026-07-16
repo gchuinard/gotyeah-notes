@@ -82,3 +82,48 @@ export function shouldShowKanbanAddButton(
 ): boolean {
   return !createOnlyInUnassigned || optionId === null;
 }
+
+/**
+ * Propriétés « métier » toujours affichées et éditables sur une carte du board,
+ * même si leur position les exclurait du top-2. Repérées par NOM (le nom est le
+ * seul point de contact stable avec l'utilisateur ; l'id est opaque).
+ */
+export const FORCED_CARD_PROPERTY_NAMES = ["Main à", "Projet"];
+
+/** Nom normalisé (trim + minuscules + sans diacritiques) pour un match robuste. */
+function normalizePropName(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "");
+}
+
+const FORCED_CARD_PROPERTY_SET = new Set(FORCED_CARD_PROPERTY_NAMES.map(normalizePropName));
+
+/**
+ * Propriétés à rendre (et éditer en inline) sur une carte kanban.
+ *
+ * Base historique = les `limit` premières propriétés (hors `title` et hors axe de
+ * regroupement) par position. On y ADJOINT toute propriété « forcée » (Main à,
+ * Projet) absente de cette base, pour GARANTIR sa présence et son édition inline
+ * quelle que soit sa position — sans l'ajouter deux fois si elle est déjà dans le
+ * top-2. Ordre final stable = par position.
+ *
+ * Fonction PURE (contrainte structurelle minimale) → testable en environnement node.
+ */
+export function buildCardProps<
+  T extends { id: string; name: string; type: string; position: number }
+>(properties: T[], groupByPropertyId: string | undefined, limit = 2): T[] {
+  const eligible = properties
+    .filter((p) => p.type !== "title" && p.id !== groupByPropertyId)
+    .sort((a, b) => a.position - b.position);
+
+  const base = eligible.slice(0, limit);
+  const baseIds = new Set(base.map((p) => p.id));
+  const forced = eligible.filter(
+    (p) => !baseIds.has(p.id) && FORCED_CARD_PROPERTY_SET.has(normalizePropName(p.name))
+  );
+
+  return [...base, ...forced].sort((a, b) => a.position - b.position);
+}

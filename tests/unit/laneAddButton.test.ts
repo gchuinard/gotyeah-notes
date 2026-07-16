@@ -76,6 +76,7 @@ function renderKanbanCol(opts: {
       selectedIds: new Set<string>(),
       onToggleSelect: noop,
       onTitleSave: noop,
+      onPropSave: noop,
       onCardClick: noop,
       onDeleteRecord: noop,
       onDuplicateRecord: noop,
