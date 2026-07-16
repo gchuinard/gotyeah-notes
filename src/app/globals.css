@@ -174,3 +174,17 @@ html[data-theme] .bn-root {
   --bn-colors-side-menu: var(--text-muted);
   --bn-colors-shadow: var(--border);
 }
+
+/* ── Fix numérotation des listes ordonnées (BlockNote) ──────────────────────────
+   BlockNote pose `--index: attr(data-index)` puis affiche `content: var(--index) "."`.
+   Or `attr()` n'est pas résolu hors de la propriété `content` par les moteurs actuels
+   → `--index` reste vide → les listes numérotées s'affichent SANS numéro.
+   Correctif : lire l'attribut directement dans `content` (seul emplacement où `attr()`
+   est fiable), en miroir des deux règles de la lib (1er item du run vs suivants). */
+html[data-theme] .bn-root .bn-block-outer:not([data-prev-type]) > .bn-block > .bn-block-content[data-content-type="numberedListItem"]::before,
+html[data-theme] .bn-root .bn-block-outer:not([data-prev-type]) > .bn-block > div[data-type="modification"] > .bn-block-content[data-content-type="numberedListItem"]::before {
+  content: attr(data-index) ".";
+}
+html[data-theme] .bn-root .bn-block-outer[data-prev-type="numberedListItem"]:not([data-prev-index="none"]) > .bn-block > .bn-block-content::before {
+  content: attr(data-prev-index) ".";
+}
