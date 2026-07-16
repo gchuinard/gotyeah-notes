@@ -21,7 +21,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { buildTree, FlatPage, TreeNode } from "@/lib/tree";
+import { buildTree, FlatPage, TreeNode, toggleBranchCollapsed } from "@/lib/tree";
 import { useDialog } from "@/contexts/DialogContext";
 import WorkspaceSelector from "@/components/WorkspaceSelector";
 import TrashSection from "@/components/TrashSection";
@@ -332,6 +332,20 @@ function SectionBlock({
   );
   const rootIds = tree.map((n) => n.id);
 
+  // Source de vérité partagée de l'expansion, détenue au niveau de la section
+  // (pas de store global) : Set des ids de dossiers REPLIÉS. Vide au démarrage
+  // → tout est déplié comme avant. Aucune persistance (ni localStorage ni serveur).
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const handleToggle = (node: TreeNode, recursive: boolean) => {
+    setCollapsed((prev) => {
+      if (recursive) return toggleBranchCollapsed(prev, node);
+      const next = new Set(prev);
+      if (next.has(node.id)) next.delete(node.id);
+      else next.add(node.id);
+      return next;
+    });
+  };
+
   return (
     <div>
       <div className="flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-[var(--text-muted)] uppercase tracking-wide group">
@@ -355,6 +369,8 @@ function SectionBlock({
               onCreate={onCreate}
               pagesKey={pagesKey}
               currentId={params?.id}
+              collapsed={collapsed}
+              onToggle={handleToggle}
             />
           ))}
         </SortableContext>
@@ -379,14 +395,18 @@ function TreeItem({
   onCreate,
   pagesKey,
   currentId,
+  collapsed,
+  onToggle,
 }: {
   node: TreeNode;
   depth: number;
   onCreate: (parentId: string | null, sectionId: string | null) => void;
   pagesKey: string | null;
   currentId: string | undefined;
+  collapsed: Set<string>;
+  onToggle: (node: TreeNode, recursive: boolean) => void;
 }) {
-  const [open, setOpen] = useState(true);
+  const open = !collapsed.has(node.id);
   const [editing, setEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState(node.title);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -450,17 +470,25 @@ function TreeItem({
         } ${currentId === node.id ? "bg-[var(--surface-active)]" : ""}`}
         style={{ paddingLeft: 8 + depth * 12 }}
       >
-        <button
-          onClick={(e) => { e.stopPropagation(); setOpen(!open); }}
-          className="w-4 shrink-0 flex items-center justify-center"
-        >
-          {hasChildren && (
+        {hasChildren ? (
+          <button
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onToggle(node, e.shiftKey);
+            }}
+            onMouseDown={(e) => { if (e.shiftKey) e.preventDefault(); }}
+            title="Maj+clic : replier/déplier toute la branche"
+            className="w-4 shrink-0 flex items-center justify-center select-none text-[var(--text-muted)]"
+          >
             <ChevronRight
               size={12}
               className={open ? "rotate-90 transition-transform" : "transition-transform"}
             />
-          )}
-        </button>
+          </button>
+        ) : (
+          <span className="w-4 shrink-0" />
+        )}
 
         {editing ? (
           <input
@@ -520,6 +548,8 @@ function TreeItem({
               onCreate={onCreate}
               pagesKey={pagesKey}
               currentId={currentId}
+              collapsed={collapsed}
+              onToggle={onToggle}
             />
           ))}
         </SortableContext>

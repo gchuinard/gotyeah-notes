@@ -32,6 +32,42 @@ export function buildTree(pages: FlatPage[]): TreeNode[] {
   return roots;
 }
 
+/**
+ * Ids de la branche enracinée en `node` : l'id du nœud lui-même + tous les ids
+ * de ses descendants (dossiers ET feuilles), en profondeur. Pur → testable.
+ * Sert au repli/dépli RÉCURSIF d'une branche de la sidebar (Maj+clic sur le chevron).
+ */
+export function collectSubtreeIds(node: TreeNode): string[] {
+  const ids: string[] = [node.id];
+  for (const child of node.children) {
+    ids.push(...collectSubtreeIds(child));
+  }
+  return ids;
+}
+
+/**
+ * Prochain Set d'ids « repliés » après un Maj+clic sur le chevron de `node`
+ * (repli/dépli RÉCURSIF de toute la branche). La direction dépend de l'état
+ * courant du nœud cliqué :
+ * - nœud déplié (absent du Set) → repli : ajoute l'id du nœud et de tous ses
+ *   descendants au Set.
+ * - nœud replié (présent dans le Set) → dépli : retire l'id du nœud et de tous
+ *   ses descendants du Set.
+ * Retourne TOUJOURS un nouveau Set (immutabilité, aucune mutation en place).
+ */
+export function toggleBranchCollapsed(
+  collapsed: Set<string>,
+  node: TreeNode
+): Set<string> {
+  const next = new Set(collapsed);
+  const collapse = !collapsed.has(node.id);
+  for (const id of collectSubtreeIds(node)) {
+    if (collapse) next.add(id);
+    else next.delete(id);
+  }
+  return next;
+}
+
 export type Crumb = { label: string; href: string | null; icon: string | null };
 
 /**
