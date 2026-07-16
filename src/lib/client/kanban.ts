@@ -1,4 +1,4 @@
-import type { PropertyValue } from "@/lib/db";
+import type { PropertyValue, RecordProperties } from "@/lib/db";
 
 /**
  * Identité DnD d'une carte : « colonne::record ».
@@ -63,4 +63,88 @@ export function initialGroupValue(
   optionId: string | null
 ): PropertyValue | null {
   return groupValueOnDrop(propertyType, undefined, null, optionId);
+}
+
+/**
+ * Fusionne le pré-remplissage dérivé des filtres (`seed`) avec la valeur d'axe
+ * (groupBy) d'une carte créée dans une colonne kanban.
+ *
+ * La valeur d'axe PRIME toujours : si un filtre eq porte sur la MÊME propriété
+ * que le groupBy, c'est la colonne cliquée (`groupValue`) qui gagne — la carte
+ * doit naître dans cette colonne. `groupValue === null` (colonne « Sans valeur »)
+ * ne pose aucune clé d'axe : le seed est renvoyé tel quel.
+ *
+ * Fonction PURE → testable en environnement node.
+ */
+export function mergeSeedWithGroupValue(
+  seed: RecordProperties,
+  groupByPropertyId: string,
+  groupValue: PropertyValue | null
+): RecordProperties {
+  const merged: RecordProperties = { ...seed };
+  if (groupValue !== null) merged[groupByPropertyId] = groupValue;
+  return merged;
+}
+
+/**
+ * Faut-il proposer le bouton d'ajout en tête d'une colonne kanban ?
+ *
+ * Avec le flag `createInUnassignedOnly`, la création n'est offerte que dans la
+ * colonne « Sans valeur » (`optionId === null`) : toute carte naît sans valeur
+ * d'axe, à classer ensuite. Sans le flag, le bouton apparaît sur chaque colonne.
+ *
+ * Le flag ne pilote QUE l'affichage du bouton, pas sa POSITION (le bouton est
+ * ancré en tête de colonne pour rester visible même sur une lane pleine).
+ * Fonction PURE → testable en environnement node.
+ */
+export function shouldShowKanbanAddButton(
+  createOnlyInUnassigned: boolean,
+  optionId: string | null
+): boolean {
+  return !createOnlyInUnassigned || optionId === null;
+}
+
+/**
+ * Propriétés « métier » toujours affichées et éditables sur une carte du board,
+ * même si leur position les exclurait du top-2. Repérées par NOM (le nom est le
+ * seul point de contact stable avec l'utilisateur ; l'id est opaque).
+ */
+export const FORCED_CARD_PROPERTY_NAMES = ["Main à", "Projet"];
+
+/** Nom normalisé (trim + minuscules + sans diacritiques) pour un match robuste. */
+function normalizePropName(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "");
+}
+
+const FORCED_CARD_PROPERTY_SET = new Set(FORCED_CARD_PROPERTY_NAMES.map(normalizePropName));
+
+/**
+ * Propriétés à rendre (et éditer en inline) sur une carte kanban.
+ *
+ * Base historique = les `limit` premières propriétés (hors `title` et hors axe de
+ * regroupement) par position. On y ADJOINT toute propriété « forcée » (Main à,
+ * Projet) absente de cette base, pour GARANTIR sa présence et son édition inline
+ * quelle que soit sa position — sans l'ajouter deux fois si elle est déjà dans le
+ * top-2. Ordre final stable = par position.
+ *
+ * Fonction PURE (contrainte structurelle minimale) → testable en environnement node.
+ */
+export function buildCardProps<
+  T extends { id: string; name: string; type: string; position: number }
+>(properties: T[], groupByPropertyId: string | undefined, limit = 2): T[] {
+  const eligible = properties
+    .filter((p) => p.type !== "title" && p.id !== groupByPropertyId)
+    .sort((a, b) => a.position - b.position);
+
+  const base = eligible.slice(0, limit);
+  const baseIds = new Set(base.map((p) => p.id));
+  const forced = eligible.filter(
+    (p) => !baseIds.has(p.id) && FORCED_CARD_PROPERTY_SET.has(normalizePropName(p.name))
+  );
+
+  return [...base, ...forced].sort((a, b) => a.position - b.position);
 }

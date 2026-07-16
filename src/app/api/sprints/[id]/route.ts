@@ -3,7 +3,12 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 import { checkSprintAccess } from "@/lib/workspace";
-import { parseManyRecords } from "@/lib/db";
+import {
+  parseManyRecords,
+  reconcileDelivered,
+  buildReleaseNotesBlocks,
+} from "@/lib/db";
+import { appendReleaseNotesToPage } from "@/lib/pages";
 
 // Renommage, objectif, dates, position et transitions d'état (state) :
 // "future" → "active" = démarrer le sprint, "active" → "completed" = terminer.
@@ -11,6 +16,12 @@ import { parseManyRecords } from "@/lib/db";
 // - Clôture : si moveIncompleteToBacklog (+ statusPropertyId + doneStatusOptionId),
 //   les issues non terminées (status != doneOption) retournent au backlog
 //   (sprintId = null) dans la même transaction que le passage à "completed".
+// - Clôture : les notes de version (Sprint.releaseNotes) sont générées UNE FOIS, et
+//   un bloc daté est auto-appendé À LA FIN de la page « Patch notes » mappée
+//   (Database.patchNotesPageId), dans la MÊME transaction (Ticket 8). Garde-fous :
+//   réconciliation d'exhaustivité (listées == livrées) sinon rollback+422 ;
+//   idempotence via un marqueur sprintId sur le bloc ; page illisible → rollback+422 ;
+//   pas de page mappée → clôture OK + flag `patchNotesAppend` explicite.
 const patchSprintSchema = z.object({
   name: z.string().min(1).max(120).optional(),
   goal: z.string().max(2000).nullable().optional(),
@@ -64,6 +75,8 @@ export async function PATCH(
   // sinon deux PATCH state=active concurrents (UI + MCP) passent tous les deux le
   // findFirst avant que l'un n'écrive → deux sprints actifs. La transaction sérialise
   // le check+write. Le conflit remonte via une exception typée (→ 409 hors transaction).
+  // La clôture (renvoi backlog + génération notes + append page) est atomique dans la
+  // même transaction : toute erreur (réconciliation, page illisible) annule le tout.
   try {
     const sprint = await prisma.$transaction(async (tx) => {
       if (state === "active") {
@@ -76,17 +89,19 @@ export async function PATCH(
 
       const updated = await tx.sprint.update({ where: { id }, data });
 
-      // Clôture avec renvoi des incomplètes au backlog, dans la même transaction.
-      if (
-        state === "completed" && moveIncompleteToBacklog &&
-        statusPropertyId && doneStatusOptionId
-      ) {
+      if (state !== "completed") return updated;
+
+      // ── Clôture ──────────────────────────────────────────────────────────
+      // Renvoi des issues non terminées au backlog (si demandé + statut câblé).
+      let reportedCount = 0;
+      if (moveIncompleteToBacklog && statusPropertyId && doneStatusOptionId) {
         const recs = await tx.record.findMany({
           where: { databaseId: access.databaseId, sprintId: id, trashedAt: null },
         });
         const incompleteIds = parseManyRecords(recs)
           .filter((r) => r.properties[statusPropertyId] !== doneStatusOptionId)
           .map((r) => r.id);
+        reportedCount = incompleteIds.length;
         if (incompleteIds.length > 0) {
           await tx.record.updateMany({
             where: { id: { in: incompleteIds } },
@@ -95,22 +110,54 @@ export async function PATCH(
         }
       }
 
-      // Notes de version : à la clôture, générées UNE SEULE fois (si pas déjà
-      // présentes) depuis les issues encore dans le sprint — c-à-d les LIVRÉES,
-      // après le renvoi des incomplètes au backlog ci-dessus.
-      if (state === "completed" && !updated.releaseNotes) {
-        const delivered = await tx.record.findMany({
-          where: { databaseId: access.databaseId, sprintId: id, trashedAt: null },
-          orderBy: { position: "asc" },
-          select: { title: true },
-        });
-        return tx.sprint.update({
-          where: { id },
-          data: { releaseNotes: buildReleaseNotes(updated, delivered) },
-        });
+      // Idempotence : notes déjà générées (re-clôture / retry) → aucune régénération
+      // ni second append. Le contenu de la page reste strictement identique.
+      if (updated.releaseNotes) {
+        return { ...updated, patchNotesAppend: "already" as const };
       }
 
-      return updated;
+      // Issues LIVRÉES = celles encore dans le sprint après le renvoi des incomplètes.
+      const deliveredRecs = parseManyRecords(
+        await tx.record.findMany({
+          where: { databaseId: access.databaseId, sprintId: id, trashedAt: null },
+          orderBy: { position: "asc" },
+        })
+      );
+
+      // Garde-fou : réconciliation d'exhaustivité (si le statut est câblé). Toute
+      // issue listée doit être « terminée », sinon le bloc mentirait → rollback.
+      if (statusPropertyId && doneStatusOptionId) {
+        const rec = reconcileDelivered(deliveredRecs, statusPropertyId, doneStatusOptionId);
+        if (!rec.ok) throw new ReconciliationError(rec.listed, rec.delivered);
+      }
+
+      const withNotes = await tx.sprint.update({
+        where: { id },
+        data: { releaseNotes: buildReleaseNotes(updated, deliveredRecs, reportedCount) },
+      });
+
+      // Append (idempotent) à la page « Patch notes » mappée, même transaction.
+      const db = await tx.database.findUnique({
+        where: { id: access.databaseId },
+        select: { patchNotesPageId: true },
+      });
+      const blocks = buildReleaseNotesBlocks({
+        sprintId: id,
+        sprintName: updated.name,
+        closedDate: (updated.endDate ?? new Date()).toISOString().slice(0, 10),
+        deliveredTitles: deliveredRecs.map((r) => r.title),
+        reportedCount,
+      });
+      const append = await appendReleaseNotesToPage(tx, {
+        pageId: db?.patchNotesPageId ?? null,
+        workspaceId: access.workspaceId,
+        userId: user.id,
+        sprintId: id,
+        blocks,
+      });
+      if (append.status === "corrupt") throw new PatchNotesCorruptError();
+
+      return { ...withNotes, patchNotesAppend: append.status };
     });
     return NextResponse.json(sprint);
   } catch (err) {
@@ -120,6 +167,27 @@ export async function PATCH(
         { status: 409 }
       );
     }
+    if (err instanceof ReconciliationError) {
+      return NextResponse.json(
+        {
+          error:
+            `Incohérence : ${err.listed} issue(s) rattachée(s) au sprint mais ` +
+            `${err.delivered} marquée(s) terminée(s). Corrige le statut des issues ` +
+            `(ou renvoie-les au backlog) puis rejoue la clôture.`,
+        },
+        { status: 422 }
+      );
+    }
+    if (err instanceof PatchNotesCorruptError) {
+      return NextResponse.json(
+        {
+          error:
+            "Le contenu de la page « Patch notes » est illisible (JSON invalide). " +
+            "Clôture annulée pour ne pas l'écraser ; corrige la page puis rejoue.",
+        },
+        { status: 422 }
+      );
+    }
     throw err;
   }
 }
@@ -127,10 +195,24 @@ export async function PATCH(
 /** Levée dans la transaction quand un autre sprint est déjà actif → 409. */
 class SprintAlreadyActiveError extends Error {}
 
-/** Notes de version auto : nom du sprint, date de clôture, objectif, issues livrées. */
+/** Levée quand les issues listées ≠ issues livrées (statut câblé) → rollback + 422. */
+class ReconciliationError extends Error {
+  constructor(readonly listed: number, readonly delivered: number) {
+    super("reconciliation");
+  }
+}
+
+/** Levée quand la page « Patch notes » a un content JSON illisible → rollback + 422. */
+class PatchNotesCorruptError extends Error {}
+
+/**
+ * Notes de version auto (markdown, `Sprint.releaseNotes`) : nom du sprint, date de
+ * clôture, objectif, issues livrées, et — distinct — le nombre d'issues reportées.
+ */
 function buildReleaseNotes(
   sprint: { name: string; goal: string | null; endDate: Date | null },
-  records: { title: string }[]
+  records: { title: string }[],
+  reportedCount: number
 ): string {
   const date = (sprint.endDate ?? new Date()).toISOString().slice(0, 10);
   const lines = [`# ${sprint.name}`, `Clôturé le ${date}.`];
@@ -138,6 +220,12 @@ function buildReleaseNotes(
   const n = records.length;
   lines.push("", `${n} issue${n > 1 ? "s" : ""} livrée${n > 1 ? "s" : ""} :`);
   for (const r of records) lines.push(`- ${r.title || "Sans titre"}`);
+  if (reportedCount > 0) {
+    lines.push(
+      "",
+      `${reportedCount} issue${reportedCount > 1 ? "s" : ""} reportée${reportedCount > 1 ? "s" : ""} au backlog.`
+    );
+  }
   return lines.join("\n");
 }
 

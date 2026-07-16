@@ -19,6 +19,11 @@ type CellProps = {
   onSave: (value: PropertyValue | null) => void;
   /** If true, enters edit mode immediately on mount (used for newly created rows). */
   autoEdit?: boolean;
+  /**
+   * Notifie l'entrée/sortie du mode édition. Utilisé par la carte kanban pour
+   * neutraliser le drag & l'ouverture du panneau tant qu'un dropdown est ouvert.
+   */
+  onEditingChange?: (editing: boolean) => void;
 };
 
 // ─── Badge ────────────────────────────────────────────────────────────────────
@@ -400,7 +405,7 @@ function MultiSelectDropdown({
 
 // ─── Main Cell component ──────────────────────────────────────────────────────
 
-export default function Cell({ property, record, onSave, autoEdit }: CellProps) {
+export default function Cell({ property, record, onSave, autoEdit, onEditingChange }: CellProps) {
   const [isEditing, setIsEditing] = useState(false);
   const triggerRef = useRef<HTMLDivElement>(null);
 
@@ -408,6 +413,16 @@ export default function Cell({ property, record, onSave, autoEdit }: CellProps) 
   useEffect(() => {
     if (autoEdit) setIsEditing(true);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Signale les transitions d'édition (sans déclencher au montage) : le parent
+  // kanban désactive alors drag & clic d'ouverture tant que l'édition est active.
+  const prevEditingRef = useRef(isEditing);
+  useEffect(() => {
+    if (prevEditingRef.current !== isEditing) {
+      prevEditingRef.current = isEditing;
+      onEditingChange?.(isEditing);
+    }
+  }, [isEditing, onEditingChange]);
 
   /** Current stored value for this cell (normalised: undefined → null). */
   const storedValue = useCallback((): PropertyValue | null => {

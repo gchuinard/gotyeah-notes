@@ -1,15 +1,34 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import useSWR from "swr";
 import { Search, FileText, Rows3 } from "lucide-react";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
+import { searchResultPathSegments, truncatePathEnd, type FlatPage } from "@/lib/tree";
 
 type Result =
   | { kind: "page"; id: string; title: string; icon: string | null; parentId: string | null }
   | { kind: "record"; id: string; pageId: string; title: string; icon: string | null };
 
+type Section = { id: string; name: string; icon: string | null };
+
+const fetcher = (url: string) => fetch(url).then((r) => r.json());
+
+// Budget de caractères de la 2e ligne (chemin) : la palette est en max-w-lg.
+// Le rendu applique aussi `truncate` (ellipse CSS) comme garde-fou visuel.
+const PATH_MAX_CHARS = 52;
+
 function hrefFor(r: Result): string {
   return r.kind === "record" ? `/pages/${r.pageId}?r=${r.id}` : `/pages/${r.id}`;
+}
+
+function pathLineFor(r: Result, pages: FlatPage[], sections: Section[]): string {
+  const segments = searchResultPathSegments(
+    pages,
+    sections,
+    r.kind === "record" ? { kind: "record", pageId: r.pageId } : { kind: "page", id: r.id }
+  );
+  return truncatePathEnd(segments, PATH_MAX_CHARS);
 }
 
 export default function SearchPalette() {
@@ -20,6 +39,12 @@ export default function SearchPalette() {
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
   const { activeWorkspace } = useWorkspace();
+  const wsId = activeWorkspace?.id ?? null;
+
+  // Mêmes clés SWR que Breadcrumb.tsx / la sidebar → cache dédupliqué, aucune
+  // requête supplémentaire déclenchée par la palette pour calculer les chemins.
+  const { data: pages = [] } = useSWR<FlatPage[]>(wsId ? `/api/pages?workspaceId=${wsId}` : null, fetcher);
+  const { data: sections = [] } = useSWR<Section[]>(wsId ? `/api/sections?workspaceId=${wsId}` : null, fetcher);
 
   // Cmd+K / Ctrl+K + événement custom depuis la sidebar
   useEffect(() => {
@@ -110,32 +135,40 @@ export default function SearchPalette() {
         {/* Résultats */}
         {results.length > 0 && (
           <ul className="max-h-72 overflow-y-auto py-1">
-            {results.map((r, i) => (
-              <li
-                key={`${r.kind}-${r.id}`}
-                onClick={() => navigate(r)}
-                onMouseEnter={() => setSelected(i)}
-                className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer text-sm transition-colors ${
-                  i === selected
-                    ? "bg-blue-50 text-blue-700"
-                    : "hover:bg-[var(--surface-hover)] text-[var(--text)]"
-                }`}
-              >
-                {r.icon ? (
-                  <span className="text-base leading-none shrink-0">{r.icon}</span>
-                ) : r.kind === "record" ? (
-                  <Rows3 size={14} className="text-[var(--text-muted)] shrink-0" />
-                ) : (
-                  <FileText size={14} className="text-[var(--text-muted)] shrink-0" />
-                )}
-                <span className="truncate">{r.title || "Sans titre"}</span>
-                {r.kind === "record" && (
-                  <span className="ml-auto shrink-0 text-[10px] uppercase tracking-wide text-[var(--text-muted)] bg-[var(--surface)] px-1.5 py-0.5 rounded">
-                    fiche
-                  </span>
-                )}
-              </li>
-            ))}
+            {results.map((r, i) => {
+              const path = pathLineFor(r, pages, sections);
+              return (
+                <li
+                  key={`${r.kind}-${r.id}`}
+                  onClick={() => navigate(r)}
+                  onMouseEnter={() => setSelected(i)}
+                  className={`flex items-start gap-3 px-4 py-2 cursor-pointer text-sm transition-colors ${
+                    i === selected
+                      ? "bg-blue-50 text-blue-700"
+                      : "hover:bg-[var(--surface-hover)] text-[var(--text)]"
+                  }`}
+                >
+                  {r.icon ? (
+                    <span className="text-base leading-none shrink-0 mt-0.5">{r.icon}</span>
+                  ) : r.kind === "record" ? (
+                    <Rows3 size={14} className="text-[var(--text-muted)] shrink-0 mt-1" />
+                  ) : (
+                    <FileText size={14} className="text-[var(--text-muted)] shrink-0 mt-1" />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <span className="block truncate">{r.title || "Sans titre"}</span>
+                    {path && (
+                      <span className="block truncate text-xs text-[var(--text-muted)]">{path}</span>
+                    )}
+                  </div>
+                  {r.kind === "record" && (
+                    <span className="shrink-0 mt-0.5 text-[10px] uppercase tracking-wide text-[var(--text-muted)] bg-[var(--surface)] px-1.5 py-0.5 rounded">
+                      fiche
+                    </span>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
 

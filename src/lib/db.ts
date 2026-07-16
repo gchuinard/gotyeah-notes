@@ -309,3 +309,316 @@ export function parseSectionsBody(raw: string | null): RecordSection[] | null {
 export function serializeSectionsBody(sections: RecordSection[]): string {
   return JSON.stringify(sections);
 }
+
+// ─── Historique des modifications (RecordRevision) ────────────────────────────
+//
+// Logique PURE (aucun accès DB) pour être testable :
+//  - diffRecordRevisions : quels champs ont RÉELLEMENT changé dans un PATCH ;
+//  - shouldCoalesceRevision : faut-il fusionner dans la dernière révision (même
+//    acteur + même champ, < 2 min) ou créer une nouvelle ligne.
+// L'écriture transactionnelle (create/merge) vit dans la route PATCH records.
+
+/** Fenêtre de coalescence : mêmes acteur/champ dans cet intervalle = fusion. */
+export const REVISION_COALESCE_MS = 2 * 60 * 1000; // 2 minutes
+
+/** Un changement de champ détecté sur un record (before/after non sérialisés). */
+export type RevisionChange = {
+  // "title" | "content" | "sectionsBody" | DatabaseProperty.id | RecordSection.id
+  field: string;
+  before: unknown;
+  after: unknown;
+};
+
+/** État d'un record AVANT PATCH (valeurs déjà parsées). */
+export type RecordSnapshot = {
+  title: string;
+  content: string;
+  properties: RecordProperties;
+  sectionsBody: RecordSection[] | null;
+};
+
+/** Fragment de PATCH pertinent pour l'audit (les autres champs ne sont pas tracés). */
+export type RecordPatchInput = {
+  title?: string;
+  content?: string;
+  // Patch BRUT des propriétés (une valeur null = suppression de la cellule).
+  properties?: RecordProperties;
+  sectionsBody?: RecordSection[] | null;
+};
+
+/** Égalité structurelle stable pour des valeurs JSON-sérialisables (undefined ≡ null). */
+function jsonEqual(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+}
+
+/** Contenu BlockNote d'une section, normalisé (section absente ≡ document vide). */
+function sectionContent(sections: RecordSection[] | null, id: string): unknown[] {
+  const found = sections?.find((s) => s.id === id);
+  return Array.isArray(found?.content) ? found.content : [];
+}
+
+/**
+ * Calcule la liste des champs RÉELLEMENT modifiés par un PATCH.
+ * - title / content : comparaison directe (une valeur identique n'est pas tracée).
+ * - properties : une entrée par propriété dont la valeur diffère (null = suppression,
+ *   before = valeur existante, after = null).
+ * - sectionsBody = tableau : une entrée par section dont le contenu diffère
+ *   (field = RecordSection.id, section absente avant ≡ document vide).
+ * - sectionsBody = null (passage en corps libre) : tracé si le record était sectionné
+ *   (field = "sectionsBody", before = anciennes sections, after = null).
+ */
+export function diffRecordRevisions(
+  before: RecordSnapshot,
+  patch: RecordPatchInput
+): RevisionChange[] {
+  const changes: RevisionChange[] = [];
+
+  if (patch.title !== undefined && patch.title !== before.title) {
+    changes.push({ field: "title", before: before.title, after: patch.title });
+  }
+
+  if (patch.content !== undefined && patch.content !== before.content) {
+    changes.push({ field: "content", before: before.content, after: patch.content });
+  }
+
+  if (patch.properties !== undefined) {
+    for (const [propId, raw] of Object.entries(patch.properties)) {
+      const prev = before.properties[propId] ?? null;
+      const next = raw ?? null;
+      if (!jsonEqual(prev, next)) {
+        changes.push({ field: propId, before: prev, after: next });
+      }
+    }
+  }
+
+  if (patch.sectionsBody !== undefined) {
+    if (patch.sectionsBody === null) {
+      if (before.sectionsBody && before.sectionsBody.length > 0) {
+        changes.push({ field: "sectionsBody", before: before.sectionsBody, after: null });
+      }
+    } else {
+      for (const section of patch.sectionsBody) {
+        const prev = sectionContent(before.sectionsBody, section.id);
+        const next = Array.isArray(section.content) ? section.content : [];
+        if (!jsonEqual(prev, next)) {
+          changes.push({ field: section.id, before: prev, after: next });
+        }
+      }
+    }
+  }
+
+  return changes;
+}
+
+/**
+ * Faut-il fusionner un changement dans la dernière révision du champ plutôt que
+ * créer une nouvelle ligne ? Oui SSI cette dernière révision existe, a le MÊME
+ * acteur et date de MOINS de `windowMs`. Absorbe le spam d'autosave BlockNote
+ * (une seule ligne coalescée par champ), sans jamais fusionner l'action d'un
+ * autre acteur ni une modification hors fenêtre.
+ */
+export function shouldCoalesceRevision(
+  last: { actorId: string | null; createdAt: Date } | null,
+  actorId: string,
+  now: Date,
+  windowMs: number = REVISION_COALESCE_MS
+): boolean {
+  if (!last) return false;
+  if (last.actorId !== actorId) return false;
+  return now.getTime() - last.createdAt.getTime() < windowMs;
+}
+
+/** Révision telle que renvoyée par l'API (before/after parsés, acteur résolu). */
+export type ParsedRecordRevision = {
+  id: string;
+  recordId: string;
+  field: string;
+  before: unknown;
+  after: unknown;
+  createdAt: Date;
+  actor: { id: string; displayName: string } | null;
+};
+
+/** Ligne RecordRevision + acteur joint, telle que lue en base (before/after en JSON). */
+export type RecordRevisionRow = {
+  id: string;
+  recordId: string;
+  field: string;
+  before: string;
+  after: string;
+  createdAt: Date;
+  actor: { id: string; displayName: string } | null;
+};
+
+export function parseRecordRevision(raw: RecordRevisionRow): ParsedRecordRevision {
+  return {
+    id: raw.id,
+    recordId: raw.recordId,
+    field: raw.field,
+    before: JSON.parse(raw.before),
+    after: JSON.parse(raw.after),
+    createdAt: raw.createdAt,
+    actor: raw.actor,
+  };
+}
+
+// ─── Notes de version : blocs BlockNote de la page « Patch notes » ────────────
+//
+// À la clôture d'un sprint, un groupe de blocs BlockNote (titre daté + issues
+// livrées + compteur reporté) est appendé À LA FIN du document BlockNote de la
+// page « 📓 Patch notes » de la database. Ces helpers sont PURS (aucun accès DB)
+// pour être testables ; l'écriture transactionnelle vit dans lib/pages.ts.
+
+/**
+ * Bloc BlockNote minimal. Un document BlockNote (Page.content) est un tableau de
+ * ces blocs. On produit la forme canonique sérialisée (props/content/children
+ * explicites) pour un rendu robuste au rechargement de l'éditeur.
+ */
+export type BlockNoteBlock = {
+  id: string;
+  type: string;
+  props: Record<string, unknown>;
+  content: Array<{ type: "text"; text: string; styles: Record<string, unknown> }>;
+  children: unknown[];
+};
+
+/** Préfixe de l'id du bloc titre — marqueur d'idempotence porté par sprintId. */
+export const RELEASE_NOTES_BLOCK_PREFIX = "release-notes-";
+
+/** Id déterministe du bloc titre d'un sprint (marqueur d'idempotence de l'append). */
+export function releaseNotesBlockId(sprintId: string): string {
+  return `${RELEASE_NOTES_BLOCK_PREFIX}${sprintId}`;
+}
+
+const DEFAULT_BLOCK_PROPS = {
+  textColor: "default",
+  backgroundColor: "default",
+  textAlignment: "left",
+} as const;
+
+function textBlock(
+  id: string,
+  type: "paragraph" | "bulletListItem",
+  text: string
+): BlockNoteBlock {
+  return {
+    id,
+    type,
+    props: { ...DEFAULT_BLOCK_PROPS },
+    content: [{ type: "text", text, styles: {} }],
+    children: [],
+  };
+}
+
+export type ReleaseNotesBlockInput = {
+  sprintId: string;
+  sprintName: string;
+  closedDate: string; // "YYYY-MM-DD"
+  deliveredTitles: string[];
+  reportedCount: number;
+};
+
+/**
+ * Construit le groupe de blocs BlockNote appendé à la page « Patch notes ».
+ * - Bloc titre (heading) portant l'id marqueur `release-notes-<sprintId>`.
+ * - Un compteur de livrées, puis une puce par issue livrée.
+ * - Un compteur de reportées (distinct des livrées) si reportedCount > 0.
+ * Garde-fou titre vide : repli « Sans titre » (jamais une puce/ligne vide).
+ */
+export function buildReleaseNotesBlocks(input: ReleaseNotesBlockInput): BlockNoteBlock[] {
+  const markerId = releaseNotesBlockId(input.sprintId);
+  const n = input.deliveredTitles.length;
+
+  const heading: BlockNoteBlock = {
+    id: markerId,
+    type: "heading",
+    props: { ...DEFAULT_BLOCK_PROPS, level: 2 },
+    content: [
+      {
+        type: "text",
+        text: `${input.sprintName || "Sprint"} — ${input.closedDate}`,
+        styles: {},
+      },
+    ],
+    children: [],
+  };
+
+  const summary = textBlock(
+    `${markerId}-summary`,
+    "paragraph",
+    `${n} issue${n > 1 ? "s" : ""} livrée${n > 1 ? "s" : ""}`
+  );
+
+  const bullets = input.deliveredTitles.map((t, i) =>
+    textBlock(`${markerId}-d${i}`, "bulletListItem", t || "Sans titre")
+  );
+
+  const blocks: BlockNoteBlock[] = [heading, summary, ...bullets];
+
+  if (input.reportedCount > 0) {
+    const r = input.reportedCount;
+    blocks.push(
+      textBlock(
+        `${markerId}-reported`,
+        "paragraph",
+        `${r} issue${r > 1 ? "s" : ""} reportée${r > 1 ? "s" : ""} au backlog`
+      )
+    );
+  }
+
+  return blocks;
+}
+
+/**
+ * Réconciliation d'exhaustivité : les issues qui SERAIENT listées (encore dans le
+ * sprint au moment de la génération) doivent toutes être « livrées » (statut ===
+ * doneStatusOptionId). Sinon le bloc listerait comme livrée une issue non terminée
+ * → l'appelant doit annuler la clôture (rollback) et renvoyer une erreur.
+ */
+export function reconcileDelivered(
+  records: Array<{ properties: RecordProperties }>,
+  statusPropertyId: string,
+  doneStatusOptionId: string
+): { ok: boolean; listed: number; delivered: number } {
+  const listed = records.length;
+  const delivered = records.filter(
+    (r) => r.properties[statusPropertyId] === doneStatusOptionId
+  ).length;
+  return { ok: listed === delivered, listed, delivered };
+}
+
+export type AppendBlocksResult =
+  | { status: "appended"; content: string }
+  | { status: "already"; content: string }
+  | { status: "corrupt" };
+
+/**
+ * Append idempotent des blocs À LA FIN d'un document BlockNote sérialisé.
+ * - Contenu non parsable ou non-tableau → { status: "corrupt" } (l'appelant décide
+ *   de rollback ; jamais d'écrasement du contenu existant).
+ * - Marqueur `release-notes-<sprintId>` déjà présent (bloc titre) → { status:
+ *   "already" }, contenu inchangé (jamais 2 blocs pour le même sprint).
+ * - Sinon les blocs sont concaténés en fin de tableau (aucun bloc préexistant
+ *   réordonné ni écrasé).
+ */
+export function appendReleaseNotesToContent(
+  rawContent: string,
+  sprintId: string,
+  blocks: BlockNoteBlock[]
+): AppendBlocksResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawContent);
+  } catch {
+    return { status: "corrupt" };
+  }
+  if (!Array.isArray(parsed)) return { status: "corrupt" };
+
+  const marker = releaseNotesBlockId(sprintId);
+  const already = parsed.some(
+    (b) => typeof b === "object" && b !== null && (b as { id?: unknown }).id === marker
+  );
+  if (already) return { status: "already", content: rawContent };
+
+  return { status: "appended", content: JSON.stringify([...parsed, ...blocks]) };
+}

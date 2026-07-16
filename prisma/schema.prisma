@@ -20,6 +20,7 @@ model User {
   pageVisits   PageVisit[]
   ownedPages   Page[]       @relation("PageOwner")
   records      Record[]
+  recordRevisions RecordRevision[]
 }
 
 model Session {
@@ -169,6 +170,12 @@ model Database {
   // Squelette de sections estampé sur les nouveaux records (JSON [{id,label}]).
   // Copié du template à la création → robuste si le template change/disparaît.
   recordSections String?
+  // Page « 📓 Patch notes » où les notes de version sont auto-appendées à la clôture
+  // d'un sprint (Ticket 8). Référence LIBRE (pas de relation Prisma) : éviter une
+  // 2e relation nommée Page↔Database ; la robustesse est assurée à l'append (page
+  // existante + même workspace, sinon flag « non appendé »). null = pas de mapping
+  // → la clôture réussit quand même, avec un flag explicite dans la réponse.
+  patchNotesPageId String?
   createdAt  DateTime           @default(now())
   updatedAt  DateTime           @updatedAt
 }
@@ -214,11 +221,39 @@ model Record {
   // Corbeille (soft delete). null = actif ; purge automatique après 30 j.
   trashedAt  DateTime?
 
+  // Piste d'audit qui/quoi/quand des modifications (onglet Historique de la carte).
+  revisions  RecordRevision[]
+
   // Composite : les records sont lus filtrés par databaseId ET triés par position.
   @@index([databaseId, position])
   @@index([createdBy])
   @@index([sprintId])
   @@index([trashedAt])
+}
+
+// Historique des modifications d'un record (piste d'audit qui/quoi/quand).
+// UNE ligne par CHAMP effectivement changé (title / content / sectionsBody /
+// DatabaseProperty.id / RecordSection.id), écrite côté serveur dans
+// PATCH /api/records/[id]. Coalescence 2 min (même acteur + même champ) pour
+// absorber le spam d'autosave BlockNote. Rétention indéfinie (PAS de purge,
+// contrairement au trashedAt des records). Périmètre records uniquement (v1).
+model RecordRevision {
+  id        String   @id @default(cuid())
+  recordId  String
+  record    Record   @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  // Acteur = utilisateur de la session au moment du PATCH. SetNull : supprimer un
+  // User ne détruit pas la trace (l'auteur devient inconnu, la révision demeure).
+  actorId   String?
+  actor     User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  // Champ touché : "title" | "content" | "sectionsBody" | DatabaseProperty.id | RecordSection.id
+  field     String
+  before    String   // JSON de l'ancienne valeur (null sérialisé si absente)
+  after     String   // JSON de la nouvelle valeur
+  // Rafraîchi lors d'une fusion (coalescence) → base de la fenêtre de 2 min.
+  createdAt DateTime @default(now())
+
+  @@index([recordId, createdAt])
+  @@index([recordId, field])
 }
 
 // Sprint (vue backlog façon Jira). Lié à une Database. Les records y sont

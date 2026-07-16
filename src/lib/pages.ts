@@ -1,5 +1,6 @@
 import { prisma } from "./prisma";
 import type { Prisma } from "../../generated/prisma/client";
+import { appendReleaseNotesToContent, type BlockNoteBlock } from "./db";
 
 type CreatePageInput = {
   title?: string;
@@ -203,6 +204,56 @@ export async function setPageSection(
 
     return { ok: true, page };
   });
+}
+
+// ─── Notes de version : append à la page « Patch notes » ─────────────────────
+
+export type AppendReleaseNotesResult =
+  | { status: "appended" }
+  | { status: "already" }
+  | { status: "no_page" } // pas de mapping, ou page introuvable / hors workspace / en corbeille / inaccessible
+  | { status: "corrupt" };
+
+/**
+ * Append (idempotent) le groupe de blocs de notes de version À LA FIN du document
+ * BlockNote de la page cible, DANS la transaction fournie (même atomicité que la
+ * clôture du sprint). Ne lève jamais : renvoie un statut que l'appelant traduit
+ * (flag de réponse ou rollback selon le cas). Robustesse du mapping libre :
+ * page absente / d'un autre workspace / en corbeille / inaccessible à l'acteur
+ * (page privée d'un autre membre) ⇒ "no_page" (défense en profondeur : le mapping
+ * est déjà refusé à la configuration, mais la visibility peut changer après coup).
+ */
+export async function appendReleaseNotesToPage(
+  tx: Prisma.TransactionClient,
+  opts: {
+    pageId: string | null;
+    workspaceId: string;
+    userId: string;
+    sprintId: string;
+    blocks: BlockNoteBlock[];
+  }
+): Promise<AppendReleaseNotesResult> {
+  if (!opts.pageId) return { status: "no_page" };
+
+  const page = await tx.page.findUnique({
+    where: { id: opts.pageId },
+    select: { content: true, workspaceId: true, trashedAt: true, visibility: true, ownerId: true },
+  });
+  if (
+    !page ||
+    page.workspaceId !== opts.workspaceId ||
+    page.trashedAt ||
+    (page.visibility === "private" && page.ownerId !== opts.userId)
+  ) {
+    return { status: "no_page" };
+  }
+
+  const result = appendReleaseNotesToContent(page.content, opts.sprintId, opts.blocks);
+  if (result.status === "corrupt") return { status: "corrupt" };
+  if (result.status === "already") return { status: "already" };
+
+  await tx.page.update({ where: { id: opts.pageId }, data: { content: result.content } });
+  return { status: "appended" };
 }
 
 // ─── Suppression de section (réaffectation des racines) ──────────────────────

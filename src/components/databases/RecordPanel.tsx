@@ -3,7 +3,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import useSWR, { mutate as globalMutate } from "swr";
 import {
   X, Type, Hash, ChevronDown, List, Calendar, CheckSquare, Link, Mail,
-  LayoutTemplate,
+  LayoutTemplate, History,
 } from "lucide-react";
 import { useCreateBlockNote } from "@blocknote/react";
 import { fr } from "@blocknote/core/locales";
@@ -80,6 +80,93 @@ function SectionEditor({
         <PageLinkMenu editor={editor} workspaceId={workspaceId} />
       </BlockNoteView>
     </div>
+  );
+}
+
+// ─── Onglet Historique (piste d'audit qui/quoi/quand) ─────────────────────────
+
+type RevisionEntry = {
+  id: string;
+  field: string;
+  before: unknown;
+  after: unknown;
+  createdAt: string;
+  actor: { id: string; displayName: string } | null;
+};
+
+const dateFmt = new Intl.DateTimeFormat("fr-FR", {
+  day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
+});
+
+/** Rendu court d'une valeur scalaire (title/property) pour l'aperçu before → after. */
+function renderScalar(v: unknown): string {
+  if (v === null || v === undefined || v === "") return "vide";
+  if (typeof v === "boolean") return v ? "oui" : "non";
+  if (Array.isArray(v)) return v.length ? v.join(", ") : "vide";
+  return String(v);
+}
+
+function RevisionHistory({
+  recordId,
+  properties,
+}: {
+  recordId: string;
+  properties: ParsedDatabaseProperty[];
+}) {
+  const { data: revisions, isLoading } = useSWR<RevisionEntry[]>(
+    `/api/records/${recordId}/revisions`,
+    fetcher
+  );
+
+  const fieldLabel = (field: string): string => {
+    if (field === "title") return "Titre";
+    if (field === "content") return "Contenu";
+    if (field === "sectionsBody") return "Corps";
+    const prop = properties.find((p) => p.id === field);
+    return prop ? prop.name : "Section";
+  };
+
+  // Les champs de corps (BlockNote) n'ont pas d'aperçu lisible → mention générique.
+  const isBodyField = (field: string): boolean =>
+    field === "content" ||
+    field === "sectionsBody" ||
+    (field !== "title" && !properties.some((p) => p.id === field));
+
+  if (isLoading) {
+    return <p className="px-6 py-4 text-sm text-[var(--text-muted)]">Chargement…</p>;
+  }
+  if (!revisions || revisions.length === 0) {
+    return (
+      <p className="px-6 py-4 text-sm text-[var(--text-muted)]">
+        Aucune modification enregistrée pour l’instant.
+      </p>
+    );
+  }
+
+  return (
+    <ul className="px-6 py-3 flex flex-col gap-3">
+      {revisions.map((rev) => (
+        <li key={rev.id} className="flex flex-col gap-0.5 text-sm">
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="text-[var(--text)]">
+              <span className="font-medium">{rev.actor?.displayName ?? "Utilisateur inconnu"}</span>
+              {" a modifié "}
+              <span className="font-medium">{fieldLabel(rev.field)}</span>
+            </span>
+            <time className="shrink-0 text-xs text-[var(--text-muted)]">
+              {dateFmt.format(new Date(rev.createdAt))}
+            </time>
+          </div>
+          {isBodyField(rev.field) ? (
+            <span className="text-xs text-[var(--text-muted)]">Contenu mis à jour</span>
+          ) : (
+            <span className="text-xs text-[var(--text-muted)] truncate">
+              {renderScalar(rev.before)} → {renderScalar(rev.after)}
+            </span>
+          )}
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -288,6 +375,13 @@ export default function RecordPanel({ record, properties, databaseId, onClose }:
 
   const isSectioned = sections.length > 0;
 
+  // ── Onglets : « Contenu » (défaut) / « Historique » ──────────────────────────
+  // L'onglet contenu reste sélectionné à l'ouverture ET à chaque changement de carte.
+  const [activeTab, setActiveTab] = useState<"content" | "history">("content");
+  useEffect(() => {
+    setActiveTab("content");
+  }, [record.id]);
+
   // ── Visible properties (non-title, sorted) ───────────────────────────────────
   const visibleProps = properties
     .filter((p) => p.type !== "title")
@@ -418,51 +512,84 @@ export default function RecordPanel({ record, properties, databaseId, onClose }:
           </div>
         </div>
 
-        {/* Properties */}
-        {visibleProps.length > 0 && (
-          <div className="px-6 py-1 shrink-0 grid grid-cols-[minmax(0,max-content)_minmax(0,1fr)] gap-x-3">
-            {visibleProps.map((property) => (
-              <Fragment key={property.id}>
-                <div className="flex items-center gap-2 max-w-[11rem] py-1.5 min-h-[36px] text-sm text-[var(--text-muted)]">
-                  <span className="shrink-0">{PROP_ICONS[property.type] ?? <Type size={14} />}</span>
-                  <span className="truncate">{property.name}</span>
-                </div>
-                <div className="flex items-center min-w-0 py-1.5 min-h-[36px] text-sm">
-                  <Cell
-                    property={property}
-                    record={record}
-                    onSave={(value) => saveProperty(property, value)}
-                  />
-                </div>
-              </Fragment>
-            ))}
+        {/* Onglets : Contenu / Historique */}
+        <div className="flex items-center gap-4 px-6 border-b border-[var(--border)] shrink-0">
+          {([
+            { key: "content", label: "Contenu", icon: null },
+            { key: "history", label: "Historique", icon: <History size={14} /> },
+          ] as const).map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={[
+                "flex items-center gap-1.5 py-2 -mb-px border-b-2 text-sm transition-colors",
+                activeTab === tab.key
+                  ? "border-[var(--accent)] text-[var(--text)]"
+                  : "border-transparent text-[var(--text-muted)] hover:text-[var(--text)]",
+              ].join(" ")}
+            >
+              {tab.icon}
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Onglet Contenu : properties + corps. Masqué (non démonté) hors onglet
+            pour préserver l'instance BlockNote et son autosave debouncé. */}
+        <div className={activeTab === "content" ? "flex flex-col flex-1 min-h-0" : "hidden"}>
+          {/* Properties */}
+          {visibleProps.length > 0 && (
+            <div className="px-6 py-1 pt-3 shrink-0 grid grid-cols-[minmax(0,max-content)_minmax(0,1fr)] gap-x-3">
+              {visibleProps.map((property) => (
+                <Fragment key={property.id}>
+                  <div className="flex items-center gap-2 max-w-[11rem] py-1.5 min-h-[36px] text-sm text-[var(--text-muted)]">
+                    <span className="shrink-0">{PROP_ICONS[property.type] ?? <Type size={14} />}</span>
+                    <span className="truncate">{property.name}</span>
+                  </div>
+                  <div className="flex items-center min-w-0 py-1.5 min-h-[36px] text-sm">
+                    <Cell
+                      property={property}
+                      record={record}
+                      onSave={(value) => saveProperty(property, value)}
+                    />
+                  </div>
+                </Fragment>
+              ))}
+            </div>
+          )}
+
+          <div className="border-t border-[var(--border)] mx-6 my-3 shrink-0" />
+
+          {/* Corps : sectionné (libellés fixes) ou libre */}
+          <div className="flex-1 px-2 min-h-[200px]">
+            {isSectioned ? (
+              sections.map((section) => (
+                <SectionEditor
+                  key={`${section.id}-${bodyVersion}`}
+                  section={section}
+                  themeMode={themeMode}
+                  workspaceId={wsId}
+                  onChange={(content) => onSectionChange(section.id, content)}
+                />
+              ))
+            ) : (
+              <BlockNoteView
+                editor={editor}
+                theme={themeMode}
+                onChange={() => contentSaverRef.current?.schedule(JSON.stringify(editor.document))}
+              >
+                <PageLinkMenu editor={editor} workspaceId={wsId} />
+              </BlockNoteView>
+            )}
+          </div>
+        </div>
+
+        {/* Onglet Historique : monté à la demande → fetch paresseux des révisions. */}
+        {activeTab === "history" && (
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            <RevisionHistory recordId={record.id} properties={properties} />
           </div>
         )}
-
-        <div className="border-t border-[var(--border)] mx-6 my-3 shrink-0" />
-
-        {/* Corps : sectionné (libellés fixes) ou libre */}
-        <div className="flex-1 px-2 min-h-[200px]">
-          {isSectioned ? (
-            sections.map((section) => (
-              <SectionEditor
-                key={`${section.id}-${bodyVersion}`}
-                section={section}
-                themeMode={themeMode}
-                workspaceId={wsId}
-                onChange={(content) => onSectionChange(section.id, content)}
-              />
-            ))
-          ) : (
-            <BlockNoteView
-              editor={editor}
-              theme={themeMode}
-              onChange={() => contentSaverRef.current?.schedule(JSON.stringify(editor.document))}
-            >
-              <PageLinkMenu editor={editor} workspaceId={wsId} />
-            </BlockNoteView>
-          )}
-        </div>
       </div>
     </>
   );

@@ -135,7 +135,7 @@ test("alerte : un refus serveur s'affiche dans le dialogue, bouton unique « OK 
   await expect(d).toBeHidden();
 });
 
-test("le dialogue est utilisable depuis le menu d'une carte kanban (sous-arbre triable)", async ({ page }) => {
+test("le dialogue est utilisable depuis l'icône Supprimer d'une carte kanban (sous-arbre triable)", async ({ page }) => {
   const workspaceId = await register(page, "dlg-kanban");
   const pg = await (
     await page.request.post("/api/pages", { data: { workspaceId, title: "DB kanban" } })
@@ -164,15 +164,12 @@ test("le dialogue est utilisable depuis le menu d'une carte kanban (sous-arbre t
   const card = page.getByText(cardTitle);
   await expect(card).toBeVisible();
 
-  // Ouvrir le menu ⋯ DE LA CARTE (portail ancré). Attention : l'onglet de vue a
-  // lui aussi un bouton « Options » → on scope à la colonne.
+  // Icône Supprimer DIRECTE de la carte (le menu ⋯ a été remplacé par 2 icônes).
+  // Scopé à la colonne : la corbeille sidebar et l'onglet de vue portent des
+  // libellés proches.
   const column = page.locator("div.w-64").filter({ hasText: "Alpha" });
   await card.hover();
-  await column.getByTitle("Options").click();
-
-  // La corbeille de la sidebar porte le même nom accessible (title) mais aucun
-  // texte : on filtre sur le libellé visible de l'entrée de menu.
-  await page.getByRole("button", { name: "Supprimer" }).filter({ hasText: "Supprimer" }).click();
+  await column.getByLabel("Supprimer").click();
 
   // Le dialogue est visible ET cliquable malgré le portail et le sous-arbre dnd-kit.
   await expect(dialog(page)).toBeVisible();
