@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import useSWR, { mutate as globalMutate } from "swr";
 import {
   X, Type, Hash, ChevronDown, List, Calendar, CheckSquare, Link, Mail,
@@ -383,21 +383,21 @@ export default function RecordPanel({ record, properties, databaseId, onClose }:
 
         {/* Properties */}
         {visibleProps.length > 0 && (
-          <div className="px-6 py-1 shrink-0">
+          <div className="px-6 py-1 shrink-0 grid grid-cols-[minmax(0,max-content)_minmax(0,1fr)] gap-x-3">
             {visibleProps.map((property) => (
-              <div key={property.id} className="flex items-center gap-3 py-1.5 min-h-[36px]">
-                <div className="flex items-center gap-2 w-44 shrink-0 text-sm text-[var(--text-muted)]">
+              <Fragment key={property.id}>
+                <div className="flex items-center gap-2 max-w-[11rem] py-1.5 min-h-[36px] text-sm text-[var(--text-muted)]">
                   <span className="shrink-0">{PROP_ICONS[property.type] ?? <Type size={14} />}</span>
                   <span className="truncate">{property.name}</span>
                 </div>
-                <div className="flex-1 min-w-0 text-sm">
+                <div className="flex items-center min-w-0 py-1.5 min-h-[36px] text-sm">
                   <Cell
                     property={property}
                     record={record}
                     onSave={(value) => saveProperty(property, value)}
                   />
                 </div>
-              </div>
+              </Fragment>
             ))}
           </div>
         )}
