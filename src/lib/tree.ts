@@ -75,3 +75,56 @@ export function buildBreadcrumb(
   });
   return crumbs;
 }
+
+/** Référence d'un résultat de la palette de recherche pour dériver son chemin. */
+export type SearchPathRef =
+  | { kind: "page"; id: string }
+  | { kind: "record"; pageId: string };
+
+/**
+ * Segments (labels) du chemin à afficher sous un résultat de la palette de recherche.
+ * - `page` : fil de la page SANS son propre titre (déjà affiché en 1re ligne)
+ *   → [section, …, dossier parent]. Page racine d'une section → [section] seul.
+ * - `record` : fil COMPLET de la page hôte (la 1re ligne porte le titre du record,
+ *   pas celui de la page hôte) → [section, …, page hôte].
+ * Renvoie [] si l'élément est introuvable ou si le cache pages/sections est vide
+ * (buildBreadcrumb renvoie []), pour que la 2e ligne soit simplement omise.
+ */
+export function searchResultPathSegments(
+  pages: FlatPage[],
+  sections: { id: string; name: string; icon: string | null }[],
+  ref: SearchPathRef
+): string[] {
+  const targetId = ref.kind === "record" ? ref.pageId : ref.id;
+  const crumbs = buildBreadcrumb(pages, sections, targetId);
+  if (crumbs.length === 0) return [];
+  const labels = crumbs.map((c) => c.label);
+  return ref.kind === "record" ? labels : labels.slice(0, -1);
+}
+
+/**
+ * Tronque un chemin (liste de segments) en conservant la FIN : préfixe « … › »
+ * dès qu'un segment est retiré, et n'ampute JAMAIS le dernier segment (même s'il
+ * dépasse à lui seul `maxChars`). Chemin qui tient dans le budget → rendu inchangé.
+ */
+export function truncatePathEnd(segments: string[], maxChars: number): string {
+  const SEP = " › ";
+  const ELLIPSIS = "…";
+  if (segments.length === 0) return "";
+
+  const full = segments.join(SEP);
+  if (full.length <= maxChars) return full;
+
+  // On garde toujours le dernier segment, puis on rajoute des segments depuis la
+  // fin tant que le résultat préfixé par « … › » tient dans le budget.
+  const kept = [segments[segments.length - 1]];
+  for (let i = segments.length - 2; i >= 0; i--) {
+    const candidate = ELLIPSIS + SEP + [segments[i], ...kept].join(SEP);
+    if (candidate.length > maxChars) break;
+    kept.unshift(segments[i]);
+  }
+  // Rien n'a été retiré (chemin d'un seul segment plus long que le budget) : pas
+  // d'ellipse — on n'ampute jamais le dernier segment.
+  if (kept.length === segments.length) return kept.join(SEP);
+  return ELLIPSIS + SEP + kept.join(SEP);
+}
