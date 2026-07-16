@@ -837,14 +837,8 @@ export default function BacklogView({ databaseId, view, properties }: Props) {
   const handleDuplicateRecord = useCallback(
     async (record: ParsedRecord) => {
       try {
-        const res = await fetch(`/api/databases/${databaseId}/records`, {
+        const res = await fetch(`/api/records/${record.id}/duplicate`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            title: `Copie de ${record.title || "Sans titre"}`,
-            properties: record.properties,
-            ...(record.sprintId && { sprintId: record.sprintId }),
-          }),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         mutate();
@@ -852,7 +846,7 @@ export default function BacklogView({ databaseId, view, properties }: Props) {
         console.error("Échec de la duplication", err);
       }
     },
-    [databaseId, mutate]
+    [mutate]
   );
 
   const handleAddRecord = useCallback(
