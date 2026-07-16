@@ -32,6 +32,7 @@ import { groupValueOnDrop, initialGroupValue, cardDndId, parseDndId } from "@/li
 import { useDialog } from "@/contexts/DialogContext";
 import Portal from "@/components/databases/portal";
 import RecordPanel from "@/components/databases/RecordPanel";
+import BulkActionBar from "@/components/databases/BulkActionBar";
 import { useRecordDeepLink } from "@/lib/client/useRecordDeepLink";
 
 // ─── Constants / types ────────────────────────────────────────────────────────
@@ -234,6 +235,8 @@ function KanbanCard({
   colId,
   previewProps,
   autoEdit,
+  selected,
+  onToggleSelect,
   onTitleSave,
   onCardClick,
   onDelete,
@@ -244,6 +247,8 @@ function KanbanCard({
   colId: string;
   previewProps: ParsedDatabaseProperty[];
   autoEdit?: boolean;
+  selected: boolean;
+  onToggleSelect: () => void;
   onTitleSave?: (id: string, title: string) => void;
   onCardClick?: (record: ParsedRecord) => void;
   onDelete: () => void;
@@ -296,10 +301,31 @@ function KanbanCard({
     >
       <div
         className={[
-          "bg-[var(--bg)] rounded-lg border border-[var(--border)] shadow-sm p-3 select-none relative",
-          isDragging ? "opacity-40" : "hover:border-[var(--accent)] transition-colors",
+          "bg-[var(--bg)] rounded-lg border shadow-sm p-3 select-none relative transition-colors",
+          isDragging
+            ? "opacity-40 border-[var(--border)]"
+            : selected
+              ? "border-[var(--accent)]"
+              : "border-[var(--border)] hover:border-[var(--accent)]",
         ].join(" ")}
       >
+        {/* Case de sélection : visible au survol OU quand la carte est cochée.
+            Contrôle distinct du clic d'ouverture / du drag (stopPropagation). */}
+        {!isEditingTitle && (
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onToggleSelect}
+            onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+            aria-label="Sélectionner la carte"
+            className={[
+              "absolute top-1.5 left-1.5 z-10 cursor-pointer accent-[var(--accent)] w-3.5 h-3.5",
+              selected ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+            ].join(" ")}
+          />
+        )}
+
         {/* ⋯ menu button */}
         <button
           ref={menuBtnRef}
@@ -324,7 +350,7 @@ function KanbanCard({
             onClick={(e) => e.stopPropagation()}
           />
         ) : (
-          <p className="text-sm font-semibold text-[var(--text)] leading-snug break-words pr-5">
+          <p className="text-sm font-semibold text-[var(--text)] leading-snug break-words pl-5 pr-5">
             {record.title || <span className="text-[var(--text-muted)] font-normal">Sans titre</span>}
           </p>
         )}
@@ -358,6 +384,8 @@ function KanbanColView({
   previewProps,
   onAddRecord,
   newRecordId,
+  selectedIds,
+  onToggleSelect,
   onTitleSave,
   onCardClick,
   onDeleteRecord,
@@ -369,6 +397,8 @@ function KanbanColView({
   previewProps: ParsedDatabaseProperty[];
   onAddRecord: (col: KanbanCol) => void;
   newRecordId: string | null;
+  selectedIds: Set<string>;
+  onToggleSelect: (id: string) => void;
   onTitleSave: (id: string, title: string) => void;
   onCardClick: (record: ParsedRecord) => void;
   onDeleteRecord: (record: ParsedRecord) => void;
@@ -456,6 +486,8 @@ function KanbanColView({
               colId={col.id}
               previewProps={previewProps}
               autoEdit={record.id === newRecordId}
+              selected={selectedIds.has(record.id)}
+              onToggleSelect={() => onToggleSelect(record.id)}
               onTitleSave={onTitleSave}
               onCardClick={onCardClick}
               onDelete={() => onDeleteRecord(record)}
@@ -594,6 +626,21 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
   const [newRecordId, setNewRecordId] = useState<string | null>(null);
   const [selectedRecordId, setSelectedRecordId] = useRecordDeepLink(records);
 
+  // ── Sélection multiple (éphémère, propre à cette vue) ────────────────────────
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  useEffect(() => { setSelectedIds(new Set()); }, [view.id]);
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
+
   const pendingIds = useRef<Set<string>>(new Set());
   const pendingTitles = useRef<Map<string, string>>(new Map());
   const newRecordTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -685,6 +732,12 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
       });
       if (!ok) return;
       if (selectedRecordId === record.id) setSelectedRecordId(null);
+      setSelectedIds((prev) => {
+        if (!prev.has(record.id)) return prev;
+        const next = new Set(prev);
+        next.delete(record.id);
+        return next;
+      });
       const snapshot = records;
       mutate(records.filter((r) => r.id !== record.id), { revalidate: false });
       try {
@@ -1062,6 +1115,8 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
                 previewProps={previewProps}
                 onAddRecord={handleAddRecord}
                 newRecordId={newRecordId}
+                selectedIds={selectedIds}
+                onToggleSelect={toggleSelect}
                 onTitleSave={handleTitleSave}
                 onCardClick={handleCardClick}
                 onDeleteRecord={handleDeleteRecord}
@@ -1091,6 +1146,15 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
           onClose={() => setSelectedRecordId(null)}
         />
       )}
+
+      {/* Barre d'action groupée (sélection multiple) */}
+      <BulkActionBar
+        properties={properties}
+        records={records}
+        selectedIds={selectedIds}
+        mutate={mutate}
+        onClear={clearSelection}
+      />
     </div>
   );
 }
