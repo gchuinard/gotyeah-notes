@@ -64,3 +64,21 @@ export function initialGroupValue(
 ): PropertyValue | null {
   return groupValueOnDrop(propertyType, undefined, null, optionId);
 }
+
+/**
+ * Faut-il proposer le bouton d'ajout en tête d'une colonne kanban ?
+ *
+ * Avec le flag `createInUnassignedOnly`, la création n'est offerte que dans la
+ * colonne « Sans valeur » (`optionId === null`) : toute carte naît sans valeur
+ * d'axe, à classer ensuite. Sans le flag, le bouton apparaît sur chaque colonne.
+ *
+ * Le flag ne pilote QUE l'affichage du bouton, pas sa POSITION (le bouton est
+ * ancré en tête de colonne pour rester visible même sur une lane pleine).
+ * Fonction PURE → testable en environnement node.
+ */
+export function shouldShowKanbanAddButton(
+  createOnlyInUnassigned: boolean,
+  optionId: string | null
+): boolean {
+  return !createOnlyInUnassigned || optionId === null;
+}

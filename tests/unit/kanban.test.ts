@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { groupValueOnDrop, initialGroupValue, cardDndId, parseDndId } from "@/lib/client/kanban";
+import {
+  groupValueOnDrop,
+  initialGroupValue,
+  cardDndId,
+  parseDndId,
+  shouldShowKanbanAddButton,
+} from "@/lib/client/kanban";
 
 describe("identité DnD des cartes (colonne::record)", () => {
   it("une même carte dans deux colonnes a deux ids distincts", () => {
@@ -72,5 +78,17 @@ describe("initialGroupValue (création de carte dans une colonne)", () => {
   it("colonne « Sans valeur » → null (aucune clé posée)", () => {
     expect(initialGroupValue("multiselect", null)).toBeNull();
     expect(initialGroupValue("select", null)).toBeNull();
+  });
+});
+
+describe("shouldShowKanbanAddButton (garde du flag createInUnassignedOnly)", () => {
+  it("flag désactivé → bouton sur toutes les colonnes (option ET « Sans valeur »)", () => {
+    expect(shouldShowKanbanAddButton(false, "opt-a")).toBe(true);
+    expect(shouldShowKanbanAddButton(false, null)).toBe(true);
+  });
+
+  it("flag activé → bouton UNIQUEMENT sur la colonne « Sans valeur » (optionId === null)", () => {
+    expect(shouldShowKanbanAddButton(true, null)).toBe(true);
+    expect(shouldShowKanbanAddButton(true, "opt-a")).toBe(false);
   });
 });

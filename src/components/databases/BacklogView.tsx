@@ -307,7 +307,7 @@ function SprintMenu({
 
 // ─── SprintLane ───────────────────────────────────────────────────────────────
 
-function SprintLane({
+export function SprintLane({
   lane, collapsed, onToggleCollapse,
   statusProp, epicProp, pointsProp, previewProps, doneOptionId, newRecordId,
   onAddRecord, onTitleSave, onRowClick, onDeleteRecord, onDuplicateRecord,
@@ -428,6 +428,20 @@ function SprintLane({
           </span>
         )}
 
+        {/* Bouton d'ajout ANCRÉ en tête de lane : reste visible même quand la lane
+            déborde (le corps ne scrolle pas, le board oui). Absent tant que la lane
+            est repliée — il réapparaît au dépliage. */}
+        {!collapsed && (
+          <button
+            onClick={() => onAddRecord(lane)}
+            className="shrink-0 flex items-center gap-1 pl-1 pr-1.5 py-0.5 text-xs text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] rounded-md transition-colors"
+            title="Créer une issue"
+          >
+            <Plus size={13} />
+            Créer une issue
+          </button>
+        )}
+
         {sprint && (
           <button
             ref={menuBtnRef}
@@ -505,13 +519,6 @@ function SprintLane({
               {sprint ? "Glissez des issues ici" : "Aucune issue non planifiée"}
             </p>
           )}
-          <button
-            onClick={() => onAddRecord(lane)}
-            className="flex items-center gap-1.5 px-1.5 py-1.5 text-sm text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] rounded-md transition-colors"
-          >
-            <Plus size={13} />
-            Créer une issue
-          </button>
         </div>
       )}
     </div>

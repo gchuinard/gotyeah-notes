@@ -28,7 +28,13 @@ import type {
 } from "@/lib/db";
 import { SelectBadge, CellDisplay } from "@/components/databases/Cell";
 import { applyViewConfig } from "@/lib/client/viewFilters";
-import { groupValueOnDrop, initialGroupValue, cardDndId, parseDndId } from "@/lib/client/kanban";
+import {
+  groupValueOnDrop,
+  initialGroupValue,
+  cardDndId,
+  parseDndId,
+  shouldShowKanbanAddButton,
+} from "@/lib/client/kanban";
 import { useDialog } from "@/contexts/DialogContext";
 import Portal from "@/components/databases/portal";
 import CardActions from "@/components/databases/CardActions";
@@ -333,7 +339,7 @@ function KanbanCard({
 
 // ─── KanbanColumn ─────────────────────────────────────────────────────────────
 
-function KanbanColView({
+export function KanbanColView({
   col,
   previewProps,
   onAddRecord,
@@ -420,12 +426,25 @@ function KanbanColView({
         <span className="text-xs text-[var(--text-muted)] ml-auto tabular-nums">
           {col.records.length}
         </span>
+        {/* Bouton d'ajout ANCRÉ en tête de colonne : reste visible même quand la
+            lane déborde (le board scrolle globalement, pas la lane). Le flag ne
+            change QUE l'affichage, jamais la position. */}
+        {shouldShowKanbanAddButton(createOnlyInUnassigned, col.optionId) && (
+          <button
+            onClick={() => onAddRecord(col)}
+            className="shrink-0 flex items-center gap-1 pl-1 pr-1.5 py-0.5 text-xs text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] rounded-md transition-colors"
+            title="Nouvel enregistrement"
+          >
+            <Plus size={13} />
+            Nouveau
+          </button>
+        )}
       </div>
 
       <div
         ref={setNodeRef}
         className={[
-          "flex flex-col gap-2 min-h-[60px] rounded-lg p-1 pb-10 transition-colors",
+          "flex flex-col gap-2 min-h-[60px] rounded-lg p-1 transition-colors",
           isOver ? "bg-[var(--surface)]" : "",
         ].join(" ")}
       >
@@ -455,16 +474,6 @@ function KanbanColView({
           )}
         </SortableContext>
       </div>
-
-      {(!createOnlyInUnassigned || col.optionId === null) && (
-        <button
-          onClick={() => onAddRecord(col)}
-          className="flex items-center gap-1.5 px-2 py-1.5 text-sm text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] rounded-md transition-colors"
-        >
-          <Plus size={13} />
-          Nouveau
-        </button>
-      )}
     </div>
   );
 }
