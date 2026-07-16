@@ -19,7 +19,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
-  Plus, MoreHorizontal, Trash2, Copy, ChevronRight, ChevronDown,
+  Plus, MoreHorizontal, Trash2, ChevronRight, ChevronDown,
   Play, CheckCircle2, RotateCcw, CalendarDays, Layers, GripVertical,
 } from "lucide-react";
 import type {
@@ -34,6 +34,7 @@ import { SelectBadge, CellDisplay } from "@/components/databases/Cell";
 import { applyViewConfig } from "@/lib/client/viewFilters";
 import { useDialog } from "@/contexts/DialogContext";
 import Portal from "@/components/databases/portal";
+import CardActions from "@/components/databases/CardActions";
 import RecordPanel from "@/components/databases/RecordPanel";
 import { useRecordDeepLink } from "@/lib/client/useRecordDeepLink";
 
@@ -133,36 +134,6 @@ function RowMeta({
   );
 }
 
-// ─── RowMenu ──────────────────────────────────────────────────────────────────
-
-function RowMenu({
-  anchor, onClose, onDelete, onDuplicate,
-}: {
-  anchor: React.RefObject<HTMLElement | null>;
-  onClose: () => void;
-  onDelete: () => void;
-  onDuplicate: () => void;
-}) {
-  return (
-    <Portal anchor={anchor} onClose={onClose} minWidth={140}>
-      <button
-        className="w-full text-left px-3 py-1.5 text-sm hover:bg-[var(--surface-hover)] text-[var(--text)] flex items-center gap-2"
-        onMouseDown={(e) => { e.preventDefault(); onClose(); onDuplicate(); }}
-      >
-        <Copy size={13} />
-        Dupliquer
-      </button>
-      <button
-        className="w-full text-left px-3 py-1.5 text-sm hover:bg-[var(--surface-hover)] text-red-500 flex items-center gap-2"
-        onMouseDown={(e) => { e.preventDefault(); onClose(); onDelete(); }}
-      >
-        <Trash2 size={13} />
-        Supprimer
-      </button>
-    </Portal>
-  );
-}
-
 // ─── BacklogRow (issue) ───────────────────────────────────────────────────────
 
 function BacklogRow({
@@ -182,9 +153,7 @@ function BacklogRow({
 }) {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleValue, setTitleValue] = useState(record.title);
-  const [menuOpen, setMenuOpen] = useState(false);
   const titleInputRef = useRef<HTMLInputElement>(null);
-  const menuBtnRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => { if (autoEdit) setIsEditingTitle(true); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -244,7 +213,7 @@ function BacklogRow({
       ) : (
         <button
           className="flex-1 min-w-0 text-left text-sm text-[var(--text)] truncate"
-          onClick={() => { if (!menuOpen) onRowClick(record); }}
+          onClick={() => onRowClick(record)}
         >
           {record.title || <span className="text-[var(--text-muted)]">Sans titre</span>}
         </button>
@@ -254,23 +223,8 @@ function BacklogRow({
         <RowMeta record={record} previewProps={previewProps} statusProp={statusProp} epicProp={epicProp} pointsProp={pointsProp} />
       </div>
 
-      <button
-        ref={menuBtnRef}
-        onClick={(e) => { e.stopPropagation(); setMenuOpen(true); }}
-        className="shrink-0 opacity-0 group-hover:opacity-100 p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] transition-opacity"
-        title="Options"
-      >
-        <MoreHorizontal size={14} />
-      </button>
-
-      {menuOpen && (
-        <RowMenu
-          anchor={menuBtnRef as React.RefObject<HTMLElement | null>}
-          onClose={() => setMenuOpen(false)}
-          onDelete={onDelete}
-          onDuplicate={onDuplicate}
-        />
-      )}
+      {/* Actions directes (dupliquer / supprimer), visibles au survol. */}
+      <CardActions className="shrink-0" onDuplicate={onDuplicate} onDelete={onDelete} />
     </div>
   );
 }

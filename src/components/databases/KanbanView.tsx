@@ -18,7 +18,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Plus, MoreHorizontal, Trash2, Copy, ChevronDown, Play, CheckCircle2 } from "lucide-react";
+import { Plus, ChevronDown, Play, CheckCircle2 } from "lucide-react";
 import type {
   ParsedDatabaseProperty,
   ParsedRecord,
@@ -31,6 +31,7 @@ import { applyViewConfig } from "@/lib/client/viewFilters";
 import { groupValueOnDrop, initialGroupValue, cardDndId, parseDndId } from "@/lib/client/kanban";
 import { useDialog } from "@/contexts/DialogContext";
 import Portal from "@/components/databases/portal";
+import CardActions from "@/components/databases/CardActions";
 import RecordPanel from "@/components/databases/RecordPanel";
 import BulkActionBar from "@/components/databases/BulkActionBar";
 import { useRecordDeepLink } from "@/lib/client/useRecordDeepLink";
@@ -157,39 +158,6 @@ function GroupBySelector({
   );
 }
 
-// ─── CardMenu ─────────────────────────────────────────────────────────────────
-
-function CardMenu({
-  anchor,
-  onClose,
-  onDelete,
-  onDuplicate,
-}: {
-  anchor: React.RefObject<HTMLElement | null>;
-  onClose: () => void;
-  onDelete: () => void;
-  onDuplicate: () => void;
-}) {
-  return (
-    <Portal anchor={anchor} onClose={onClose} minWidth={140}>
-      <button
-        className="w-full text-left px-3 py-1.5 text-sm hover:bg-[var(--surface-hover)] text-[var(--text)] flex items-center gap-2"
-        onMouseDown={(e) => { e.preventDefault(); onClose(); onDuplicate(); }}
-      >
-        <Copy size={13} />
-        Dupliquer
-      </button>
-      <button
-        className="w-full text-left px-3 py-1.5 text-sm hover:bg-[var(--surface-hover)] text-red-500 flex items-center gap-2"
-        onMouseDown={(e) => { e.preventDefault(); onClose(); onDelete(); }}
-      >
-        <Trash2 size={13} />
-        Supprimer
-      </button>
-    </Portal>
-  );
-}
-
 // ─── KanbanCardContent (pure display — used by DragOverlay) ───────────────────
 
 function KanbanCardContent({
@@ -256,9 +224,7 @@ function KanbanCard({
 }) {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleValue, setTitleValue] = useState(record.title);
-  const [menuOpen, setMenuOpen] = useState(false);
   const titleInputRef = useRef<HTMLInputElement>(null);
-  const menuBtnRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (autoEdit) setIsEditingTitle(true);
@@ -295,7 +261,7 @@ function KanbanCard({
       {...attributes}
       {...(isEditingTitle ? {} : listeners)}
       onClick={() => {
-        if (!isEditingTitle && !menuOpen) onCardClick?.(record);
+        if (!isEditingTitle) onCardClick?.(record);
       }}
       className={`group ${isEditingTitle ? "" : "cursor-pointer"}`}
     >
@@ -326,15 +292,12 @@ function KanbanCard({
           />
         )}
 
-        {/* ⋯ menu button */}
-        <button
-          ref={menuBtnRef}
-          onClick={(e) => { e.stopPropagation(); setMenuOpen(true); }}
-          className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] transition-opacity"
-          title="Options"
-        >
-          <MoreHorizontal size={14} />
-        </button>
+        {/* Actions directes (dupliquer / supprimer), visibles au survol. */}
+        <CardActions
+          className="absolute top-1.5 right-1.5"
+          onDuplicate={onDuplicate}
+          onDelete={onDelete}
+        />
 
         {isEditingTitle ? (
           <input
@@ -350,7 +313,7 @@ function KanbanCard({
             onClick={(e) => e.stopPropagation()}
           />
         ) : (
-          <p className="text-sm font-semibold text-[var(--text)] leading-snug break-words pl-5 pr-5">
+          <p className="text-sm font-semibold text-[var(--text)] leading-snug break-words pl-5 pr-12">
             {record.title || <span className="text-[var(--text-muted)] font-normal">Sans titre</span>}
           </p>
         )}
@@ -362,15 +325,6 @@ function KanbanCard({
               </div>
             ))}
           </div>
-        )}
-
-        {menuOpen && (
-          <CardMenu
-            anchor={menuBtnRef as React.RefObject<HTMLElement | null>}
-            onClose={() => setMenuOpen(false)}
-            onDelete={onDelete}
-            onDuplicate={onDuplicate}
-          />
         )}
       </div>
     </div>
