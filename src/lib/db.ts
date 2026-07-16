@@ -309,3 +309,164 @@ export function parseSectionsBody(raw: string | null): RecordSection[] | null {
 export function serializeSectionsBody(sections: RecordSection[]): string {
   return JSON.stringify(sections);
 }
+
+// ─── Notes de version : blocs BlockNote de la page « Patch notes » ────────────
+//
+// À la clôture d'un sprint, un groupe de blocs BlockNote (titre daté + issues
+// livrées + compteur reporté) est appendé À LA FIN du document BlockNote de la
+// page « 📓 Patch notes » de la database. Ces helpers sont PURS (aucun accès DB)
+// pour être testables ; l'écriture transactionnelle vit dans lib/pages.ts.
+
+/**
+ * Bloc BlockNote minimal. Un document BlockNote (Page.content) est un tableau de
+ * ces blocs. On produit la forme canonique sérialisée (props/content/children
+ * explicites) pour un rendu robuste au rechargement de l'éditeur.
+ */
+export type BlockNoteBlock = {
+  id: string;
+  type: string;
+  props: Record<string, unknown>;
+  content: Array<{ type: "text"; text: string; styles: Record<string, unknown> }>;
+  children: unknown[];
+};
+
+/** Préfixe de l'id du bloc titre — marqueur d'idempotence porté par sprintId. */
+export const RELEASE_NOTES_BLOCK_PREFIX = "release-notes-";
+
+/** Id déterministe du bloc titre d'un sprint (marqueur d'idempotence de l'append). */
+export function releaseNotesBlockId(sprintId: string): string {
+  return `${RELEASE_NOTES_BLOCK_PREFIX}${sprintId}`;
+}
+
+const DEFAULT_BLOCK_PROPS = {
+  textColor: "default",
+  backgroundColor: "default",
+  textAlignment: "left",
+} as const;
+
+function textBlock(
+  id: string,
+  type: "paragraph" | "bulletListItem",
+  text: string
+): BlockNoteBlock {
+  return {
+    id,
+    type,
+    props: { ...DEFAULT_BLOCK_PROPS },
+    content: [{ type: "text", text, styles: {} }],
+    children: [],
+  };
+}
+
+export type ReleaseNotesBlockInput = {
+  sprintId: string;
+  sprintName: string;
+  closedDate: string; // "YYYY-MM-DD"
+  deliveredTitles: string[];
+  reportedCount: number;
+};
+
+/**
+ * Construit le groupe de blocs BlockNote appendé à la page « Patch notes ».
+ * - Bloc titre (heading) portant l'id marqueur `release-notes-<sprintId>`.
+ * - Un compteur de livrées, puis une puce par issue livrée.
+ * - Un compteur de reportées (distinct des livrées) si reportedCount > 0.
+ * Garde-fou titre vide : repli « Sans titre » (jamais une puce/ligne vide).
+ */
+export function buildReleaseNotesBlocks(input: ReleaseNotesBlockInput): BlockNoteBlock[] {
+  const markerId = releaseNotesBlockId(input.sprintId);
+  const n = input.deliveredTitles.length;
+
+  const heading: BlockNoteBlock = {
+    id: markerId,
+    type: "heading",
+    props: { ...DEFAULT_BLOCK_PROPS, level: 2 },
+    content: [
+      {
+        type: "text",
+        text: `${input.sprintName || "Sprint"} — ${input.closedDate}`,
+        styles: {},
+      },
+    ],
+    children: [],
+  };
+
+  const summary = textBlock(
+    `${markerId}-summary`,
+    "paragraph",
+    `${n} issue${n > 1 ? "s" : ""} livrée${n > 1 ? "s" : ""}`
+  );
+
+  const bullets = input.deliveredTitles.map((t, i) =>
+    textBlock(`${markerId}-d${i}`, "bulletListItem", t || "Sans titre")
+  );
+
+  const blocks: BlockNoteBlock[] = [heading, summary, ...bullets];
+
+  if (input.reportedCount > 0) {
+    const r = input.reportedCount;
+    blocks.push(
+      textBlock(
+        `${markerId}-reported`,
+        "paragraph",
+        `${r} issue${r > 1 ? "s" : ""} reportée${r > 1 ? "s" : ""} au backlog`
+      )
+    );
+  }
+
+  return blocks;
+}
+
+/**
+ * Réconciliation d'exhaustivité : les issues qui SERAIENT listées (encore dans le
+ * sprint au moment de la génération) doivent toutes être « livrées » (statut ===
+ * doneStatusOptionId). Sinon le bloc listerait comme livrée une issue non terminée
+ * → l'appelant doit annuler la clôture (rollback) et renvoyer une erreur.
+ */
+export function reconcileDelivered(
+  records: Array<{ properties: RecordProperties }>,
+  statusPropertyId: string,
+  doneStatusOptionId: string
+): { ok: boolean; listed: number; delivered: number } {
+  const listed = records.length;
+  const delivered = records.filter(
+    (r) => r.properties[statusPropertyId] === doneStatusOptionId
+  ).length;
+  return { ok: listed === delivered, listed, delivered };
+}
+
+export type AppendBlocksResult =
+  | { status: "appended"; content: string }
+  | { status: "already"; content: string }
+  | { status: "corrupt" };
+
+/**
+ * Append idempotent des blocs À LA FIN d'un document BlockNote sérialisé.
+ * - Contenu non parsable ou non-tableau → { status: "corrupt" } (l'appelant décide
+ *   de rollback ; jamais d'écrasement du contenu existant).
+ * - Marqueur `release-notes-<sprintId>` déjà présent (bloc titre) → { status:
+ *   "already" }, contenu inchangé (jamais 2 blocs pour le même sprint).
+ * - Sinon les blocs sont concaténés en fin de tableau (aucun bloc préexistant
+ *   réordonné ni écrasé).
+ */
+export function appendReleaseNotesToContent(
+  rawContent: string,
+  sprintId: string,
+  blocks: BlockNoteBlock[]
+): AppendBlocksResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawContent);
+  } catch {
+    return { status: "corrupt" };
+  }
+  if (!Array.isArray(parsed)) return { status: "corrupt" };
+
+  const marker = releaseNotesBlockId(sprintId);
+  const already = parsed.some(
+    (b) => typeof b === "object" && b !== null && (b as { id?: unknown }).id === marker
+  );
+  if (already) return { status: "already", content: rawContent };
+
+  return { status: "appended", content: JSON.stringify([...parsed, ...blocks]) };
+}

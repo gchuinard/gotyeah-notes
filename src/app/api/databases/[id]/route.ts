@@ -8,6 +8,9 @@ import { parseManyDatabaseProperties, parseManyViews } from "@/lib/db";
 const patchDatabaseSchema = z.object({
   // Document BlockNote JSON (modèle de corps des records), ou null pour l'effacer.
   recordTemplate: z.string().nullable().optional(),
+  // Page « 📓 Patch notes » cible pour l'auto-append à la clôture d'un sprint, ou
+  // null pour retirer le mapping. La page doit appartenir au même workspace.
+  patchNotesPageId: z.string().nullable().optional(),
 });
 
 export async function GET(
@@ -55,6 +58,21 @@ export async function PATCH(
       { error: "Validation failed", details: result.error.flatten() },
       { status: 400 }
     );
+  }
+
+  // Mapping « Patch notes » : la page cible doit exister dans le même workspace
+  // (sinon l'append serait toujours ignoré). null retire le mapping, sans contrôle.
+  if (result.data.patchNotesPageId) {
+    const target = await prisma.page.findUnique({
+      where: { id: result.data.patchNotesPageId },
+      select: { workspaceId: true },
+    });
+    if (!target || target.workspaceId !== access.workspaceId) {
+      return NextResponse.json(
+        { error: "Page « Patch notes » introuvable dans ce workspace." },
+        { status: 400 }
+      );
+    }
   }
 
   const updated = await prisma.database.update({
