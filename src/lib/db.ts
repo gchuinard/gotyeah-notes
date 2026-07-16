@@ -133,6 +133,10 @@ export type ViewConfig = {
   sorts?: ViewSort[];
   filters?: ViewFilter[];
   groupByPropertyId?: string;
+  // Kanban : si true, le bouton « + Nouveau » n'apparaît que sur la colonne « Sans valeur »
+  // (toute carte naît sans valeur d'axe, à classer ensuite). Opt-in par vue ;
+  // absent/false = bouton sur toutes les colonnes (comportement historique).
+  createInUnassignedOnly?: boolean;
   calendarPropertyId?: string;
   columnWidths?: Record<string, number>;
   pointsPropertyId?: string;
