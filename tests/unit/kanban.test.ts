@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   groupValueOnDrop,
   initialGroupValue,
+  mergeSeedWithGroupValue,
   cardDndId,
   parseDndId,
   shouldShowKanbanAddButton,
@@ -87,6 +88,42 @@ describe("initialGroupValue (création de carte dans une colonne)", () => {
   it("colonne « Sans valeur » → null (aucune clé posée)", () => {
     expect(initialGroupValue("multiselect", null)).toBeNull();
     expect(initialGroupValue("select", null)).toBeNull();
+  });
+});
+
+describe("mergeSeedWithGroupValue (fusion pré-remplissage filtres + valeur d'axe)", () => {
+  it("C5 : la valeur d'axe (groupBy) PRIME sur un filtre eq visant la même propriété", () => {
+    // Le seed dérivé du filtre porte « colA » sur l'axe, mais la carte est créée
+    // dans la colonne « colB » → colB doit gagner (sinon la carte naîtrait ailleurs).
+    const seed = { axe: "colA", autre: "x" };
+    expect(mergeSeedWithGroupValue(seed, "axe", "colB")).toEqual({
+      axe: "colB",
+      autre: "x",
+    });
+  });
+
+  it("conserve les autres clés semées à côté de la valeur d'axe", () => {
+    const seed = { proj: "opt1", statut: "s1" };
+    expect(mergeSeedWithGroupValue(seed, "axe", "colB")).toEqual({
+      proj: "opt1",
+      statut: "s1",
+      axe: "colB",
+    });
+  });
+
+  it("colonne « Sans valeur » (groupValue null) → aucune clé d'axe posée, seed inchangé", () => {
+    const seed = { proj: "opt1" };
+    expect(mergeSeedWithGroupValue(seed, "axe", null)).toEqual({ proj: "opt1" });
+  });
+
+  it("supporte une valeur d'axe multiselect (tableau)", () => {
+    expect(mergeSeedWithGroupValue({}, "axe", ["colB"])).toEqual({ axe: ["colB"] });
+  });
+
+  it("ne mute pas le seed d'entrée", () => {
+    const seed = { proj: "opt1" };
+    mergeSeedWithGroupValue(seed, "axe", "colB");
+    expect(seed).toEqual({ proj: "opt1" });
   });
 });
 

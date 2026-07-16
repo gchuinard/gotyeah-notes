@@ -3,7 +3,7 @@ import { useState, useMemo, useRef, useCallback } from "react";
 import useSWR from "swr";
 import { Plus } from "lucide-react";
 import type { ParsedDatabaseProperty, ParsedRecord, ParsedView } from "@/lib/db";
-import { applyViewConfig } from "@/lib/client/viewFilters";
+import { applyViewConfig, deriveSeedFromFilters } from "@/lib/client/viewFilters";
 import { CellDisplay } from "@/components/databases/Cell";
 import RecordPanel from "@/components/databases/RecordPanel";
 import { useRecordDeepLink } from "@/lib/client/useRecordDeepLink";
@@ -137,6 +137,10 @@ export default function GalleryView({ databaseId, view, properties }: Props) {
     const now = new Date();
     const lastPos = (records ?? []).reduce((max, r) => Math.max(max, r.position), 0);
 
+    // Pré-remplissage dérivé des filtres eq (select/text) de la vue : la carte
+    // satisfait le filtre par construction et reste visible après revalidation.
+    const seed = deriveSeedFromFilters(view.config.filters ?? [], properties);
+
     const tempRecord: ParsedRecord = {
       id: tempId,
       databaseId,
@@ -152,7 +156,7 @@ export default function GalleryView({ databaseId, view, properties }: Props) {
       createdAt: now,
       updatedAt: now,
       position: lastPos + 1000,
-      properties: {},
+      properties: seed,
     };
 
     pendingIds.current.add(tempId);
@@ -162,7 +166,9 @@ export default function GalleryView({ databaseId, view, properties }: Props) {
       const res = await fetch(`/api/databases/${databaseId}/records`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: "" }),
+        body: JSON.stringify(
+          Object.keys(seed).length > 0 ? { title: "", properties: seed } : { title: "" }
+        ),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const created: ParsedRecord = await res.json();
@@ -176,7 +182,7 @@ export default function GalleryView({ databaseId, view, properties }: Props) {
       mutate((prev) => (prev ?? []).filter((r) => r.id !== tempId), { revalidate: false });
       console.error("Échec de la création du record (gallery)", err);
     }
-  }, [databaseId, records, mutate]);
+  }, [databaseId, records, mutate, view.config.filters, properties]);
 
   // ─── Render ─────────────────────────────────────────────────────────────────
 

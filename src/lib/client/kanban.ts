@@ -1,4 +1,4 @@
-import type { PropertyValue } from "@/lib/db";
+import type { PropertyValue, RecordProperties } from "@/lib/db";
 
 /**
  * Identité DnD d'une carte : « colonne::record ».
@@ -63,6 +63,27 @@ export function initialGroupValue(
   optionId: string | null
 ): PropertyValue | null {
   return groupValueOnDrop(propertyType, undefined, null, optionId);
+}
+
+/**
+ * Fusionne le pré-remplissage dérivé des filtres (`seed`) avec la valeur d'axe
+ * (groupBy) d'une carte créée dans une colonne kanban.
+ *
+ * La valeur d'axe PRIME toujours : si un filtre eq porte sur la MÊME propriété
+ * que le groupBy, c'est la colonne cliquée (`groupValue`) qui gagne — la carte
+ * doit naître dans cette colonne. `groupValue === null` (colonne « Sans valeur »)
+ * ne pose aucune clé d'axe : le seed est renvoyé tel quel.
+ *
+ * Fonction PURE → testable en environnement node.
+ */
+export function mergeSeedWithGroupValue(
+  seed: RecordProperties,
+  groupByPropertyId: string,
+  groupValue: PropertyValue | null
+): RecordProperties {
+  const merged: RecordProperties = { ...seed };
+  if (groupValue !== null) merged[groupByPropertyId] = groupValue;
+  return merged;
 }
 
 /**

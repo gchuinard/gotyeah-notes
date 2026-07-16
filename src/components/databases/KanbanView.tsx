@@ -28,10 +28,11 @@ import type {
   PropertyValue,
 } from "@/lib/db";
 import Cell, { SelectBadge, CellDisplay } from "@/components/databases/Cell";
-import { applyViewConfig } from "@/lib/client/viewFilters";
+import { applyViewConfig, deriveSeedFromFilters } from "@/lib/client/viewFilters";
 import {
   groupValueOnDrop,
   initialGroupValue,
+  mergeSeedWithGroupValue,
   cardDndId,
   parseDndId,
   shouldShowKanbanAddButton,
@@ -855,7 +856,11 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
 
       // string (select) ou tableau d'un id (multiselect) ; null = « Sans valeur ».
       const initValue = initialGroupValue(groupByProp.type, col.optionId);
-      const initProperties = initValue !== null ? { [groupByPropId]: initValue } : {};
+      // Pré-remplissage dérivé des filtres eq (select/text) de la vue : la carte
+      // satisfait le filtre par construction et ne disparaît pas après revalidation.
+      // La valeur d'axe (groupBy) PRIME sur un filtre visant la même propriété.
+      const seed = deriveSeedFromFilters(view.config.filters ?? [], properties);
+      const initProperties = mergeSeedWithGroupValue(seed, groupByPropId, initValue);
 
       const tempRecord: ParsedRecord = {
         id: tempId,
@@ -880,9 +885,8 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
       setNewRecordId(tempId);
 
       try {
-        const body: Record<string, unknown> = initValue === null
-          ? {}
-          : { properties: { [groupByPropId]: initValue } };
+        const body: Record<string, unknown> = {};
+        if (Object.keys(initProperties).length > 0) body.properties = initProperties;
         if (targetSprint) body.sprintId = targetSprint.id;
 
         const res = await fetch(`/api/databases/${databaseId}/records`, {
@@ -926,7 +930,7 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
         console.error("Échec de la création du record (kanban)", err);
       }
     },
-    [databaseId, groupByPropId, groupByProp, records, mutate, targetSprint]
+    [databaseId, groupByPropId, groupByProp, records, mutate, targetSprint, view.config.filters, properties]
   );
 
   // ── Drag start ──────────────────────────────────────────────────────────────

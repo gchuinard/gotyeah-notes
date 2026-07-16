@@ -1,6 +1,7 @@
 import type {
   ParsedDatabaseProperty,
   ParsedRecord,
+  RecordProperties,
   ViewConfig,
   ViewFilter,
   ViewSort,
@@ -10,6 +11,39 @@ import type {
 function getRawValue(record: ParsedRecord, property: ParsedDatabaseProperty): unknown {
   if (property.type === "title") return record.title ?? "";
   return record.properties[property.id] ?? null;
+}
+
+/**
+ * Dérive les valeurs de pré-remplissage d'une carte créée depuis une vue filtrée.
+ *
+ * Ne retient QUE les filtres `{ operator: "eq", value }` à valeur unique (string)
+ * sur des propriétés `select` ou `text` : ce sont les seuls dont on peut déduire
+ * une valeur qui satisfera le filtre PAR CONSTRUCTION, afin que la carte reste
+ * visible au lieu de disparaître silencieusement après revalidation.
+ *
+ * Tout le reste est écarté volontairement :
+ * - opérateurs `neq`/`gt`/`lt`/`gte`/`lte`/`contains`/`notContains`/`isEmpty`/
+ *   `isNotEmpty` → ambigus ou négatifs (aucune valeur unique à semer) ;
+ * - `multiselect`/`relation` (leur `eq` n'existe pas ; ils filtrent par `contains`
+ *   sur un tableau) → jamais pré-remplis ;
+ * - `title` → stocké dans `Record.title`, pas dans `properties` : hors périmètre.
+ *
+ * Fonction PURE (aucune dépendance navigateur) → testable en environnement node.
+ */
+export function deriveSeedFromFilters(
+  filters: ViewFilter[],
+  properties: ParsedDatabaseProperty[]
+): RecordProperties {
+  const seed: RecordProperties = {};
+  for (const filter of filters) {
+    if (filter.operator !== "eq") continue;
+    const property = properties.find((p) => p.id === filter.propertyId);
+    if (!property) continue;
+    if (property.type !== "select" && property.type !== "text") continue;
+    if (typeof filter.value !== "string") continue;
+    seed[filter.propertyId] = filter.value;
+  }
+  return seed;
 }
 
 export function applyFilters(
