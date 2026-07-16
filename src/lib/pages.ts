@@ -211,7 +211,7 @@ export async function setPageSection(
 export type AppendReleaseNotesResult =
   | { status: "appended" }
   | { status: "already" }
-  | { status: "no_page" } // pas de mapping, ou page introuvable / hors workspace / en corbeille
+  | { status: "no_page" } // pas de mapping, ou page introuvable / hors workspace / en corbeille / inaccessible
   | { status: "corrupt" };
 
 /**
@@ -219,13 +219,16 @@ export type AppendReleaseNotesResult =
  * BlockNote de la page cible, DANS la transaction fournie (même atomicité que la
  * clôture du sprint). Ne lève jamais : renvoie un statut que l'appelant traduit
  * (flag de réponse ou rollback selon le cas). Robustesse du mapping libre :
- * page absente / d'un autre workspace / en corbeille ⇒ "no_page".
+ * page absente / d'un autre workspace / en corbeille / inaccessible à l'acteur
+ * (page privée d'un autre membre) ⇒ "no_page" (défense en profondeur : le mapping
+ * est déjà refusé à la configuration, mais la visibility peut changer après coup).
  */
 export async function appendReleaseNotesToPage(
   tx: Prisma.TransactionClient,
   opts: {
     pageId: string | null;
     workspaceId: string;
+    userId: string;
     sprintId: string;
     blocks: BlockNoteBlock[];
   }
@@ -234,9 +237,14 @@ export async function appendReleaseNotesToPage(
 
   const page = await tx.page.findUnique({
     where: { id: opts.pageId },
-    select: { content: true, workspaceId: true, trashedAt: true },
+    select: { content: true, workspaceId: true, trashedAt: true, visibility: true, ownerId: true },
   });
-  if (!page || page.workspaceId !== opts.workspaceId || page.trashedAt) {
+  if (
+    !page ||
+    page.workspaceId !== opts.workspaceId ||
+    page.trashedAt ||
+    (page.visibility === "private" && page.ownerId !== opts.userId)
+  ) {
     return { status: "no_page" };
   }
 

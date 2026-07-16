@@ -151,6 +151,7 @@ export async function PATCH(
       const append = await appendReleaseNotesToPage(tx, {
         pageId: db?.patchNotesPageId ?? null,
         workspaceId: access.workspaceId,
+        userId: user.id,
         sprintId: id,
         blocks,
       });
