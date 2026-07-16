@@ -3,8 +3,24 @@ import useSWR from "swr";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useRef, useState, useEffect, useMemo } from "react";
 import { Plus, MoreHorizontal, Trash2, Pencil, Table2, Kanban, Calendar, LayoutGrid, ListChecks } from "lucide-react";
+import {
+  DndContext,
+  type DragEndEvent,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  closestCenter,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  useSortable,
+  horizontalListSortingStrategy,
+  arrayMove,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import type { ParsedDatabaseProperty, ParsedRecord, ParsedView } from "@/lib/db";
 import { applyViewConfig } from "@/lib/client/viewFilters";
+import { intermediatePosition } from "@/lib/client/reorder";
 import { useDialog } from "@/contexts/DialogContext";
 import TableView from "@/components/databases/TableView";
 import KanbanView from "@/components/databases/KanbanView";
@@ -84,6 +100,116 @@ function TabMenu({
         </button>
       )}
     </Portal>
+  );
+}
+
+// ─── SortableViewTab ──────────────────────────────────────────────────────────
+
+function SortableViewTab({
+  view,
+  isActive,
+  isEditing,
+  editingName,
+  editInputRef,
+  menuBtnRefs,
+  menuOpen,
+  canDelete,
+  onEditingNameChange,
+  onSwitchView,
+  onCommitRename,
+  onCancelRename,
+  onStartRename,
+  onToggleMenu,
+  onCloseMenu,
+  onDelete,
+}: {
+  view: ParsedView;
+  isActive: boolean;
+  isEditing: boolean;
+  editingName: string;
+  editInputRef: React.RefObject<HTMLInputElement | null>;
+  menuBtnRefs: React.RefObject<Map<string, HTMLButtonElement>>;
+  menuOpen: boolean;
+  canDelete: boolean;
+  onEditingNameChange: (value: string) => void;
+  onSwitchView: () => void;
+  onCommitRename: () => void;
+  onCancelRename: () => void;
+  onStartRename: () => void;
+  onToggleMenu: () => void;
+  onCloseMenu: () => void;
+  onDelete: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: view.id });
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...(isEditing ? {} : listeners)}
+      className={[
+        "relative group/tab flex items-center shrink-0 select-none",
+        isDragging ? "opacity-40 z-10" : "",
+      ].join(" ")}
+    >
+      {isEditing ? (
+        <input
+          ref={editInputRef}
+          value={editingName}
+          onChange={(e) => onEditingNameChange(e.target.value)}
+          onBlur={onCommitRename}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") { e.preventDefault(); onCommitRename(); }
+            if (e.key === "Escape") { e.preventDefault(); onCancelRename(); }
+          }}
+          className="px-2 py-2 text-sm border-b-2 border-[var(--accent)] bg-transparent outline-none text-[var(--text)] min-w-[60px] -mb-px"
+          style={{ width: Math.max(60, editingName.length * 8) + "px" }}
+        />
+      ) : (
+        <button
+          onClick={onSwitchView}
+          className={[
+            "flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap",
+            isActive
+              ? "border-[var(--accent)] text-[var(--accent)]"
+              : "border-transparent text-[var(--text-muted)] hover:text-[var(--text)] hover:border-[var(--border)]",
+          ].join(" ")}
+        >
+          {VIEW_TYPE_ICONS[view.type] ?? null}
+          {view.name}
+        </button>
+      )}
+
+      {/* ⋯ context button */}
+      {!isEditing && (
+        <button
+          ref={(el) => { if (el) menuBtnRefs.current.set(view.id, el); }}
+          onClick={(e) => { e.stopPropagation(); onToggleMenu(); }}
+          className="opacity-0 group-hover/tab:opacity-100 p-0.5 mr-1 rounded text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] transition-opacity shrink-0"
+          title="Options"
+        >
+          <MoreHorizontal size={12} />
+        </button>
+      )}
+
+      {/* Tab menu */}
+      {menuOpen && (
+        <TabMenu
+          anchor={{ current: menuBtnRefs.current.get(view.id) ?? null }}
+          canDelete={canDelete}
+          onRename={onStartRename}
+          onDelete={onDelete}
+          onClose={onCloseMenu}
+        />
+      )}
+    </div>
   );
 }
 
@@ -260,6 +386,49 @@ export default function DatabaseShell({ databaseId }: { databaseId: string }) {
     [mutate, switchView]
   );
 
+  // ── View tabs drag-and-drop (réordonnancement, ordre partagé via View.position)
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
+  );
+
+  const handleTabDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (!data || !over || active.id === over.id) return;
+
+      const ordered = [...data.views].sort((a, b) => a.position - b.position);
+      const oldIndex = ordered.findIndex((v) => v.id === active.id);
+      const newIndex = ordered.findIndex((v) => v.id === over.id);
+      if (oldIndex === -1 || newIndex === -1) return;
+
+      const reordered = arrayMove(ordered, oldIndex, newIndex);
+      const prev = reordered[newIndex - 1];
+      const next = reordered[newIndex + 1];
+      const newPosition = intermediatePosition(prev?.position ?? null, next?.position ?? null);
+
+      const movedId = active.id as string;
+      const snapshot = data;
+
+      // Optimistic : seule la vue déplacée change de position dans le cache SWR.
+      mutate(
+        {
+          ...data,
+          views: data.views.map((v) => (v.id === movedId ? { ...v, position: newPosition } : v)),
+        },
+        { revalidate: false }
+      );
+
+      fetch(`/api/views/${movedId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ position: newPosition }),
+      })
+        .then((res) => { if (!res.ok) throw new Error(); mutate(); })
+        .catch(() => { mutate(snapshot, { revalidate: false }); });
+    },
+    [data, mutate]
+  );
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-48 text-[var(--text-muted)] text-sm">
@@ -350,68 +519,34 @@ export default function DatabaseShell({ databaseId }: { databaseId: string }) {
     <div className="flex flex-col h-full">
       {/* View tabs + add button */}
       <div className="flex items-center gap-0.5 px-4 border-b border-[var(--border)] shrink-0 overflow-x-auto">
-        {views.map((view) => {
-          const isActive = view.id === activeView.id;
-          const isEditing = editingViewId === view.id;
-
-          return (
-            <div key={view.id} className="relative group/tab flex items-center shrink-0">
-              {isEditing ? (
-                <input
-                  ref={editInputRef}
-                  value={editingName}
-                  onChange={(e) => setEditingName(e.target.value)}
-                  onBlur={commitRename}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") { e.preventDefault(); commitRename(); }
-                    if (e.key === "Escape") { e.preventDefault(); setEditingViewId(null); }
-                  }}
-                  className="px-2 py-2 text-sm border-b-2 border-[var(--accent)] bg-transparent outline-none text-[var(--text)] min-w-[60px] -mb-px"
-                  style={{ width: Math.max(60, editingName.length * 8) + "px" }}
-                />
-              ) : (
-                <button
-                  onClick={() => switchView(view.id)}
-                  className={[
-                    "flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap",
-                    isActive
-                      ? "border-[var(--accent)] text-[var(--accent)]"
-                      : "border-transparent text-[var(--text-muted)] hover:text-[var(--text)] hover:border-[var(--border)]",
-                  ].join(" ")}
-                >
-                  {VIEW_TYPE_ICONS[view.type] ?? null}
-                  {view.name}
-                </button>
-              )}
-
-              {/* ⋯ context button */}
-              {!isEditing && (
-                <button
-                  ref={(el) => { if (el) menuBtnRefs.current.set(view.id, el); }}
-                  onClick={(e) => { e.stopPropagation(); setTabMenuOpenId((prev) => prev === view.id ? null : view.id); }}
-                  className="opacity-0 group-hover/tab:opacity-100 p-0.5 mr-1 rounded text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] transition-opacity shrink-0"
-                  title="Options"
-                >
-                  <MoreHorizontal size={12} />
-                </button>
-              )}
-
-              {/* Tab menu */}
-              {tabMenuOpenId === view.id && (
-                <TabMenu
-                  anchor={{ current: menuBtnRefs.current.get(view.id) ?? null }}
-                  canDelete={views.length > 1}
-                  onRename={() => {
-                    setEditingViewId(view.id);
-                    setEditingName(view.name);
-                  }}
-                  onDelete={() => handleDeleteView(view)}
-                  onClose={() => setTabMenuOpenId(null)}
-                />
-              )}
-            </div>
-          );
-        })}
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleTabDragEnd}>
+          <SortableContext items={views.map((v) => v.id)} strategy={horizontalListSortingStrategy}>
+            {views.map((view) => (
+              <SortableViewTab
+                key={view.id}
+                view={view}
+                isActive={view.id === activeView.id}
+                isEditing={editingViewId === view.id}
+                editingName={editingName}
+                editInputRef={editInputRef}
+                menuBtnRefs={menuBtnRefs}
+                menuOpen={tabMenuOpenId === view.id}
+                canDelete={views.length > 1}
+                onEditingNameChange={setEditingName}
+                onSwitchView={() => switchView(view.id)}
+                onCommitRename={commitRename}
+                onCancelRename={() => setEditingViewId(null)}
+                onStartRename={() => {
+                  setEditingViewId(view.id);
+                  setEditingName(view.name);
+                }}
+                onToggleMenu={() => setTabMenuOpenId((prev) => (prev === view.id ? null : view.id))}
+                onCloseMenu={() => setTabMenuOpenId(null)}
+                onDelete={() => handleDeleteView(view)}
+              />
+            ))}
+          </SortableContext>
+        </DndContext>
 
         {/* Add view button */}
         <button
