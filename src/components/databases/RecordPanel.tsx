@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import useSWR, { mutate as globalMutate } from "swr";
 import {
   X, Type, Hash, ChevronDown, List, Calendar, CheckSquare, Link, Mail,
@@ -290,13 +290,45 @@ export default function RecordPanel({ record, properties, databaseId, onClose }:
 
   // ─── Render ───────────────────────────────────────────────────────────────────
 
+  const [panelWidth, setPanelWidth] = useState<number>(() => {
+    if (typeof window === "undefined") return 600;
+    const saved = Number(window.localStorage.getItem("recordPanel:width"));
+    return saved >= 380 ? saved : 600;
+  });
+
+  const startResize = (e: React.PointerEvent) => {
+    e.preventDefault();
+    let latest = panelWidth;
+    const onMove = (ev: PointerEvent) => {
+      latest = Math.min(window.innerWidth, Math.max(380, window.innerWidth - ev.clientX));
+      setPanelWidth(latest);
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.localStorage.setItem("recordPanel:width", String(Math.round(latest)));
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+
   return (
     <>
       <div className="fixed inset-0 bg-black/30 z-40" onClick={handleClose} />
 
+      {visible && (
+        <div
+          onPointerDown={startResize}
+          style={{ right: panelWidth }}
+          className="fixed top-0 bottom-0 w-1 z-[51] cursor-ew-resize hover:bg-[var(--accent)] transition-colors"
+          title="Glisser pour redimensionner la fenêtre"
+        />
+      )}
+
       <div
+        style={{ width: panelWidth }}
         className={[
-          "fixed right-0 top-0 bottom-0 w-[600px] max-w-full z-50",
+          "fixed right-0 top-0 bottom-0 max-w-full z-50",
           "bg-[var(--bg)] shadow-2xl overflow-y-auto flex flex-col",
           "transition-transform duration-200",
           visible ? "translate-x-0" : "translate-x-full",
@@ -383,21 +415,21 @@ export default function RecordPanel({ record, properties, databaseId, onClose }:
 
         {/* Properties */}
         {visibleProps.length > 0 && (
-          <div className="px-6 py-1 shrink-0">
+          <div className="px-6 py-1 shrink-0 grid grid-cols-[minmax(0,max-content)_minmax(0,1fr)] gap-x-3">
             {visibleProps.map((property) => (
-              <div key={property.id} className="flex items-center gap-3 py-1.5 min-h-[36px]">
-                <div className="flex items-center gap-2 w-44 shrink-0 text-sm text-[var(--text-muted)]">
+              <Fragment key={property.id}>
+                <div className="flex items-center gap-2 max-w-[11rem] py-1.5 min-h-[36px] text-sm text-[var(--text-muted)]">
                   <span className="shrink-0">{PROP_ICONS[property.type] ?? <Type size={14} />}</span>
                   <span className="truncate">{property.name}</span>
                 </div>
-                <div className="flex-1 min-w-0 text-sm">
+                <div className="flex items-center min-w-0 py-1.5 min-h-[36px] text-sm">
                   <Cell
                     property={property}
                     record={record}
                     onSave={(value) => saveProperty(property, value)}
                   />
                 </div>
-              </div>
+              </Fragment>
             ))}
           </div>
         )}
