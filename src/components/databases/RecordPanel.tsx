@@ -15,6 +15,7 @@ import { useThemeMode } from "@/lib/client/useThemeMode";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { createDebouncedSaver, type DebouncedSaver } from "@/lib/client/debouncedSaver";
 import { uploadFile } from "@/lib/client/upload";
+import { pageLinkSchema, PageLinkMenu } from "@/lib/client/blocknoteSchema";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -54,16 +55,18 @@ function parseSections(raw: string | null): RecordSection[] | null {
 function SectionEditor({
   section,
   themeMode,
+  workspaceId,
   onChange,
 }: {
   section: RecordSection;
   themeMode: "light" | "dark";
+  workspaceId: string | null;
   onChange: (content: unknown[]) => void;
 }) {
   const initial =
     Array.isArray(section.content) && section.content.length > 0 ? section.content : undefined;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const editor = useCreateBlockNote({ initialContent: initial as any, dictionary: fr, uploadFile });
+  const editor = useCreateBlockNote({ schema: pageLinkSchema, initialContent: initial as any, dictionary: fr, uploadFile });
   return (
     <div className="mb-3">
       <h3 className="px-3 text-sm font-semibold text-[var(--text)] select-none">
@@ -73,7 +76,9 @@ function SectionEditor({
         editor={editor}
         theme={themeMode}
         onChange={() => onChange(editor.document)}
-      />
+      >
+        <PageLinkMenu editor={editor} workspaceId={workspaceId} />
+      </BlockNoteView>
     </div>
   );
 }
@@ -279,7 +284,7 @@ export default function RecordPanel({ record, properties, databaseId, onClose }:
     if (Array.isArray(arr) && arr.length > 0) parsedContent = arr;
   } catch {}
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const editor = useCreateBlockNote({ initialContent: parsedContent as any, dictionary: fr, uploadFile });
+  const editor = useCreateBlockNote({ schema: pageLinkSchema, initialContent: parsedContent as any, dictionary: fr, uploadFile });
 
   const isSectioned = sections.length > 0;
 
@@ -444,6 +449,7 @@ export default function RecordPanel({ record, properties, databaseId, onClose }:
                 key={`${section.id}-${bodyVersion}`}
                 section={section}
                 themeMode={themeMode}
+                workspaceId={wsId}
                 onChange={(content) => onSectionChange(section.id, content)}
               />
             ))
@@ -452,7 +458,9 @@ export default function RecordPanel({ record, properties, databaseId, onClose }:
               editor={editor}
               theme={themeMode}
               onChange={() => contentSaverRef.current?.schedule(JSON.stringify(editor.document))}
-            />
+            >
+              <PageLinkMenu editor={editor} workspaceId={wsId} />
+            </BlockNoteView>
           )}
         </div>
       </div>
