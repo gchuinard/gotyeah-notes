@@ -25,6 +25,7 @@ import Cell, { CellDisplay } from "@/components/databases/Cell";
 import AddPropertyModal from "@/components/databases/AddPropertyModal";
 import PropertyPopover from "@/components/databases/PropertyPopover";
 import RecordPanel from "@/components/databases/RecordPanel";
+import BulkActionBar from "@/components/databases/BulkActionBar";
 import { useRecordDeepLink } from "@/lib/client/useRecordDeepLink";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -127,6 +128,8 @@ function SortableRow({
   index,
   sorted,
   colWidths,
+  selected,
+  onToggleSelect,
   onSave,
   onDelete,
   onTitleClick,
@@ -135,6 +138,8 @@ function SortableRow({
   index: number;
   sorted: ParsedDatabaseProperty[];
   colWidths: Record<string, number>;
+  selected: boolean;
+  onToggleSelect: () => void;
   onSave: (property: ParsedDatabaseProperty, value: PropertyValue | null) => void;
   onDelete: () => void;
   onTitleClick: () => void;
@@ -146,10 +151,11 @@ function SortableRow({
       ref={setNodeRef}
       className={[
         "border-b border-[var(--border)] hover:bg-[var(--surface-hover)] transition-colors group",
+        selected ? "bg-[var(--surface)]" : "",
         isDragging ? "opacity-40" : "",
       ].join(" ")}
     >
-      {/* Drag handle + row number — fixed width, not resizable */}
+      {/* Drag handle + (row number ↔ selection checkbox) — fixed width, not resizable */}
       <td className="px-2 py-1.5 select-none" style={{ width: 56, minWidth: 56 }}>
         <div className="flex items-center gap-1">
           <span
@@ -159,7 +165,27 @@ function SortableRow({
           >
             <GripVertical size={13} />
           </span>
-          <span className="text-xs text-[var(--text-muted)] tabular-nums">{index + 1}</span>
+          {/* Case de sélection : visible au survol OU quand la ligne est cochée.
+              Contrôle distinct du clic d'ouverture du panneau. */}
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onToggleSelect}
+            onClick={(e) => e.stopPropagation()}
+            aria-label="Sélectionner la ligne"
+            className={[
+              "cursor-pointer accent-[var(--accent)] w-3.5 h-3.5 shrink-0",
+              selected ? "inline-block" : "hidden group-hover:inline-block",
+            ].join(" ")}
+          />
+          <span
+            className={[
+              "text-xs text-[var(--text-muted)] tabular-nums",
+              selected ? "hidden" : "inline group-hover:hidden",
+            ].join(" ")}
+          >
+            {index + 1}
+          </span>
         </div>
       </td>
 
@@ -349,6 +375,22 @@ export default function TableView({ databaseId, view: _view, properties: initial
   const [selectedRecordId, setSelectedRecordId] = useRecordDeepLink(records);
   const pendingIds = useRef<Set<string>>(new Set());
 
+  // ── Sélection multiple (éphémère, propre à cette vue) ────────────────────────
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // Réinitialise à chaque changement de vue (perdu au changement/refresh).
+  useEffect(() => { setSelectedIds(new Set()); }, [_view.id]);
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
   );
@@ -464,6 +506,12 @@ export default function TableView({ databaseId, view: _view, properties: initial
       });
       if (!ok) return;
       if (selectedRecordId === record.id) setSelectedRecordId(null);
+      setSelectedIds((prev) => {
+        if (!prev.has(record.id)) return prev;
+        const next = new Set(prev);
+        next.delete(record.id);
+        return next;
+      });
       const snapshot = records;
       mutate(records.filter((r) => r.id !== record.id), { revalidate: false });
       try {
@@ -639,6 +687,8 @@ export default function TableView({ databaseId, view: _view, properties: initial
                       index={index}
                       sorted={sorted}
                       colWidths={widths}
+                      selected={selectedIds.has(record.id)}
+                      onToggleSelect={() => toggleSelect(record.id)}
                       onSave={(property, value) => handleSave(record, property, value)}
                       onDelete={() => handleDeleteRecord(record)}
                       onTitleClick={() => setSelectedRecordId(record.id)}
@@ -700,6 +750,15 @@ export default function TableView({ databaseId, view: _view, properties: initial
           onClose={() => setSelectedRecordId(null)}
         />
       )}
+
+      {/* Barre d'action groupée (sélection multiple) */}
+      <BulkActionBar
+        properties={properties}
+        records={records}
+        selectedIds={selectedIds}
+        mutate={mutate}
+        onClear={clearSelection}
+      />
     </>
   );
 }
