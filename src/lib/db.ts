@@ -310,6 +310,158 @@ export function serializeSectionsBody(sections: RecordSection[]): string {
   return JSON.stringify(sections);
 }
 
+// ─── Historique des modifications (RecordRevision) ────────────────────────────
+//
+// Logique PURE (aucun accès DB) pour être testable :
+//  - diffRecordRevisions : quels champs ont RÉELLEMENT changé dans un PATCH ;
+//  - shouldCoalesceRevision : faut-il fusionner dans la dernière révision (même
+//    acteur + même champ, < 2 min) ou créer une nouvelle ligne.
+// L'écriture transactionnelle (create/merge) vit dans la route PATCH records.
+
+/** Fenêtre de coalescence : mêmes acteur/champ dans cet intervalle = fusion. */
+export const REVISION_COALESCE_MS = 2 * 60 * 1000; // 2 minutes
+
+/** Un changement de champ détecté sur un record (before/after non sérialisés). */
+export type RevisionChange = {
+  // "title" | "content" | "sectionsBody" | DatabaseProperty.id | RecordSection.id
+  field: string;
+  before: unknown;
+  after: unknown;
+};
+
+/** État d'un record AVANT PATCH (valeurs déjà parsées). */
+export type RecordSnapshot = {
+  title: string;
+  content: string;
+  properties: RecordProperties;
+  sectionsBody: RecordSection[] | null;
+};
+
+/** Fragment de PATCH pertinent pour l'audit (les autres champs ne sont pas tracés). */
+export type RecordPatchInput = {
+  title?: string;
+  content?: string;
+  // Patch BRUT des propriétés (une valeur null = suppression de la cellule).
+  properties?: RecordProperties;
+  sectionsBody?: RecordSection[] | null;
+};
+
+/** Égalité structurelle stable pour des valeurs JSON-sérialisables (undefined ≡ null). */
+function jsonEqual(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+}
+
+/** Contenu BlockNote d'une section, normalisé (section absente ≡ document vide). */
+function sectionContent(sections: RecordSection[] | null, id: string): unknown[] {
+  const found = sections?.find((s) => s.id === id);
+  return Array.isArray(found?.content) ? found.content : [];
+}
+
+/**
+ * Calcule la liste des champs RÉELLEMENT modifiés par un PATCH.
+ * - title / content : comparaison directe (une valeur identique n'est pas tracée).
+ * - properties : une entrée par propriété dont la valeur diffère (null = suppression,
+ *   before = valeur existante, after = null).
+ * - sectionsBody = tableau : une entrée par section dont le contenu diffère
+ *   (field = RecordSection.id, section absente avant ≡ document vide).
+ * - sectionsBody = null (passage en corps libre) : tracé si le record était sectionné
+ *   (field = "sectionsBody", before = anciennes sections, after = null).
+ */
+export function diffRecordRevisions(
+  before: RecordSnapshot,
+  patch: RecordPatchInput
+): RevisionChange[] {
+  const changes: RevisionChange[] = [];
+
+  if (patch.title !== undefined && patch.title !== before.title) {
+    changes.push({ field: "title", before: before.title, after: patch.title });
+  }
+
+  if (patch.content !== undefined && patch.content !== before.content) {
+    changes.push({ field: "content", before: before.content, after: patch.content });
+  }
+
+  if (patch.properties !== undefined) {
+    for (const [propId, raw] of Object.entries(patch.properties)) {
+      const prev = before.properties[propId] ?? null;
+      const next = raw ?? null;
+      if (!jsonEqual(prev, next)) {
+        changes.push({ field: propId, before: prev, after: next });
+      }
+    }
+  }
+
+  if (patch.sectionsBody !== undefined) {
+    if (patch.sectionsBody === null) {
+      if (before.sectionsBody && before.sectionsBody.length > 0) {
+        changes.push({ field: "sectionsBody", before: before.sectionsBody, after: null });
+      }
+    } else {
+      for (const section of patch.sectionsBody) {
+        const prev = sectionContent(before.sectionsBody, section.id);
+        const next = Array.isArray(section.content) ? section.content : [];
+        if (!jsonEqual(prev, next)) {
+          changes.push({ field: section.id, before: prev, after: next });
+        }
+      }
+    }
+  }
+
+  return changes;
+}
+
+/**
+ * Faut-il fusionner un changement dans la dernière révision du champ plutôt que
+ * créer une nouvelle ligne ? Oui SSI cette dernière révision existe, a le MÊME
+ * acteur et date de MOINS de `windowMs`. Absorbe le spam d'autosave BlockNote
+ * (une seule ligne coalescée par champ), sans jamais fusionner l'action d'un
+ * autre acteur ni une modification hors fenêtre.
+ */
+export function shouldCoalesceRevision(
+  last: { actorId: string | null; createdAt: Date } | null,
+  actorId: string,
+  now: Date,
+  windowMs: number = REVISION_COALESCE_MS
+): boolean {
+  if (!last) return false;
+  if (last.actorId !== actorId) return false;
+  return now.getTime() - last.createdAt.getTime() < windowMs;
+}
+
+/** Révision telle que renvoyée par l'API (before/after parsés, acteur résolu). */
+export type ParsedRecordRevision = {
+  id: string;
+  recordId: string;
+  field: string;
+  before: unknown;
+  after: unknown;
+  createdAt: Date;
+  actor: { id: string; displayName: string } | null;
+};
+
+/** Ligne RecordRevision + acteur joint, telle que lue en base (before/after en JSON). */
+export type RecordRevisionRow = {
+  id: string;
+  recordId: string;
+  field: string;
+  before: string;
+  after: string;
+  createdAt: Date;
+  actor: { id: string; displayName: string } | null;
+};
+
+export function parseRecordRevision(raw: RecordRevisionRow): ParsedRecordRevision {
+  return {
+    id: raw.id,
+    recordId: raw.recordId,
+    field: raw.field,
+    before: JSON.parse(raw.before),
+    after: JSON.parse(raw.after),
+    createdAt: raw.createdAt,
+    actor: raw.actor,
+  };
+}
+
 // ─── Notes de version : blocs BlockNote de la page « Patch notes » ────────────
 //
 // À la clôture d'un sprint, un groupe de blocs BlockNote (titre daté + issues

@@ -7,8 +7,11 @@ import { validateRelationValues } from "@/lib/relations";
 import {
   serializeRecord,
   parseRecord,
+  parseSectionsBody,
   mergeRecordProperties,
   serializeSectionsBody,
+  diffRecordRevisions,
+  shouldCoalesceRevision,
   type RecordProperties,
   type RecordSection,
 } from "@/lib/db";
@@ -109,23 +112,72 @@ export async function PATCH(
     }
   }
 
-  const updated = await prisma.record.update({
-    where: { id },
-    data: {
-      ...serializeRecord({
-        ...(title !== undefined && { title }),
-        ...(icon !== undefined && { icon }),
-        ...(content !== undefined && { content }),
-        ...(position !== undefined && { position }),
-        ...(mergedProperties !== undefined && { properties: mergedProperties }),
-      }),
-      ...(sectionsBody !== undefined && {
-        sectionsBody:
-          sectionsBody === null ? null : serializeSectionsBody(sectionsBody as RecordSection[]),
-      }),
-      ...(templateId !== undefined && { templateId }),
-      ...(sprintId !== undefined && { sprintId }),
+  // Piste d'audit : une révision par CHAMP réellement changé (title/content/
+  // property/section). Diff calculé AVANT l'update, à partir de l'état existant.
+  const changes = diffRecordRevisions(
+    {
+      title: access.record.title,
+      content: access.record.content,
+      properties: parseRecord(access.record).properties,
+      sectionsBody: parseSectionsBody(access.record.sectionsBody),
     },
+    {
+      ...(title !== undefined && { title }),
+      ...(content !== undefined && { content }),
+      ...(rawProperties !== undefined && { properties: rawProperties as RecordProperties }),
+      ...(sectionsBody !== undefined && { sectionsBody: sectionsBody as RecordSection[] | null }),
+    }
+  );
+  const now = new Date();
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const row = await tx.record.update({
+      where: { id },
+      data: {
+        ...serializeRecord({
+          ...(title !== undefined && { title }),
+          ...(icon !== undefined && { icon }),
+          ...(content !== undefined && { content }),
+          ...(position !== undefined && { position }),
+          ...(mergedProperties !== undefined && { properties: mergedProperties }),
+        }),
+        ...(sectionsBody !== undefined && {
+          sectionsBody:
+            sectionsBody === null ? null : serializeSectionsBody(sectionsBody as RecordSection[]),
+        }),
+        ...(templateId !== undefined && { templateId }),
+        ...(sprintId !== undefined && { sprintId }),
+      },
+    });
+
+    for (const change of changes) {
+      // Coalescence : fusion dans la dernière révision du champ si même acteur < 2 min,
+      // sinon nouvelle ligne. On conserve le `before` d'origine, on rafraîchit after+date.
+      const last = await tx.recordRevision.findFirst({
+        where: { recordId: id, field: change.field },
+        orderBy: { createdAt: "desc" },
+        select: { id: true, actorId: true, createdAt: true },
+      });
+      if (shouldCoalesceRevision(last, user.id, now)) {
+        await tx.recordRevision.update({
+          where: { id: last!.id },
+          data: { after: JSON.stringify(change.after ?? null), createdAt: now },
+        });
+      } else {
+        await tx.recordRevision.create({
+          data: {
+            recordId: id,
+            actorId: user.id,
+            field: change.field,
+            before: JSON.stringify(change.before ?? null),
+            after: JSON.stringify(change.after ?? null),
+            createdAt: now,
+          },
+        });
+      }
+    }
+
+    return row;
   });
 
   return NextResponse.json(parseRecord(updated));
