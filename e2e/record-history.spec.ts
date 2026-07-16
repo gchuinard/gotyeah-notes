@@ -43,13 +43,13 @@ test("RecordPanel : onglet Historique affiche qui/quoi/quand ; l'onglet Contenu 
   await expect(historyEntry).toHaveCount(0);
 
   // Bascule sur « Historique » → l'entrée qui/quoi s'affiche, panneau toujours ouvert.
-  await page.getByRole("button", { name: "Historique" }).click();
+  await page.getByRole("button", { name: "Historique", exact: true }).click();
   await expect(historyEntry).toHaveCount(1);
   await expect(historyEntry).toContainText("Historien"); // qui
   await expect(historyEntry).toContainText("Titre"); // quoi
   await expect(panelOpen(page)).toBeVisible(); // le panneau ne s'est pas fermé
 
   // Retour sur « Contenu » → l'éditeur est de nouveau visible (instance préservée).
-  await page.getByRole("button", { name: "Contenu" }).click();
+  await page.getByRole("button", { name: "Contenu", exact: true }).click();
   await expect(body).toBeVisible();
 });

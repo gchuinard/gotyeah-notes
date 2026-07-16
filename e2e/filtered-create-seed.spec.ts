@@ -118,7 +118,9 @@ test("table : créer une ligne sur une vue filtrée par un eq → ligne présent
 
   await page.request.patch(`/api/records/${created.id}`, { data: { title: "Ligne filtrée" } });
   await page.reload();
-  await expect(page.getByText("Ligne filtrée", { exact: true })).toBeVisible();
+  // Le titre apparaît DEUX fois (cellule de la table + titre du RecordPanel rouvert
+  // via ?r=) : on scope à la table pour asserter la présence de la LIGNE.
+  await expect(page.getByRole("table").getByText("Ligne filtrée", { exact: true })).toBeVisible();
 });
 
 // ─── Gallery (plan 8) ─────────────────────────────────────────────────────────

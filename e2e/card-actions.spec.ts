@@ -71,15 +71,15 @@ test("kanban : au survol, 2 icônes directes ; Dupliquer clone sans dialog ni Re
 
   // AC1/AC5 : 2 icônes directes, plus aucun bouton de menu ⋯ (Options).
   await card.hover();
-  await expect(column.getByRole("button", { name: "Dupliquer" })).toBeVisible();
-  await expect(column.getByRole("button", { name: "Supprimer" })).toBeVisible();
+  await expect(column.getByLabel("Dupliquer")).toBeVisible();
+  await expect(column.getByLabel("Supprimer")).toBeVisible();
   await expect(column.getByTitle("Options")).toHaveCount(0);
 
   // AC2 : Dupliquer → clone immédiat « (copie) », SANS dialog, sans ouvrir le panneau.
   const dup = page.waitForResponse(
     (r) => r.url().includes("/duplicate") && r.request().method() === "POST"
   );
-  await column.getByRole("button", { name: "Dupliquer" }).click();
+  await column.getByLabel("Dupliquer").click();
   await dup;
   await expect(dialog(page)).toHaveCount(0);
   await expect(panelOpen(page)).toHaveCount(0);
@@ -100,7 +100,7 @@ test("kanban : Supprimer ouvre la popup maison — Annuler conserve, Confirmer r
 
   // Annuler → la carte reste, et l'icône n'a pas ouvert le RecordPanel.
   await card.hover();
-  await column.getByRole("button", { name: "Supprimer" }).click();
+  await column.getByLabel("Supprimer").click();
   await expect(dialog(page)).toBeVisible();
   await dialog(page).getByRole("button", { name: "Annuler" }).click();
   await expect(dialog(page)).toBeHidden();
@@ -109,7 +109,7 @@ test("kanban : Supprimer ouvre la popup maison — Annuler conserve, Confirmer r
 
   // Confirmer → la carte disparaît.
   await card.hover();
-  await column.getByRole("button", { name: "Supprimer" }).click();
+  await column.getByLabel("Supprimer").click();
   await dialog(page).getByRole("button", { name: "Supprimer" }).click();
   await expect(dialog(page)).toBeHidden();
   await expect(card).toHaveCount(0);

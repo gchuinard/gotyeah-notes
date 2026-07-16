@@ -120,7 +120,9 @@ test("AC5 : clic (<6px) switche la vue sans réordonner ; ⋯ menu et rename inl
   await wrapperB.hover();
   await wrapperB.getByRole("button", { name: "Options" }).click();
   await expect(page.getByRole("button", { name: "Renommer" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Supprimer" })).toBeVisible();
+  // « Supprimer » du menu déroulant (texte visible) ≠ corbeille de la sidebar
+  // (bouton icône, libellé porté par title) : on cible l'item texte du menu.
+  await expect(page.getByText("Supprimer", { exact: true })).toBeVisible();
 
   // Rename inline : Renommer → saisie → Entrée → nom persisté.
   await page.getByRole("button", { name: "Renommer" }).click();

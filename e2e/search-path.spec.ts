@@ -85,7 +85,7 @@ test("résultat record → badge « fiche » conservé ET 2e ligne = chemin de l
 
   const item = page.getByRole("listitem").filter({ hasText: recTitle });
   await expect(item).toBeVisible();
-  await expect(item.getByText("fiche")).toBeVisible();
+  await expect(item.getByText("fiche", { exact: true })).toBeVisible();
   // Le chemin est le fil COMPLET de la page hôte (section › dossier › page hôte).
   await expect(item).toContainText("RecoSec");
   await expect(item).toContainText("RecoHost");

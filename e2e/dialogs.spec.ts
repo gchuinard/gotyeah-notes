@@ -169,7 +169,7 @@ test("le dialogue est utilisable depuis l'icône Supprimer d'une carte kanban (s
   // libellés proches.
   const column = page.locator("div.w-64").filter({ hasText: "Alpha" });
   await card.hover();
-  await column.getByRole("button", { name: "Supprimer" }).click();
+  await column.getByLabel("Supprimer").click();
 
   // Le dialogue est visible ET cliquable malgré le portail et le sous-arbre dnd-kit.
   await expect(dialog(page)).toBeVisible();
