@@ -31,6 +31,9 @@ export type ParsedSprint = {
   startDate: string | null;
   endDate: string | null;
   state: SprintState;
+  // Notes de version générées server-side à la clôture (markdown des issues livrées).
+  // null tant que le sprint n'a pas été terminé. Lecture seule côté client.
+  releaseNotes: string | null;
   position: number;
 };
 
