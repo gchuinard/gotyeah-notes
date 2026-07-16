@@ -384,6 +384,7 @@ function SprintLane({
   const [menuOpen, setMenuOpen] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
   const [nameValue, setNameValue] = useState(sprint?.name ?? "");
+  const [showNotes, setShowNotes] = useState(false);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
@@ -497,6 +498,26 @@ function SprintLane({
 
       {sprint?.goal && !collapsed && (
         <p className="px-9 -mt-1 pb-2 text-xs text-[var(--text-muted)] italic">{sprint.goal}</p>
+      )}
+
+      {/* Notes de version (lecture seule) — présentes sur les sprints terminés.
+          Accessibles même quand la lane est repliée (les terminés le sont par défaut). */}
+      {sprint?.releaseNotes && (
+        <div className="px-2 pb-2">
+          <button
+            onClick={() => setShowNotes((v) => !v)}
+            className="flex items-center gap-1.5 px-1.5 py-1 text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] rounded-md transition-colors"
+            title="Notes de version (lecture seule)"
+          >
+            {showNotes ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+            <span aria-hidden>📝</span> Notes de version
+          </button>
+          {showNotes && (
+            <div className="mt-1 ml-1 px-3 py-2 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text)] whitespace-pre-wrap leading-relaxed select-text">
+              {sprint.releaseNotes}
+            </div>
+          )}
+        </div>
       )}
 
       {/* Body */}
