@@ -290,13 +290,45 @@ export default function RecordPanel({ record, properties, databaseId, onClose }:
 
   // ─── Render ───────────────────────────────────────────────────────────────────
 
+  const [panelWidth, setPanelWidth] = useState<number>(() => {
+    if (typeof window === "undefined") return 600;
+    const saved = Number(window.localStorage.getItem("recordPanel:width"));
+    return saved >= 380 ? saved : 600;
+  });
+
+  const startResize = (e: React.PointerEvent) => {
+    e.preventDefault();
+    let latest = panelWidth;
+    const onMove = (ev: PointerEvent) => {
+      latest = Math.min(window.innerWidth, Math.max(380, window.innerWidth - ev.clientX));
+      setPanelWidth(latest);
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.localStorage.setItem("recordPanel:width", String(Math.round(latest)));
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+
   return (
     <>
       <div className="fixed inset-0 bg-black/30 z-40" onClick={handleClose} />
 
+      {visible && (
+        <div
+          onPointerDown={startResize}
+          style={{ right: panelWidth }}
+          className="fixed top-0 bottom-0 w-1 z-[51] cursor-ew-resize hover:bg-[var(--accent)] transition-colors"
+          title="Glisser pour redimensionner la fenêtre"
+        />
+      )}
+
       <div
+        style={{ width: panelWidth }}
         className={[
-          "fixed right-0 top-0 bottom-0 w-[600px] max-w-full z-50",
+          "fixed right-0 top-0 bottom-0 max-w-full z-50",
           "bg-[var(--bg)] shadow-2xl overflow-y-auto flex flex-col",
           "transition-transform duration-200",
           visible ? "translate-x-0" : "translate-x-full",
