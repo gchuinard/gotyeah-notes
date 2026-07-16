@@ -363,6 +363,7 @@ function KanbanColView({
   onDeleteRecord,
   onDuplicateRecord,
   onRenameOption,
+  createOnlyInUnassigned,
 }: {
   col: KanbanCol;
   previewProps: ParsedDatabaseProperty[];
@@ -373,6 +374,7 @@ function KanbanColView({
   onDeleteRecord: (record: ParsedRecord) => void;
   onDuplicateRecord: (record: ParsedRecord) => void;
   onRenameOption: (optionId: string, newName: string) => void;
+  createOnlyInUnassigned: boolean;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: col.id });
 
@@ -468,13 +470,15 @@ function KanbanColView({
         </SortableContext>
       </div>
 
-      <button
-        onClick={() => onAddRecord(col)}
-        className="flex items-center gap-1.5 px-2 py-1.5 text-sm text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] rounded-md transition-colors"
-      >
-        <Plus size={13} />
-        Nouveau
-      </button>
+      {(!createOnlyInUnassigned || col.optionId === null) && (
+        <button
+          onClick={() => onAddRecord(col)}
+          className="flex items-center gap-1.5 px-2 py-1.5 text-sm text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] rounded-md transition-colors"
+        >
+          <Plus size={13} />
+          Nouveau
+        </button>
+      )}
     </div>
   );
 }
@@ -1063,6 +1067,7 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
                 onDeleteRecord={handleDeleteRecord}
                 onDuplicateRecord={handleDuplicateRecord}
                 onRenameOption={handleRenameOption}
+                createOnlyInUnassigned={view.config.createInUnassignedOnly ?? false}
               />
             ))}
           </div>
