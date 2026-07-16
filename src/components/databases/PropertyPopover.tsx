@@ -1,6 +1,8 @@
 "use client";
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Trash2, Plus } from "lucide-react";
+import { Trash2, Plus, GripVertical } from "lucide-react";
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { SortableContext, verticalListSortingStrategy, arrayMove, useSortable } from "@dnd-kit/sortable";
 import type { ParsedDatabaseProperty, SelectOption } from "@/lib/db";
 import Portal from "@/components/databases/portal";
 import { SELECT_COLORS } from "@/lib/propertyColors";
@@ -45,6 +47,7 @@ function OptionRow({
   autoFocus?: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const { attributes, listeners, setNodeRef, isDragging } = useSortable({ id: option.id });
 
   // Focus + select text when this option was just created
   useEffect(() => {
@@ -55,9 +58,20 @@ function OptionRow({
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className="px-2 py-1.5 group/opt">
+    <div
+      ref={setNodeRef}
+      className={`px-2 py-1.5 group/opt ${isDragging ? "opacity-40" : ""}`}
+    >
       {/* Name + delete */}
       <div className="flex items-center gap-1.5">
+        <span
+          {...attributes}
+          {...listeners}
+          title="Glisser pour réordonner"
+          className="opacity-0 group-hover/opt:opacity-100 cursor-grab active:cursor-grabbing text-[var(--text-muted)] transition-opacity shrink-0 touch-none"
+        >
+          <GripVertical size={12} />
+        </span>
         <input
           ref={inputRef}
           value={option.name}
@@ -141,6 +155,8 @@ export default function PropertyPopover({
   // Écriture optimiste : en cas de refus serveur (ex. 400 « option référencée »),
   // on RESTAURE le dernier état réellement enregistré — sinon l'UI afficherait une
   // option supprimée qui existe toujours en base.
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+
   const saveOptions = useCallback(async (nextOptions: SelectOption[]) => {
     setSaving(true);
     setOptionsError(null);
@@ -166,6 +182,17 @@ export default function PropertyPopover({
       setSaving(false);
     }
   }, [property, onPropertyUpdated]);
+
+  const handleOptionDragEnd = (e: DragEndEvent) => {
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    const oldIdx = options.findIndex((o) => o.id === active.id);
+    const newIdx = options.findIndex((o) => o.id === over.id);
+    if (oldIdx === -1 || newIdx === -1) return;
+    const reordered = arrayMove(options, oldIdx, newIdx);
+    setOptions(reordered);
+    saveOptions(reordered);
+  };
 
   const handleOptionChange = (idx: number, next: SelectOption) => {
     const updated = options.map((o, i) => (i === idx ? next : o));
@@ -246,15 +273,19 @@ export default function PropertyPopover({
           {optionsError && (
             <p className="px-3 pb-1 text-xs text-red-500 normal-case">{optionsError}</p>
           )}
-          {options.map((opt, idx) => (
-            <OptionRow
-              key={opt.id}
-              option={opt}
-              onChange={(next) => handleOptionChange(idx, next)}
-              onDelete={() => handleOptionDelete(idx)}
-              autoFocus={newOptionId === opt.id}
-            />
-          ))}
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleOptionDragEnd}>
+            <SortableContext items={options.map((o) => o.id)} strategy={verticalListSortingStrategy}>
+              {options.map((opt, idx) => (
+                <OptionRow
+                  key={opt.id}
+                  option={opt}
+                  onChange={(next) => handleOptionChange(idx, next)}
+                  onDelete={() => handleOptionDelete(idx)}
+                  autoFocus={newOptionId === opt.id}
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
           <button
             type="button"
             onClick={handleAddOption}
