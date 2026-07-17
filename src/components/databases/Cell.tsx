@@ -526,13 +526,29 @@ export default function Cell({ property, record, onSave, autoEdit, onEditingChan
   }
 
   // ── View mode ─────────────────────────────────────────────────────────────
+  const storedRaw =
+    property.type === "title" ? record.title : record.properties[property.id];
+  const isEmpty =
+    storedRaw === undefined ||
+    storedRaw === null ||
+    storedRaw === "" ||
+    (Array.isArray(storedRaw) && storedRaw.length === 0);
   return (
     <div
       ref={triggerRef}
-      className="cursor-text min-h-[22px] rounded px-1 -mx-1 hover:bg-[var(--surface)] transition-colors"
+      className="cursor-pointer min-h-[22px] rounded px-1 -mx-1 hover:bg-[var(--surface)] transition-colors"
       onClick={() => setIsEditing(true)}
     >
-      <CellDisplay property={property} record={record} />
+      {isEmpty && property.type !== "title" ? (
+        // État vide (hors titre : CellDisplay y affiche déjà « Sans titre ») : sans
+        // repère, une Cell vide se réduit à ~0px de large → aucune cible pour cliquer
+        // et renseigner la valeur. On rend une zone large + un hint.
+        <span className="block min-w-[3.5rem] italic text-[var(--text-muted)] opacity-50">
+          Vide
+        </span>
+      ) : (
+        <CellDisplay property={property} record={record} />
+      )}
     </div>
   );
 }
