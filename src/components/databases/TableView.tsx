@@ -26,6 +26,7 @@ import AddPropertyModal from "@/components/databases/AddPropertyModal";
 import PropertyPopover from "@/components/databases/PropertyPopover";
 import RecordPanel from "@/components/databases/RecordPanel";
 import BulkActionBar from "@/components/databases/BulkActionBar";
+import { SelectCheckbox } from "@/components/databases/SelectCheckbox";
 import { useRecordDeepLink } from "@/lib/client/useRecordDeepLink";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -167,15 +168,13 @@ function SortableRow({
           </span>
           {/* Case de sélection : visible au survol OU quand la ligne est cochée.
               Contrôle distinct du clic d'ouverture du panneau. */}
-          <input
-            type="checkbox"
-            checked={selected}
-            onChange={onToggleSelect}
-            onClick={(e) => e.stopPropagation()}
-            aria-label="Sélectionner la ligne"
+          <SelectCheckbox
+            selected={selected}
+            onToggle={onToggleSelect}
+            label="Sélectionner la ligne"
             className={[
-              "cursor-pointer accent-[var(--accent)] w-3.5 h-3.5 shrink-0",
-              selected ? "inline-block" : "hidden group-hover:inline-block",
+              "shrink-0",
+              selected ? "grid" : "hidden group-hover:grid",
             ].join(" ")}
           />
           <span

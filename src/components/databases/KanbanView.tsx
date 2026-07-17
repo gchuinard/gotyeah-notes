@@ -41,6 +41,7 @@ import {
 import { useDialog } from "@/contexts/DialogContext";
 import Portal from "@/components/databases/portal";
 import CardActions from "@/components/databases/CardActions";
+import { SelectCheckbox } from "@/components/databases/SelectCheckbox";
 import RecordPanel from "@/components/databases/RecordPanel";
 import BulkActionBar from "@/components/databases/BulkActionBar";
 import { useRecordDeepLink } from "@/lib/client/useRecordDeepLink";
@@ -307,15 +308,12 @@ function KanbanCard({
         {/* Case de sélection : visible au survol OU quand la carte est cochée.
             Contrôle distinct du clic d'ouverture / du drag (stopPropagation). */}
         {!isEditing && (
-          <input
-            type="checkbox"
-            checked={selected}
-            onChange={onToggleSelect}
-            onClick={(e) => e.stopPropagation()}
-            onPointerDown={(e) => e.stopPropagation()}
-            aria-label="Sélectionner la carte"
+          <SelectCheckbox
+            selected={selected}
+            onToggle={onToggleSelect}
+            label="Sélectionner la carte"
             className={[
-              "absolute top-1.5 left-1.5 z-10 cursor-pointer accent-[var(--accent)] w-3.5 h-3.5",
+              "grid absolute top-1 left-1 z-10",
               selected ? "opacity-100" : "opacity-0 group-hover:opacity-100",
             ].join(" ")}
           />
