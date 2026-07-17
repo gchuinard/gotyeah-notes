@@ -40,11 +40,14 @@ function OptionRow({
   onChange,
   onDelete,
   autoFocus,
+  dropSide,
 }: {
   option: SelectOption;
   onChange: (next: SelectOption) => void;
   onDelete: () => void;
   autoFocus?: boolean;
+  /** Côté où l'option glissée atterrira (trait accent), ou null si pas la cible. */
+  dropSide?: "top" | "bottom" | null;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const { attributes, listeners, setNodeRef, isDragging } = useSortable({ id: option.id });
@@ -60,8 +63,17 @@ function OptionRow({
   return (
     <div
       ref={setNodeRef}
-      className={`px-2 py-1.5 group/opt ${isDragging ? "opacity-40" : ""}`}
+      className={`relative px-2 py-1.5 group/opt ${isDragging ? "opacity-40" : ""}`}
     >
+      {dropSide && (
+        <div
+          aria-hidden
+          className={[
+            "absolute left-2 right-2 h-[3px] rounded-full bg-[var(--accent)] z-10 pointer-events-none",
+            dropSide === "top" ? "-top-[2px]" : "-bottom-[2px]",
+          ].join(" ")}
+        />
+      )}
       {/* Name + delete */}
       <div className="flex items-center gap-1.5">
         <span
@@ -183,7 +195,17 @@ export default function PropertyPopover({
     }
   }, [property, onPropertyUpdated]);
 
+  // Indicateur de drop : on suit l'option active + celle survolée pour dessiner un
+  // trait accent à l'endroit exact où l'option glissée atterrira.
+  const [activeOptId, setActiveOptId] = useState<string | null>(null);
+  const [overOptId, setOverOptId] = useState<string | null>(null);
+  const resetDrag = () => {
+    setActiveOptId(null);
+    setOverOptId(null);
+  };
+
   const handleOptionDragEnd = (e: DragEndEvent) => {
+    resetDrag();
     const { active, over } = e;
     if (!over || active.id === over.id) return;
     const oldIdx = options.findIndex((o) => o.id === active.id);
@@ -273,17 +295,35 @@ export default function PropertyPopover({
           {optionsError && (
             <p className="px-3 pb-1 text-xs text-red-500 normal-case">{optionsError}</p>
           )}
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleOptionDragEnd}>
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragStart={(e) => setActiveOptId(String(e.active.id))}
+            onDragOver={(e) => setOverOptId(e.over ? String(e.over.id) : null)}
+            onDragEnd={handleOptionDragEnd}
+            onDragCancel={resetDrag}
+          >
             <SortableContext items={options.map((o) => o.id)} strategy={verticalListSortingStrategy}>
-              {options.map((opt, idx) => (
-                <OptionRow
-                  key={opt.id}
-                  option={opt}
-                  onChange={(next) => handleOptionChange(idx, next)}
-                  onDelete={() => handleOptionDelete(idx)}
-                  autoFocus={newOptionId === opt.id}
-                />
-              ))}
+              {options.map((opt, idx) => {
+                const activeIdx = activeOptId ? options.findIndex((o) => o.id === activeOptId) : -1;
+                const overIdx = overOptId ? options.findIndex((o) => o.id === overOptId) : -1;
+                const dropSide: "top" | "bottom" | null =
+                  overOptId && opt.id === overOptId && opt.id !== activeOptId && activeIdx !== -1
+                    ? activeIdx < overIdx
+                      ? "bottom"
+                      : "top"
+                    : null;
+                return (
+                  <OptionRow
+                    key={opt.id}
+                    option={opt}
+                    onChange={(next) => handleOptionChange(idx, next)}
+                    onDelete={() => handleOptionDelete(idx)}
+                    autoFocus={newOptionId === opt.id}
+                    dropSide={dropSide}
+                  />
+                );
+              })}
             </SortableContext>
           </DndContext>
           <button

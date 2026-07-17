@@ -355,18 +355,18 @@ function KanbanCard({
         {previewProps.length > 0 && (
           <div className="mt-2 flex flex-col gap-1">
             {previewProps.map((p) => (
-              // stopPropagation : cliquer une valeur ENTRE en édition (via Cell) sans
-              // ouvrir le panneau (onClick) ni démarrer un drag (onPointerDown).
-              <div
-                key={p.id}
-                className="flex items-center gap-1.5 min-w-0 text-xs"
-                onClick={(e) => e.stopPropagation()}
-                onPointerDown={(e) => e.stopPropagation()}
-              >
+              // Le stopPropagation est porté par la VALEUR seule (le wrapper Cell) :
+              // cliquer la valeur ENTRE en édition, mais cliquer le libellé ou l'espace
+              // vide de la ligne laisse remonter le clic → ouvre le panneau / drag carte.
+              <div key={p.id} className="flex items-center gap-1.5 min-w-0 text-xs">
                 <span className="shrink-0 text-[var(--text-muted)] truncate max-w-[90px]" title={p.name}>
                   {p.name}
                 </span>
-                <div className="min-w-0 flex-1">
+                <div
+                  className="min-w-0 max-w-full"
+                  onClick={(e) => e.stopPropagation()}
+                  onPointerDown={(e) => e.stopPropagation()}
+                >
                   <Cell
                     property={p}
                     record={record}
