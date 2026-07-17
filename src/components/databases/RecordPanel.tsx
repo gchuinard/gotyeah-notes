@@ -418,9 +418,13 @@ export default function RecordPanel({ record, properties, databaseId, onClose }:
       {visible && (
         <div
           onPointerDown={startResize}
+          onDoubleClick={() => {
+            setPanelWidth(600);
+            window.localStorage.removeItem("recordPanel:width");
+          }}
           style={{ right: panelWidth }}
           className="fixed top-0 bottom-0 w-1 z-[51] cursor-ew-resize hover:bg-[var(--accent)] transition-colors"
-          title="Glisser pour redimensionner la fenêtre"
+          title="Glisser pour redimensionner · double-clic pour réinitialiser"
         />
       )}
 
@@ -539,7 +543,7 @@ export default function RecordPanel({ record, properties, databaseId, onClose }:
         <div className={activeTab === "content" ? "flex flex-col flex-1 min-h-0" : "hidden"}>
           {/* Properties */}
           {visibleProps.length > 0 && (
-            <div className="px-6 py-1 pt-3 shrink-0 grid grid-cols-[minmax(0,max-content)_minmax(0,1fr)] gap-x-3">
+            <div className="px-6 py-1 pt-3 shrink-0 grid grid-cols-[minmax(5.5rem,max-content)_minmax(0,1fr)] gap-x-3">
               {visibleProps.map((property) => (
                 <Fragment key={property.id}>
                   <div className="flex items-center gap-2 max-w-[11rem] py-1.5 min-h-[36px] text-sm text-[var(--text-muted)]">
