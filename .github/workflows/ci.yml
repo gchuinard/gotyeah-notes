@@ -2,7 +2,11 @@ name: CI
 
 on:
   push:
-    branches: [main, "feat/**"]
+    # Toutes les branches de travail, pas seulement feat/**. Avant, un push sur
+    # fix/**, docs/** ou chore/** ne déclenchait AUCUN run : on pouvait croire une
+    # branche verte alors que rien n'avait tourné. Le vert n'arrivait qu'à
+    # l'ouverture de la PR (l'événement pull_request ci-dessous n'a pas de filtre).
+    branches: [main, "feat/**", "fix/**", "docs/**", "chore/**"]
   pull_request:
 
 permissions:
