@@ -273,7 +273,7 @@ L'éditeur BlockNote debounce 500-600ms sur `onChange` et envoie un PATCH. Même
 
 ## Déploiement
 
-- **CI** : `.github/workflows/ci.yml` — jobs `build` (Next + Prisma), `test` (Vitest unit/API) et `e2e` (Playwright). Un test rouge bloque la CI (condition DoD). ⚠️ **Déclencheurs asymétriques** : au *push*, la CI ne tourne que sur `main` et `feat/**` (`branches: [main, "feat/**"]`) ; le `pull_request:` n'a aucun filtre et couvre donc **toutes** les branches. Conséquence : **pousser sur `fix/**`, `docs/**` ou `chore/**` ne déclenche AUCUN run** — l'absence de rouge n'y vaut pas vert, la CI ne s'exécute qu'à l'ouverture de la PR. Ne jamais conclure « CI verte » sans avoir vu un run.
+- **CI** : `.github/workflows/ci.yml` — jobs `build` (Next + Prisma), `test` (Vitest unit/API) et `e2e` (Playwright). Un test rouge bloque la CI (condition DoD). **Déclencheurs** : au *push* sur `main`, `feat/**`, `fix/**`, `docs/**` et `chore/**` ; le `pull_request:` n'a aucun filtre et couvre donc **toutes** les branches. Une branche nommée hors de ces préfixes ne déclenche donc rien au push — sa CI n'arrive qu'à l'ouverture de la PR. Ne jamais conclure « CI verte » sans avoir vu un run.
 - **CD** : `.github/workflows/deploy.yml` — sur push `main` (ou `workflow_dispatch`), SSH sur le Pi (secrets repo `SSH_HOST`/`SSH_USER`/`SSH_KEY`), `git reset --hard origin/main` + `docker compose up -d --build`, puis attend que le conteneur `gotyeah_notes` soit `healthy` (healthcheck node défini dans `docker-compose.yml`). ⚠️ **Un push sur `main` déclenche un déploiement réel**, à une exception près : `paths-ignore: ["**.md"]` — un push ne touchant QUE des `.md` ne déploie pas. Un commit mêlant doc et code déploie quand même.
 - **Snapshot backup AVANT chaque MEP** (filet de sécurité) : le script SSH prend un snapshot SQLite via `sqlite3 .backup` (cohérent sous WAL) `--user 0:0` dans `/home/pi/backups/gotyeah-notes/`, + `PRAGMA integrity_check`. **Un échec du snapshot arrête le déploiement** (avant `docker compose up`). ⚠️ Ne PAS mettre d'étape best-effort dans le `script:` de `deploy.yml` : `appleboy/ssh-action` (`script_stop`) coupe la MEP au moindre code non nul, quelles que soient les gardes shell (`set +e`/`|| true`). Rotation des snapshots (7 j) + réplication restic hors-Pi = **cron dédié sur le Pi** (hors chemin critique, cf. README §Sauvegardes).
 - Le schéma Prisma est appliqué au déploiement par le service one-shot `migrate` (`prisma db push`). Bascule vers `prisma migrate deploy` + baseline versionnée = PR **#23** (draft, rollout supervisé : `migrate resolve --applied 0_init` sur la prod avant le 1er `migrate deploy`).
@@ -284,7 +284,7 @@ L'éditeur BlockNote debounce 500-600ms sur `onChange` et envoie un PATCH. Même
 
 Instance exposée durcie — variables d'env associées (défauts sûrs, cf. `.env.example` / `docker-compose.yml`) :
 - **`REGISTRATION`** (défaut `off`) : inscription publique par formulaire fermée. `on` pour rouvrir `POST /api/auth/register`. Découplée de `LEGACY_LOGIN` et de l'OIDC.
-- **`MCP_ACT_AS_ALLOWLIST`** (défaut vide = comportement historique) : liste d'emails (séparés par virgule) que le pont MCP peut incarner ; hors liste → refus + log d'audit. ⚠️ **Inerte en prod** : la variable n'est pas injectée par `docker-compose.yml` (voir *Variables d'environnement* et *Reste à faire*).
+- **`MCP_ACT_AS_ALLOWLIST`** (défaut vide = comportement historique) : liste d'emails (séparés par virgule) que le pont MCP peut incarner ; hors liste → refus + log d'audit. Injectée au conteneur depuis la PR #38 (18/07/2026) — avant, elle était absente du bloc `environment:` et la garde ne s'appliquait pas.
 - **Tokens de session hachés** (sha256) : `Session.id = hashToken(token)`, jamais le token en clair ; purge des expirées (`@@index([expiresAt])`). Le déploiement de ce changement déconnecte tout le monde une fois.
 - **Login** : rate-limit mémoire (IP+email) → 429 ; anti-énumération (bcrypt factice sur email inconnu, même message/temps). Emails normalisés (`normalizeEmail` = trim+lowercase) sur register/login/act-as.
 - **Headers** (`next.config.ts`) : `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`. **Anti-CSRF** (`src/proxy.ts`) : une mutation `/api/*` avec `Origin` cross-site est refusée (403) ; GET, same-origin et pont MCP passent.
@@ -305,7 +305,7 @@ Toutes les variables réellement lues (`process.env`). Source de vérité : `.en
 | `MCP_ACT_AS_ALLOWLIST` | `lib/session.ts` | vide | N'importe quel User existant est incarnable |
 | `UPLOAD_DIR` | `lib/uploads.ts` | `<cwd>/data/uploads` | En conteneur, doit valoir `/data/uploads` (volume) — sinon images perdues au rebuild |
 
-- ⚠️ **`MCP_ACT_AS_ALLOWLIST` est aujourd'hui INERTE en prod** : elle est lue par le code et documentée, mais **absente du bloc `environment:` de `docker-compose.yml`** → la poser dans le `.env` du Pi ne fait rien. À corriger côté compose avant de compter dessus comme garde de sécurité.
+- ⚠️ **Leçon de la PR #38** : `MCP_ACT_AS_ALLOWLIST` a été **inerte en prod** pendant une semaine — lue par le code et documentée comme livrée, mais absente du bloc `environment:`. Une garde de sécurité qu'on croit active et qui ne l'est pas est pire que pas de garde. Réflexe : toute nouvelle variable lue par `src/` doit être ajoutée AU MÊME MOMENT dans `.env.example` **et** dans `docker-compose.yml`.
 - `NODE_ENV` (flag `secure` des cookies) est posé par Next et le Dockerfile — ne pas le définir à la main. `E2E_PORT`, `PORT` et `CI` ne servent qu'aux tests.
 - ⚠️ **`AUTH_SECRET` n'est lue nulle part dans `src/`.** Elle n'existe que comme placeholder dans `ci.yml`, `vitest.config.ts` et `tests/e2e-server.mjs` (vestige d'un design d'auth abandonné). Ce n'est pas une variable de configuration : elle n'a aucun effet.
 
@@ -351,12 +351,12 @@ Toutes les variables réellement lues (`process.env`). Source de vérité : `.en
 ### Reste
 
 - [ ] **Builds hors Pi** : le build Docker tourne toujours **sur le Pi** (`deploy.yml` → `docker compose up -d --build`), RAM-intensif sur arm64. Cible : builder l'image en CI (`ci.yml` n'a aujourd'hui aucun job Docker) + `docker pull` au déploiement.
-- [ ] **`MCP_ACT_AS_ALLOWLIST` absente du `docker-compose.yml`** : la variable est lue par le code et documentée, mais n'est pas dans le bloc `environment:` du service `app` → **inerte en prod**. Une ligne à ajouter (le compose n'a pas d'`env_file`).
+- [x] ~~**`MCP_ACT_AS_ALLOWLIST` absente du `docker-compose.yml`**~~ : fait (18/07/2026, PR #38). Reste à la **renseigner** dans le `.env` du Pi pour que la garde s'applique réellement (vide = tout User existant reste incarnable).
 - [ ] **MCP — édition fine des options select** : `notes_add_select_option` couvre l'**ajout** ; **renommer / recolorer / réordonner / retirer** une option reste hors MCP (l'API le permet via `PATCH /api/properties/[id] {config}`, et refuse déjà de retirer une option encore référencée — c'est donc exposable sans risque, juste pas exposé).
 - [ ] **`View.config.createInUnassignedOnly` sans UI** : le flag existe (`lib/db.ts`) et est respecté par le kanban (`KanbanView.tsx`), mais **aucun écran ne l'écrit** — il faut éditer le `config` de la vue à la main. À câbler dans les réglages de vue si on le garde.
 - [ ] **Dupliquer — phase B** : `POST /api/records/[id]/duplicate` (phase A) n'est câblé que dans **KanbanView** et **BacklogView**. Reste à l'exposer dans TableView / GalleryView / CalendarView.
 - [ ] **Migrations Prisma versionnées** : le déploiement applique encore `prisma db push` (pas de dossier `prisma/migrations/`). Bascule vers `migrate deploy` + baseline = PR **#23** (draft).
-- [ ] **CI aveugle sur `fix/**`, `docs/**`, `chore/**`** : soit documenter le trou (fait, cf. *Déploiement*), soit élargir `ci.yml` (`branches: [main, "feat/**", "fix/**", "docs/**", "chore/**"]`). Si on élargit, penser à retirer l'avertissement correspondant de la section Déploiement.
+- [x] ~~**CI aveugle sur `fix/**`, `docs/**`, `chore/**`**~~ : fait (18/07/2026, PR #39). `ci.yml` déclenche désormais au push sur `main`, `feat/**`, `fix/**`, `docs/**` et `chore/**`.
 - [ ] (optionnel) UI Settings « Jetons d'accès » si un jour on veut un PAT en complément de l'IdP.
 
 ## Process de travail (Dev Loop)
