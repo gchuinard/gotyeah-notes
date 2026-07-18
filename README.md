@@ -40,7 +40,9 @@ npm run test:e2e  # tests end-to-end (Playwright)
   sur une DB jetable **hors du dossier projet** (le cookie de session n'est `secure`
   qu'en production ; en dev il circule sur `http://localhost`).
 - **CI** : `.github/workflows/ci.yml` exécute `build`, `test` (Vitest) et `e2e`
-  (Playwright) sur chaque push/PR. Un test rouge bloque la CI (condition DoD).
+  (Playwright). Un test rouge bloque la CI (condition DoD). ⚠️ Au *push*, la CI ne tourne
+  que sur `main` et `feat/**` ; sur les autres branches (`fix/**`, `docs/**`…) elle ne
+  s'exécute qu'à l'ouverture de la **PR**.
 
 ## Configuration
 
@@ -56,8 +58,10 @@ cp .env.example .env
 ## Déploiement
 
 Conteneurisé (Docker Compose) derrière Nginx Proxy Manager. Déploiement continu via
-`.github/workflows/deploy.yml` : **tout push sur `main`** déclenche un déploiement SSH sur
+`.github/workflows/deploy.yml` : **un push sur `main`** déclenche un déploiement SSH sur
 le serveur (`git reset --hard` + `docker compose up -d --build`) avec attente du healthcheck.
+Seule exception : `paths-ignore: ["**.md"]` — un push ne touchant que des `.md` ne déploie
+pas (un commit mêlant doc et code, si).
 Le schéma Prisma est appliqué automatiquement par le service one-shot `migrate`.
 
 ### Sauvegardes
@@ -90,18 +94,30 @@ production sans sauvegarde vérifiée.
   docker compose up -d app
   ```
 
-**Réplication hors-Pi (optionnelle, recommandée).** L'étape restic ne s'active que si
-un dépôt est configuré — sinon elle est ignorée sans bloquer. Pour l'activer, créer sur
-le Pi `/home/pi/.gotyeah-backup.env` (jamais commité) :
+**Réplication hors-Pi (recommandée, à mettre en place à la main).** Il n'y a **aucune**
+étape de réplication dans `deploy.yml` — elle en a été retirée (commit `8256218`) pour la
+même raison que la rotation : `appleboy/ssh-action` (`script_stop`) arrête la MEP au
+moindre code de retour non nul, quelles que soient les gardes shell. Le déploiement se
+limite donc au snapshot bloquant.
+
+Pour répliquer les snapshots hors du Pi, ajouter un **cron dédié** (hors du chemin
+critique de déploiement), par exemple avec restic :
 
 ```bash
-export RESTIC_REPOSITORY="…"          # ex. sftp:autre-machine:/backups/gotyeah  ou  s3:…
-export RESTIC_PASSWORD_FILE="/home/pi/.restic-pass"   # mot de passe du dépôt restic
+# /home/pi/.gotyeah-backup.env (jamais commité)
+export RESTIC_REPOSITORY="…"                          # ex. sftp:autre-machine:/backups/gotyeah ou s3:…
+export RESTIC_PASSWORD_FILE="/home/pi/.restic-pass"
 ```
 
-puis `restic init` une fois. Les déploiements suivants répliquent le snapshot
-(`--keep-daily 7`). La réplication hors-Pi est **non bloquante** (le snapshot local
-protège déjà) — un échec est signalé dans les logs de déploiement sans stopper la MEP.
+```bash
+# /etc/cron.daily/gotyeah-backup-replicate (chmod +x), après un `restic init` initial
+. /home/pi/.gotyeah-backup.env
+restic backup /home/pi/backups/gotyeah-notes
+restic forget --keep-daily 7 --prune
+```
+
+Tant que ce cron n'est pas en place, la seule protection est le **snapshot local vérifié**
+pris avant chaque MEP (ci-dessus) — qui ne survit pas à la perte du Pi.
 
 ## Intégration MCP
 
