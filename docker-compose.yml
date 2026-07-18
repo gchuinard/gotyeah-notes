@@ -36,6 +36,12 @@ services:
       # Pont de confiance du serveur MCP (cf. lib/session.ts). Doit valoir le même
       # secret que NOTES_MCP_SECRET côté MCP. Vide = chemin act-as désactivé.
       MCP_SHARED_SECRET: "${MCP_SHARED_SECRET:-}"
+      # Allowlist des emails que le pont MCP peut incarner (séparés par des virgules).
+      # Vide = comportement historique : n'importe quel User existant est incarnable.
+      # Définie = seuls ces emails sont acceptés, les autres sont refusés + journalisés.
+      # ⚠️ Ce compose n'utilise PAS env_file : sans cette ligne, la variable posée dans
+      # le .env du Pi n'atteignait jamais le conteneur — la garde était inerte.
+      MCP_ACT_AS_ALLOWLIST: "${MCP_ACT_AS_ALLOWLIST:-}"
       # Connexion OIDC (bouton « Se connecter avec GotYeah », cf. lib/oidc.ts).
       # Les 4 premières vides = bouton masqué. Client confidentiel créé dans Keycloak.
       OIDC_ISSUER: "${OIDC_ISSUER:-}"
