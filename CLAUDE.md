@@ -4,7 +4,7 @@ Ce fichier cadre le travail de Claude Code sur ce projet. Lis-le avant toute mod
 
 ## Contexte projet
 
-**gotyeah-notes** est un clone de Notion self-hosted. Multi-workspace, multi-membres avec rôles, pages organisées en arborescence, databases avec vues multiples (table, kanban, calendar, gallery), drag-and-drop, éditeur de blocs BlockNote.
+**gotyeah-notes** est un clone de Notion self-hosted. Multi-workspace, multi-membres avec rôles, pages organisées en arborescence, databases avec vues multiples (table, kanban, calendar, gallery, backlog), drag-and-drop, éditeur de blocs BlockNote.
 
 ## Stack
 
@@ -21,117 +21,228 @@ Ce fichier cadre le travail de Claude Code sur ce projet. Lis-le avant toute mod
 
 Pas d'autres libs sans raison forte. Avant d'ajouter une dépendance, demande-toi si on peut faire sans.
 
-## Modèle de données (13 modèles)
+## Modèle de données (15 modèles)
 
 ```
-User            → auth basique (email, passwordHash, displayName)
-Session         → avec currentWorkspaceId pour le workspace actif
+User            → email @unique, firstName/lastName/displayName, passwordHash.
+                  displayName = le seul nom affiché (header, sidebar, acteur des révisions).
+Session         → id = sha256(token) (le token ne vit qu'en cookie), currentWorkspaceId
+                  pour le workspace actif, @@index([expiresAt]) pour la purge des expirées
 Workspace       → conteneur partageable, l'autorité c'est Membership
 Membership      → (userId, workspaceId, role: admin|editor|viewer), unique sur (userId, workspaceId)
-Section         → conteneur dans la sidebar, type = "private"|"team", appartient à un Workspace
-Page            → arborescence (parentId), visibility dénormalisé depuis la section racine
+Section         → conteneur dans la sidebar, type = "private"|"team", icon, appartient à un Workspace
+Page            → arborescence (parentId), visibility dénormalisé depuis la section racine,
+                  ownerId = créateur (autorité des pages privées), trashedAt = corbeille
 PageVisit       → UPSERT sur unique (userId, pageId), pour la section "Récents"
 Database        → liée 1-1 à une Page (pageId @unique). Une database EST une page.
                   templateId/recordSections = template source + squelette de sections estampé.
-DatabaseProperty → colonnes dynamiques (name, type, position, config JSON)
+                  patchNotesPageId = page « Patch notes » (référence LIBRE, pas de relation Prisma).
+DatabaseProperty → colonnes dynamiques (name, type, position, config JSON).
+                  types : title|text|number|select|multiselect|date|checkbox|url|email|relation
 Record          → lignes de la database (title, properties JSON indexé par property.id).
                   templateId/sectionsBody = corps SECTIONNÉ (sinon corps libre `content`).
                   sprintId = sprint d'affectation (vue backlog), null = backlog. onDelete SetNull.
+                  createdBy (SetNull), coverUrl, trashedAt = corbeille.
+RecordRevision  → piste d'audit d'un Record : une ligne par CHAMP changé (title | content |
+                  sectionsBody | DatabaseProperty.id | RecordSection.id), actorId (SetNull),
+                  before/after en JSON. Onglet « Historique » de la carte.
+Sprint          → sprint d'une Database (vue backlog façon Jira). name, goal, startDate, endDate,
+                  state (future|active|completed), position, releaseNotes (générées à la clôture).
+                  Record.sprintId pointe dessus.
 View            → type table|kanban|calendar|gallery|backlog, config JSON (filtres, tris, group-by,
-                  columnWidths ; backlog : pointsPropertyId/statusPropertyId/epicPropertyId/doneStatusOptionId ;
-                  kanban scrum : sprintScope "active"|"all"|<sprintId>)
+                  columnWidths, createInUnassignedOnly ; backlog : pointsPropertyId/statusPropertyId/
+                  epicPropertyId/doneStatusOptionId ; kanban scrum : sprintScope "active"|"all"|<sprintId>)
 Template        → modèle réutilisable par workspace : columns + kanbanGroupProperty + sections [{id,label}]
                   (builtins : backlog? câble la vue Backlog du template scrum)
-Sprint          → sprint d'une Database (vue backlog façon Jira). name, goal, startDate, endDate,
-                  state (future|active|completed), position. Record.sprintId pointe dessus.
+AppConfig       → réglages globaux de l'instance. Ligne UNIQUE id="app", uploadMaxMb.
+                  Toujours via `lib/appConfig.ts` (upsert → jamais de ligne manquante).
 ```
 
 ### Conventions clés du modèle
 
 - **Page.sectionId** : renseigné UNIQUEMENT sur les pages racines (parentId IS NULL). Pour les enfants, la section est héritée via la racine. Toujours passer par `lib/pages.ts > setPageSection()`.
 - **Page.visibility** : dénormalisé depuis la section racine ("private" | "team"), synchronisé récursivement via `setPageSection()`.
+- **Page.ownerId = autorité des pages privées** : une page `visibility="private"` n'est accessible QU'À son `ownerId`, même pour les autres membres du workspace. Règle centralisée dans `lib/workspace.ts > isPageAccessible()` et appliquée **en cascade** par TOUS les `check*Access` — sinon un membre lirait la database posée sur la page privée d'un autre. Ne réimplémente jamais ce test : appelle le helper.
+- **Corbeille (soft delete)** : **seuls `Page` et `Record` ont un `trashedAt`** ; les 13 autres modèles n'en ont pas (supprimer une View / un Sprint / une Property / une Section est **définitif**). Trasher une page estampe **tout son sous-arbre** en transaction (`lib/trash.ts > trashPageSubtree`, restauration symétrique) : le soft delete ne cascade pas via les FK, il faut le propager à la main. Les `check*Access` renvoient **null** pour un élément trashé — l'option `includeTrashed` n'est là que pour le lifecycle corbeille (restaurer / purger). **Toute nouvelle lecture doit filtrer `trashedAt: null`.** Purge définitive après 30 j (`TRASH_PURGE_DAYS`), déclenchée **paresseusement** à l'ouverture de la corbeille — pas de cron en self-host.
 - **Record.properties** : JSON indexé par `DatabaseProperty.id` (stable), JAMAIS par le nom de la propriété. Le nom est un label affichable qui peut changer.
 - **Record.title** vs property "title" : la property de type `"title"` (créée automatiquement avec la database) correspond au champ SQL `Record.title`, PAS à une entrée dans `Record.properties`. Le composant Cell bifurque sur ce cas.
 - **DatabaseProperty.type = "title"** : type spécial, un seul par database, créé auto, ne peut pas être supprimé ni dupliqué. Les garde-fous sont en place côté API.
+- **Propriété `relation`** : la valeur d'un record est un `string[]` d'ids de `Record` appartenant à `config.targetDatabaseId`. Tout POST/PATCH de properties passe par `lib/relations.ts > validateRelationValues()` (→ **400** si un id n'existe pas dans la database cible ou y est en corbeille). Pas de backlink en v1 ; un id dont le record a été supprimé est un « lien mort » toléré à l'affichage.
+- **Record.coverUrl** : le champ existe et `GalleryView` l'affiche, mais **aucune route ne permet de l'écrire** aujourd'hui (ni `POST /records`, ni `PATCH /records/[id]`) — seul `POST /api/records/[id]/duplicate` le recopie. Ne construis pas de feature en supposant qu'il est alimenté.
 - **View.config** : remplacement TOTAL au PATCH (pas de merge). Le client envoie toujours le config complet.
-- **Record.properties au PATCH** : MERGE via `mergeRecordProperties()`, pas écrasement. Une valeur `null` supprime la clé.
+- **Record.properties au PATCH** : MERGE via `mergeRecordProperties()`, pas écrasement. Une valeur `null` supprime la clé. ⚠️ En revanche `content` et `sectionsBody` sont en **remplacement TOTAL** : une mise à jour partielle du corps EFFACE les sections non réémises. Relis le corps existant avant d'écrire.
+- **RecordRevision (historique)** : écrit **côté serveur**, dans la MÊME transaction que le `PATCH /api/records/[id]` — une ligne par champ **réellement** changé (diff calculé avant l'update par `lib/db.ts > diffRecordRevisions`, logique PURE et testée). **Coalescence 2 min** (`shouldCoalesceRevision` : même acteur + même champ → fusion dans la dernière ligne) pour absorber le spam d'autosave BlockNote. **Rétention indéfinie : pas de purge**, contrairement au `trashedAt`. Périmètre records uniquement (les pages ne sont pas versionnées).
 - **Templates (modèles)** : un `Template` (par workspace) définit colonnes + regroupement kanban + sections de corps à libellés FIXES. Templates « fournis » (ticket, bug) en code (`lib/templates.ts`, id `builtin-*`, lecture seule) à côté des templates DB. `POST /api/databases { templateId }` scaffolde colonnes + kanban + estampe `Database.recordSections`. Un record d'une DB templatée a un **corps sectionné** (`Record.sectionsBody` = `[{id,label,content}]`, parse via `lib/db.ts > parseSectionsBody`) — libellés rendus HORS éditeur (non modifiables), un éditeur BlockNote par section. **Opt-in** : sans template, le record garde son corps libre (`content`). Le menu « modèle » du `RecordPanel` change le template par carte (indépendant du kanban).
-- **Backlog (façon Jira)** : un 5e type de vue `backlog`. Les **sprints** sont un modèle Prisma `Sprint` (par database) ; un record y est rattaché via `Record.sprintId` (null = backlog). `onDelete: SetNull` → supprimer un sprint renvoie ses issues au backlog (non destructif). Les colonnes story points / statut / épic ne sont PAS un nouveau concept : ce sont des propriétés normales (number / select / select coloré), câblées dans `View.config` (`pointsPropertyId`, `statusPropertyId`, `epicPropertyId`, `doneStatusOptionId`) par le template fourni `builtin-scrum`. Sans câblage, la vue dégrade proprement (lanes par sprint, lignes titre seul). **Board scopé (Scrum)** : le kanban a un `View.config.sprintScope` (`"active"` = sprint en cours · `"all"` = toutes les issues · un id de sprint) ; le board scrum est scaffoldé `sprintScope:"active"` (nommé « Sprint actif »). Le statut est l'axe COMMUN (`statusPropertyId` backlog = `groupByPropertyId` board) → l'avancement se reflète des deux côtés. Le kanban ne fetch les sprints QUE si `sprintScope` est défini (kanban classique inchangé). **Un seul sprint `active`** par database (PATCH `state="active"` → **409** sinon). **Terminer un sprint** = `state="completed"` ET **renvoi des issues non terminées au backlog** (`status != doneStatusOptionId` → `sprintId=null`), atomique en transaction côté serveur (PATCH `{state:"completed", moveIncompleteToBacklog, statusPropertyId, doneStatusOptionId}`) ; démarrer/terminer dispo depuis le backlog ET le board. `POST /api/databases/[id]/records` et `PATCH /api/records/[id]` acceptent `sprintId` (garde-fou : sprint de la même database, sinon 400). API sprints : `GET/POST /api/databases/[id]/sprints`, `PATCH/DELETE /api/sprints/[id]`. Accès via `checkSprintAccess` (`lib/workspace.ts`).
-- **Position** : Float, gap-based ordering (gap de 1000). Helpers dans `lib/positions.ts > nextPosition()` (models : databaseProperty, record, view, sprint).
+- **Backlog (façon Jira)** : un 5e type de vue `backlog`. Les **sprints** sont un modèle Prisma `Sprint` (par database) ; un record y est rattaché via `Record.sprintId` (null = backlog). `onDelete: SetNull` → supprimer un sprint renvoie ses issues au backlog (non destructif). Les colonnes story points / statut / épic ne sont PAS un nouveau concept : ce sont des propriétés normales (number / select / select coloré), câblées dans `View.config` (`pointsPropertyId`, `statusPropertyId`, `epicPropertyId`, `doneStatusOptionId`) par le template fourni `builtin-scrum`. Sans câblage, la vue dégrade proprement (lanes par sprint, lignes titre seul). **Board scopé (Scrum)** : le kanban a un `View.config.sprintScope` (`"active"` = sprint en cours · `"all"` = toutes les issues · un id de sprint) ; le board scrum est scaffoldé `sprintScope:"active"` (nommé « Sprint actif »). Le statut est l'axe COMMUN (`statusPropertyId` backlog = `groupByPropertyId` board) → l'avancement se reflète des deux côtés. Le kanban ne fetch les sprints QUE si `sprintScope` est défini (kanban classique inchangé). **Un seul sprint `active`** par database — le check et l'update vivent dans la MÊME transaction (deux PATCH concurrents sinon → deux sprints actifs), le conflit remonte en **409**. `POST /api/databases/[id]/records` et `PATCH /api/records/[id]` acceptent `sprintId` (garde-fou : sprint de la même database, sinon 400). API sprints : `GET/POST /api/databases/[id]/sprints`, `PATCH/DELETE /api/sprints/[id]`. Accès via `checkSprintAccess` (`lib/workspace.ts`).
+- **Clôture d'un sprint (transaction unique)** : `PATCH {state:"completed", moveIncompleteToBacklog, statusPropertyId, doneStatusOptionId}` fait, atomiquement : passage à `completed`, **renvoi des issues non terminées au backlog** (`status != doneStatusOptionId` → `sprintId=null`), génération de `Sprint.releaseNotes` (markdown, **une seule fois** : `releaseNotes` déjà rempli = re-clôture idempotente), puis **append d'un bloc daté à la page « Patch notes »** mappée par `Database.patchNotesPageId`. Garde-fous : réconciliation d'exhaustivité (toute issue listée doit être terminée, sinon **rollback + 422**), page au contenu JSON illisible → **rollback + 422** (on n'écrase jamais la page), pas de page mappée → clôture OK avec un flag `patchNotesAppend` explicite. `Sprint.releaseNotes` est en **lecture seule côté UI**. Démarrer/terminer dispo depuis le backlog ET le board.
+- **Database.patchNotesPageId** : référence **LIBRE**, sans relation Prisma. La robustesse est assurée à l'écriture (le PATCH refuse une page d'un autre workspace ou inaccessible) ET à l'append (page existante, même workspace, non trashée, accessible à l'acteur — la visibility peut changer après le mapping). `null` = pas de mapping, ce n'est pas une erreur.
+- **Position** : Float, gap-based ordering (gap de 1000) via `lib/positions.ts > nextPosition()` — models `databaseProperty`, `record`, `view`, `sprint`, **et eux seuls**. Passer le client de `$transaction` pour que le MAX(position) et le create soient atomiques. ⚠️ **`Page` n'utilise PAS `nextPosition`** : `lib/pages.ts > createPage()` a son propre calcul (`MAX + 1`, scopé à la section pour les racines). Ne mélange pas les deux systèmes.
+- **AppConfig** : ligne **singleton** (`id = "app"`). Toujours passer par `lib/appConfig.ts > getAppConfig()/setAppConfig()` (upsert → la ligne est créée à la volée avec ses défauts, jamais de `findUnique` qui renverrait null).
 - **Prisma 7** génère les types avec suffixe `Model` (RecordModel, ViewModel...). `lib/db.ts` les aliase. Le type natif TS `Record` est shadowé → importer comme `import type { Record as DbRecord }`.
 
 ## Architecture
 
 ```
 src/
+├── proxy.ts                         # ⚠️ LE middleware (Next 16 a renommé middleware → proxy).
+│                                    #   401 sur /api/* sans cookie + anti-CSRF (Origin cross-site → 403).
+│                                    #   Laisse passer le pont MCP (x-mcp-secret + x-act-as-email).
 ├── app/
-│   ├── layout.tsx
-│   ├── page.tsx
-│   ├── pages/[id]/page.tsx          # Server Component : charge Page + détecte Database
-│   ├── templates/page.tsx          # Page de gestion des modèles (TemplatesManager)
-│   └── api/
-│       ├── pages/...                # CRUD pages (GET /api/pages/[id] expose database:{id})
-│       ├── templates/
-│       │   ├── route.ts            # GET liste (fournis + workspace), POST create
-│       │   └── [id]/route.ts       # GET, PATCH, DELETE (builtins en lecture seule)
+│   ├── layout.tsx                   # Racine : pose data-theme (cookie app-theme), monte
+│   │                                #   DialogProvider > WorkspaceProvider > AppShell
+│   ├── page.tsx                     # "/" → redirect /login si pas de session, sinon écran d'accueil
+│   ├── login/ · register/           # page.tsx (Server) + LoginForm/RegisterForm (Client)
+│   ├── settings/                    # SettingsPage.tsx — Profil · Utilisateurs · Stockage · Apparence
+│   ├── templates/page.tsx           # Gestion des modèles (TemplatesManager)
+│   ├── pages/[id]/page.tsx          # Server Component : charge Page, enregistre la visite,
+│   │                                #   branche DatabaseShell (si database) OU EditorClient
+│   ├── globals.css                  # Thèmes (data-theme), mapping --bn-colors-* de BlockNote
+│   └── api/                         # 35 route handlers → voir « Conventions des routes API »
+│       ├── auth/                    # PUBLIC : login/logout/register + oidc/login|callback
+│       ├── workspaces/              # GET/POST, [id] DELETE (admin), [id]/switch POST
+│       ├── sections/                # GET/POST, [id] PATCH/DELETE (409 si dernière du type)
+│       ├── pages/
+│       │   ├── route.ts             # GET arbre (hors corbeille), POST create
+│       │   ├── recent/route.ts      # GET 5 dernières visites (PageVisit)
+│       │   └── [id]/                # route.ts (GET expose database:{id}, PATCH, DELETE → CORBEILLE),
+│       │                            #   restore/ (page + sous-arbre), visit/ (upsert PageVisit)
+│       ├── trash/route.ts           # GET corbeille du workspace ; purge > 30 j au passage
+│       ├── search/route.ts          # GET pages + records (scopé workspace, hors corbeille)
+│       ├── config/route.ts          # GET/PATCH réglages instance ; le GET purge les uploads orphelins
+│       ├── upload/route.ts          # POST image multipart → { url } ; 413 trop gros / 415 type
+│       ├── files/[name]/route.ts    # GET sert le fichier (OCTETS BRUTS, pas de JSON) ; session requise
+│       ├── templates/               # route.ts GET/POST, [id] GET/PATCH/DELETE (builtins → 400)
 │       ├── databases/
-│       │   ├── route.ts            # POST create (+ scaffold depuis templateId)
+│       │   ├── route.ts             # POST create (+ scaffold colonnes/kanban/backlog depuis templateId)
 │       │   └── [id]/
-│       │       ├── route.ts         # GET, PATCH (recordTemplate), DELETE database
-│       │       ├── properties/route.ts  # POST property
-│       │       ├── records/route.ts     # GET list (params optionnels filter/limit/offset/includeContent + X-Total-Count),
-│       │       │                        #   POST record (estampe le corps sectionné, accepte sprintId)
-│       │       ├── sprints/route.ts      # GET list, POST sprint (vue backlog)
+│       │       ├── route.ts         # GET, PATCH (recordTemplate, patchNotesPageId), DELETE
+│       │       ├── properties/route.ts  # POST property (relation : cible dans le MÊME workspace)
+│       │       ├── records/route.ts     # GET list (params optionnels filter/limit/offset/includeContent
+│       │       │                        #   + X-Total-Count), POST record (corps sectionné, sprintId)
+│       │       ├── sprints/route.ts     # GET list, POST sprint (vue backlog)
 │       │       └── views/route.ts       # POST view
-│       ├── properties/[id]/route.ts # PATCH, DELETE property
-│       ├── records/[id]/route.ts    # GET, PATCH (dont sectionsBody/templateId/sprintId), DELETE
-│       ├── sprints/[id]/route.ts    # PATCH (rename/dates/état démarrer-terminer), DELETE sprint
-│       └── views/[id]/route.ts      # PATCH, DELETE view
+│       ├── properties/[id]/route.ts # PATCH (rename/options, type FIGÉ), DELETE (purge la clé des records)
+│       ├── records/[id]/
+│       │   ├── route.ts             # GET, PATCH (+ écrit les RecordRevision), DELETE → CORBEILLE (?permanent=1)
+│       │   ├── duplicate/route.ts   # POST copie serveur atomique (titre « (copie) », props/corps/sprint)
+│       │   ├── restore/route.ts     # POST restaure (409 si la page hôte est encore en corbeille)
+│       │   └── revisions/route.ts   # GET historique des modifs
+│       ├── sprints/[id]/route.ts    # PATCH (démarrer/terminer + notes de version + append Patch notes), DELETE
+│       └── views/[id]/route.ts      # PATCH, DELETE (400 si c'est la dernière vue)
+├── contexts/                        # Les 2 SEULS contextes React (pas de state global au-delà)
+│   ├── WorkspaceContext.tsx         # workspaces, activeWorkspace, switchWorkspace()
+│   └── DialogContext.tsx            # useDialog() → confirm()/alert() en Promise.
+│                                    #   ⚠️ Remplace window.confirm : ne JAMAIS utiliser confirm() natif
 ├── components/
-│   ├── Sidebar.tsx
-│   ├── PageTree.tsx
-│   ├── Editor.tsx                   # BlockNote + autosave + bouton "Convertir en database"
+│   ├── AppShell.tsx                 # Sidebar + Header + SearchPalette ; EmptyWorkspaceScreen si 0 workspace
+│   ├── Header.tsx · Breadcrumb.tsx  # Fil d'ariane (via buildBreadcrumb), recherche/réglages/avatar
+│   ├── Sidebar.tsx                  # Sections, arborescence, Récents, DnD de pages
+│   │                                #   ⚠️ PageTree.tsx n'existe plus : l'arbre est intégré ici
+│   ├── SearchPalette.tsx            # Palette Cmd/Ctrl+K : pages + records, avec chemin d'accès
+│   ├── TrashSection.tsx             # Corbeille dans la sidebar : restaurer / purger
+│   ├── Editor.tsx                   # BlockNote page : autosave, upload d'images, liens @page,
+│   │                                #   conversion en database
+│   ├── EditorClient.tsx             # Wrapper dynamic({ssr:false}) — BlockNote ne rend pas au SSR
+│   ├── WorkspaceSelector.tsx · EmptyWorkspaceScreen.tsx · EmojiPicker.tsx · VisitRecorder.tsx
+│   ├── ui/Dialog.tsx                # Modale accessible (portal, focus trap, Échap) — pilotée par DialogContext
+│   ├── templates/TemplatesManager.tsx
 │   └── databases/
-│       ├── DatabaseShell.tsx        # Tabs de views + toolbar (sort/filter/compteur) + branching vers la bonne vue
-│       ├── TableView.tsx            # Vue table complète (édition inline, DnD rows, resize colonnes)
-│       ├── KanbanView.tsx           # Vue kanban (DnD cards, menu ⋯, renommage colonnes)
-│       ├── CalendarView.tsx         # Vue calendrier mensuel
-│       ├── GalleryView.tsx          # Vue grille de cartes
-│       ├── BacklogView.tsx          # Vue backlog (Jira) : lanes sprint + backlog, DnD, panneau épics, points, démarrer/terminer
-│       ├── RecordPanel.tsx          # Slide panel record : props + corps libre OU sectionné + menu modèle par carte
-│       ├── Cell.tsx                 # Édition inline par type (title, text, number, select, etc.)
-│       ├── PropertyPopover.tsx      # Popover header colonne (rename, options select, supprimer)
-│       ├── AddPropertyModal.tsx     # Modal création de colonne
-│       ├── SortControls.tsx         # UI de configuration des tris
-│       ├── FilterControls.tsx       # UI de configuration des filtres
+│       ├── DatabaseShell.tsx        # Tabs de views + toolbar (sort/filter/compteur) + branching de vue
+│       ├── TableView.tsx            # Table (édition inline, DnD rows, resize colonnes)
+│       ├── KanbanView.tsx           # Kanban (DnD cards, sprint-aware via config.sprintScope)
+│       ├── CalendarView.tsx · GalleryView.tsx
+│       ├── BacklogView.tsx          # Backlog Jira : lanes sprint/backlog, points, épics, démarrer/terminer
+│       ├── RecordPanel.tsx          # Slide panel : onglets « Contenu » (corps libre OU sectionné)
+│       │                            #   et « Historique » (révisions, fetch paresseux) + menu modèle
+│       ├── Cell.tsx                 # Édition inline par type (+ SelectBadge, réutilisé ailleurs)
+│       ├── BulkActionBar.tsx        # Barre flottante de sélection multiple (N PATCH optimistes)
+│       ├── SelectCheckbox.tsx       # Case de multi-sélection ronde, partagée Table/Kanban
+│       ├── CardActions.tsx          # Dupliquer / Supprimer au survol (Kanban + Backlog)
+│       ├── PropertyPopover.tsx · AddPropertyModal.tsx · SortControls.tsx · FilterControls.tsx
 │       └── portal.tsx               # Composant Portal partagé
-│   └── templates/
-│       └── TemplatesManager.tsx     # Liste + éditeur de modèles (colonnes, sections, kanban)
 └── lib/
     ├── prisma.ts                    # Singleton PrismaClient
-    ├── session.ts                   # getSession() → user authentifié ou null
-    ├── workspace.ts                 # getMembership, checkDatabaseAccess, checkPropertyAccess, checkRecordAccess, checkViewAccess, checkSprintAccess
-    ├── positions.ts                 # nextPosition({ model, where }) → MAX(position) + 1000
-    ├── pages.ts                     # createPage, setPageSection (synchro récursive visibility)
-    ├── db.ts                        # Types TS (PropertyType, PropertyConfig, ViewConfig, ParsedRecord, RecordSection…)
-    │                                # Parse/serialize helpers (parseDatabaseProperty, serializeRecord, parseSectionsBody…)
-    │                                # mergeRecordProperties, removePropertyKey
-    ├── templates.ts                 # Templates fournis (builtin-scrum/ticket/bug), BacklogConfig, résolution, emptySectionsBody
-    ├── tree.ts                      # buildTree(flat) → arbre pour la sidebar
-    └── client/
-        └── viewFilters.ts           # applyFilters, applySorts, applyViewConfig (côté client uniquement)
+    ├── session.ts                   # getSession(), createSession, hashToken (sha256), SESSION_COOKIE
+    ├── oidc.ts                      # OIDC/Pocket ID : discovery, verifyIdToken, appOrigin,
+    │                                #   flags oidcEnabled/legacyLoginEnabled/registrationEnabled,
+    │                                #   normalizeEmail (trim+lowercase, utilisé aussi par le pont MCP)
+    ├── rateLimit.ts                 # Rate-limit mémoire du login (IP+email) → 429
+    ├── workspace.ts                 # getMembership, createWorkspaceWithDefaults, isPageAccessible,
+    │                                #   check{Database,Property,Record,View,Sprint}Access
+    ├── positions.ts                 # nextPosition(model, where, client?) → MAX(position) + 1000
+    ├── pages.ts                     # createPage, setPageSection (synchro récursive visibility),
+    │                                #   appendReleaseNotesToPage, deleteSectionReassigningRoots
+    ├── trash.ts                     # trash/restorePageSubtree, purgeExpiredTrash (30 j)
+    ├── uploads.ts                   # Chemin, MIME, garde anti-traversée, purgeOrphanUploads
+    ├── db.ts                        # Types (PropertyType, ViewConfig, ParsedRecord, RecordSection…),
+    │                                #   parse*/serialize*, mergeRecordProperties, removePropertyKey,
+    │                                #   stripRecordBody, diff/parse des révisions
+    ├── relations.ts                 # validateRelationValues (intégrité des propriétés relation)
+    ├── propertyConfig.ts            # validatePropertyConfig (zod), removedOptionIds,
+    │                                #   findReferencedOptionIds (nettoyage d'options select supprimées)
+    ├── propertyColors.ts            # SELECT_COLORS (palette des options select)
+    ├── templates.ts                 # Templates fournis (builtin-scrum/ticket/bug), emptySectionsBody
+    ├── tree.ts                      # buildTree, buildBreadcrumb, collectSubtreeIds,
+    │                                #   toggleBranchCollapsed, searchResultPathSegments
+    ├── avatar.ts · appConfig.ts     # Couleur/initiales d'avatar · config runtime (quota d'upload)
+    └── client/                      # ⚠️ Client uniquement (jamais importé côté serveur)
+        ├── viewFilters.ts           # applyFilters, applySorts, applyViewConfig, deriveSeedFromFilters
+        ├── blocknoteSchema.tsx      # Schéma BlockNote partagé : inline content « pageLink » (@page)
+        │                            #   + menu de suggestion. Importé par Editor ET RecordPanel
+        ├── upload.ts                # uploadFile() branché sur BlockNote (coller/glisser une image)
+        ├── kanban.ts                # Logique pure du kanban (ids DnD, valeur de groupe au drop…)
+        ├── reorder.ts               # intermediatePosition() : position entre deux items au drop
+        ├── debouncedSaver.ts        # createDebouncedSaver — le debounce d'autosave, testable
+        ├── dialogController.ts      # Machine à états des dialogues (logique pure de DialogContext)
+        ├── useThemeMode.ts          # light/dark déduit de la luminance de --bg (prop theme de BlockNote)
+        └── useRecordDeepLink.ts     # Lien profond vers un record (?record=<id>)
+```
+
+**Conventions de lecture de cet arbre**
+
+- La logique **pure et testable** est systématiquement extraite dans `lib/` (`client/kanban.ts`, `client/dialogController.ts`, `client/reorder.ts`, `propertyConfig.ts`…) pour être couverte par Vitest sans DOM. Avant d'écrire un helper dans un composant, vérifie qu'il n'est pas déjà là.
+- `lib/client/**` ne doit **jamais** être importé depuis une route API ou un Server Component.
+- Les deux éditeurs BlockNote (page et record) partagent `lib/client/blocknoteSchema.tsx` et `lib/client/upload.ts` : toute évolution de l'éditeur se fait là, pas en dupliquant dans `Editor.tsx` et `RecordPanel.tsx`.
+
+### Signatures des helpers (à respecter au mot près)
+
+```ts
+// lib/positions.ts — arguments POSITIONNELS, pas un objet.
+nextPosition(
+  model: "databaseProperty" | "record" | "view" | "sprint",
+  where: { databaseId: string },
+  client?: PositionClient    // client de $transaction : rend atomiques le MAX(position)
+): Promise<number>           // et le create qui suit. Défaut : le client global.
+
+// lib/workspace.ts — 3e paramètre pour atteindre les éléments en corbeille.
+checkDatabaseAccess(databaseId: string, userId: string, includeTrashed = false)
+checkRecordAccess(recordId: string, userId: string, includeTrashed = false)
+checkPropertyAccess(propertyId: string, userId: string)
+checkViewAccess(viewId: string, userId: string)
+checkSprintAccess(sprintId: string, userId: string)
+
+// lib/pages.ts — setPageSection NE LÈVE PAS : elle renvoie une union à narrower.
+createPage(input: CreatePageInput)   // objet : { title?, parentId?, workspaceId, ownerId, sectionId? }
+setPageSection(pageId: string, input: SetPageSectionInput):
+  Promise<{ ok: true; page } | { ok: false; code: "page_not_found" | … }>
+
+// lib/client/viewFilters.ts — l'ordre des arguments compte (records, config, properties).
+applyViewConfig(records: ParsedRecord[], config: ViewConfig, properties: ParsedDatabaseProperty[])
 ```
 
 ## Conventions des routes API
 
-- **Auth** : `getSession()` → 401 si null
-- **Accès** : check via les helpers `check*Access` de `lib/workspace.ts` → **404** si pas d'accès (jamais 403, pour ne pas leaker l'existence)
-- **Validation** : zod, schema en haut du fichier
-- **JSON fields** : JAMAIS de `JSON.parse/stringify` direct dans les routes → toujours les helpers `parse*/serialize*` de `lib/db.ts`
-- **Réponse succès** : objet parsé direct (pas wrappé dans `{ data: ... }`)
-- **Réponse erreur** : `{ error: "message" }` ou `{ error: "Validation failed", details: zodFlattenedErrors }`
-- **Position** : automatique via `nextPosition()` pour properties/records/views
-- **Pas de filtres/tris côté serveur** : tous les records sont retournés, le client filtre en JS via `applyViewConfig()`. **Exception assumée** — `GET /api/databases/[id]/records` accepte des params **optionnels** pour les consommateurs sans `applyViewConfig` (MCP) : `filter` (JSON `ViewFilter[]`, appliqué via `applyFilters` — pas de réimplémentation), `limit`/`offset` (total pré-pagination dans l'en-tête `X-Total-Count` ; le corps reste un **tableau nu**), `includeContent=false` (omet `content`/`sectionsBody` via `stripRecordBody`). **Sans aucun param, la réponse est identique à l'historique** → le front n'est pas impacté.
+- **Auth** : `getSession()` → 401 si null. **Exception : `/api/auth/*` est public** (`src/proxy.ts > PUBLIC_PATHS`) — ces routes *créent* la session, elles ne peuvent pas la lire. Leur garde est un flag d'env (`LEGACY_LOGIN`, `REGISTRATION`, OIDC) → **403** si la fonctionnalité est désactivée, **429** sur rate-limit login.
+- **Accès** : helpers `check*Access` de `lib/workspace.ts` → **404** si pas d'accès. Ils ne couvrent que les entités de database (`checkDatabaseAccess`, `checkPropertyAccess`, `checkRecordAccess`, `checkViewAccess`, `checkSprintAccess`). Pour **page / section / workspace / trash / search : pas de helper** (ne cherche pas un `checkPageAccess`, il n'existe pas) → `getMembership()` + contrôle de confidentialité (`isPageAccessible`, ou `visibility === "private" && ownerId !== user.id`), 404 également.
+- **404, jamais 403 pour une ressource** (ne pas leaker l'existence). Les seuls 403 du projet sont fonctionnels : fonctionnalité désactivée (`/api/auth/login|register`) et refus anti-CSRF du proxy (`Origin` cross-site sur une mutation).
+- **Corbeille (soft delete)** : `DELETE /api/pages/[id]` et `DELETE /api/records/[id]` estampent `trashedAt` — ils ne suppriment PAS. `?permanent=1` = suppression définitive depuis la corbeille. Les `check*Access` masquent le trashé par défaut → passer `includeTrashed = true` (3e arg) pour le cycle de vie corbeille. Toutes les lectures (arbre, search, records, recent) filtrent `trashedAt: null`.
+- **Validation** : zod, schema en haut du fichier. Exceptions : `POST /api/upload` lit un `FormData` (pas de JSON), `/api/auth/*` et `POST /api/pages` valident à la main.
+- **JSON fields** : JAMAIS de `JSON.parse/stringify` direct dans les routes → toujours les helpers `parse*/serialize*` de `lib/db.ts`. (Seul `templates/*` sérialise `columns`/`sections` à la main — pas de helper dédié pour `Template`.)
+- **Réponse succès** : objet parsé direct (pas wrappé dans `{ data: ... }`). **201** sur les créations d'entités database (database, record, duplicate, property, view, sprint, template) ; les routes historiques (pages, sections, workspaces) répondent 200. Deux sorties non-JSON : `GET /api/files/[name]` renvoie des **octets bruts**, `/api/auth/oidc/*` renvoie des **redirections** (erreur → `/login?sso_error=<code>`).
+- **Réponse erreur** : `{ error: "message" }` ou `{ error: "Validation failed", details: zodFlattenedErrors }`. Codes métier en usage : **409** (page déjà database, sprint déjà actif, email pris, dernière section, restore sous page trashée), **422** (clôture de sprint : réconciliation des issues, page « Patch notes » illisible), **413/415** (upload), **429** (login).
+- **Position** : `nextPosition(model, where, tx)` — models `databaseProperty | record | view | sprint`. **Appeler DANS le `prisma.$transaction` de la création, avec le client `tx` en 3e argument** : hors transaction, deux créations concurrentes lisent le même `MAX(position)` et collisionnent.
+- **Effets de bord sur GET** (self-host, pas de cron) : `GET /api/config` purge les uploads orphelins > 30 j, `GET /api/trash` purge la corbeille expirée > 30 j.
+- **Pas de filtres/tris côté serveur** : tous les records sont retournés (hors corbeille : `trashedAt: null`), le client filtre en JS via `applyViewConfig()`. **Exception assumée** — `GET /api/databases/[id]/records` accepte des params **optionnels** pour les consommateurs sans `applyViewConfig` : `filter` (JSON `ViewFilter[]`, appliqué via `applyFilters` — pas de réimplémentation), `limit` (1-200) / `offset` (total pré-pagination dans l'en-tête `X-Total-Count` ; le corps reste un **tableau nu**), `includeContent=false` (omet `content`/`sectionsBody` via `stripRecordBody`). **Sans aucun param, la réponse est identique à l'historique** → le front n'est pas impacté. ⚠️ Ces params ont été faits « pour le MCP » mais le MCP ne les utilise pas encore (`notes_tools.py > list_records` appelle la route nue).
 
 ## Conventions UI
 
@@ -149,8 +260,9 @@ L'éditeur BlockNote debounce 500-600ms sur `onChange` et envoie un PATCH. Même
 
 ## Bugs connus
 
-- **Drag-and-drop sidebar vers le haut** : ECONNRESET côté serveur + NetworkError client quand on remonte une page. La donnée est sauvée en DB. Hypothèse : better-sqlite3 écrit dans `prisma/dev.db-wal` qui est watché par Next.js dev → Fast Refresh en plein PATCH. Solution probable : déplacer la DB hors du dossier projet ou ignorer `prisma/*.db*` dans le watcher.
-- **Turbopack + WSL2** : les nouveaux fichiers ne sont pas détectés sur les mounts `/mnt/c/...`. Nécessite un restart de `next dev` à chaque ajout de fichier. Solution : déplacer le projet dans le FS natif WSL (`~/projects/...`).
+- **Écritures SQLite coupées par le watcher `next dev`** — symptôme historique : ECONNRESET côté serveur + NetworkError client au drag-and-drop d'une page vers le haut dans la sidebar, alors que la donnée était bien écrite en DB. Cause retenue : better-sqlite3 écrit `dev.db-wal` **dans le dossier projet**, watché par Next.js dev → Fast Refresh en plein PATCH.
+  **Mitigation appliquée, non re-testée** : la DB de dev vit désormais HORS du repo (`DATABASE_URL` de ton `.env` local ; l'astuce est documentée dans `.env.example`) et le harnais E2E fait pareil (`tests/e2e-server.mjs` → `os.tmpdir()`). Traite donc ce point comme *mitigé*, pas comme *prouvé disparu*. **Si le symptôme réapparaît, vérifie d'abord que `DATABASE_URL` ne pointe pas dans le repo** avant de chercher ailleurs.
+- **Environnement de dev** (note, pas un bug) : le développement se fait en **Windows natif**. L'ancienne entrée « Turbopack + WSL2 » (nouveaux fichiers non détectés sur les mounts `/mnt/c/...`) est **sans objet** dans cette configuration ; elle ne redeviendrait vraie que si le projet repassait sous WSL sur `/mnt/c` — auquel cas : travailler dans le FS natif WSL (`~/projects/...`).
 
 ## Thème (couleurs)
 
@@ -161,8 +273,8 @@ L'éditeur BlockNote debounce 500-600ms sur `onChange` et envoie un PATCH. Même
 
 ## Déploiement
 
-- **CI** : `.github/workflows/ci.yml` — jobs `build` (Next + Prisma), `test` (Vitest unit/API) et `e2e` (Playwright) sur push/PR. Un test rouge bloque la CI (condition DoD).
-- **CD** : `.github/workflows/deploy.yml` — sur push `main` (ou `workflow_dispatch`), SSH sur le Pi (secrets repo `SSH_HOST`/`SSH_USER`/`SSH_KEY`), `git reset --hard origin/main` + `docker compose up -d --build`, puis attend que le conteneur `gotyeah_notes` soit `healthy` (healthcheck node défini dans `docker-compose.yml`). ⚠️ **Tout push sur `main` déclenche un déploiement réel.**
+- **CI** : `.github/workflows/ci.yml` — jobs `build` (Next + Prisma), `test` (Vitest unit/API) et `e2e` (Playwright). Un test rouge bloque la CI (condition DoD). **Déclencheurs** : au *push* sur `main`, `feat/**`, `fix/**`, `docs/**` et `chore/**` ; le `pull_request:` n'a aucun filtre et couvre donc **toutes** les branches. Une branche nommée hors de ces préfixes ne déclenche donc rien au push — sa CI n'arrive qu'à l'ouverture de la PR. Ne jamais conclure « CI verte » sans avoir vu un run.
+- **CD** : `.github/workflows/deploy.yml` — sur push `main` (ou `workflow_dispatch`), SSH sur le Pi (secrets repo `SSH_HOST`/`SSH_USER`/`SSH_KEY`), `git reset --hard origin/main` + `docker compose up -d --build`, puis attend que le conteneur `gotyeah_notes` soit `healthy` (healthcheck node défini dans `docker-compose.yml`). ⚠️ **Un push sur `main` déclenche un déploiement réel**, à une exception près : `paths-ignore: ["**.md"]` — un push ne touchant QUE des `.md` ne déploie pas. Un commit mêlant doc et code déploie quand même.
 - **Snapshot backup AVANT chaque MEP** (filet de sécurité) : le script SSH prend un snapshot SQLite via `sqlite3 .backup` (cohérent sous WAL) `--user 0:0` dans `/home/pi/backups/gotyeah-notes/`, + `PRAGMA integrity_check`. **Un échec du snapshot arrête le déploiement** (avant `docker compose up`). ⚠️ Ne PAS mettre d'étape best-effort dans le `script:` de `deploy.yml` : `appleboy/ssh-action` (`script_stop`) coupe la MEP au moindre code non nul, quelles que soient les gardes shell (`set +e`/`|| true`). Rotation des snapshots (7 j) + réplication restic hors-Pi = **cron dédié sur le Pi** (hors chemin critique, cf. README §Sauvegardes).
 - Le schéma Prisma est appliqué au déploiement par le service one-shot `migrate` (`prisma db push`). Bascule vers `prisma migrate deploy` + baseline versionnée = PR **#23** (draft, rollout supervisé : `migrate resolve --applied 0_init` sur la prod avant le 1er `migrate deploy`).
 - `postinstall` = `prisma generate` (jamais `db push` : aucune opération destructive à l'install).
@@ -172,35 +284,114 @@ L'éditeur BlockNote debounce 500-600ms sur `onChange` et envoie un PATCH. Même
 
 Instance exposée durcie — variables d'env associées (défauts sûrs, cf. `.env.example` / `docker-compose.yml`) :
 - **`REGISTRATION`** (défaut `off`) : inscription publique par formulaire fermée. `on` pour rouvrir `POST /api/auth/register`. Découplée de `LEGACY_LOGIN` et de l'OIDC.
-- **`MCP_ACT_AS_ALLOWLIST`** (défaut vide = comportement historique) : liste d'emails (séparés par virgule) que le pont MCP peut incarner ; hors liste → refus + log d'audit.
+- **`MCP_ACT_AS_ALLOWLIST`** (défaut vide = comportement historique) : liste d'emails (séparés par virgule) que le pont MCP peut incarner ; hors liste → refus + log d'audit. Injectée au conteneur depuis la PR #38 (18/07/2026) — avant, elle était absente du bloc `environment:` et la garde ne s'appliquait pas.
 - **Tokens de session hachés** (sha256) : `Session.id = hashToken(token)`, jamais le token en clair ; purge des expirées (`@@index([expiresAt])`). Le déploiement de ce changement déconnecte tout le monde une fois.
 - **Login** : rate-limit mémoire (IP+email) → 429 ; anti-énumération (bcrypt factice sur email inconnu, même message/temps). Emails normalisés (`normalizeEmail` = trim+lowercase) sur register/login/act-as.
 - **Headers** (`next.config.ts`) : `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`. **Anti-CSRF** (`src/proxy.ts`) : une mutation `/api/*` avec `Origin` cross-site est refusée (403) ; GET, same-origin et pont MCP passent.
+
+### Variables d'environnement
+
+Toutes les variables réellement lues (`process.env`). Source de vérité : `.env.example` (local) + bloc `environment:` de `docker-compose.yml` (conteneur). ⚠️ Le compose n'utilise **pas** `env_file` : une variable absente de son bloc `environment:` **n'atteint jamais le conteneur**, même posée dans le `.env` du Pi.
+
+| Variable | Lue dans | Défaut | Si absente |
+|---|---|---|---|
+| `DATABASE_URL` | `lib/prisma.ts` | `file:./prisma/dev.db` | OK en conteneur (fixée par le compose) ; requise en local pour le CLI Prisma |
+| `OIDC_ISSUER` / `_CLIENT_ID` / `_CLIENT_SECRET` / `_REDIRECT_URI` | `lib/oidc.ts` | `""` | Bouton OIDC masqué (`oidcEnabled()` exige les **4**) — dégradation propre, pas d'erreur |
+| `OIDC_ALLOW_SIGNUP` | `lib/oidc.ts` | `"true"` | Provisioning auto au 1er login OIDC actif |
+| `OIDC_BUTTON_LABEL` | `lib/oidc.ts` | `"Se connecter avec GotYeah"` | Libellé par défaut |
+| `LEGACY_LOGIN` | `lib/oidc.ts` | `"on"` | Login email/mot de passe actif (break-glass) |
+| `REGISTRATION` | `lib/oidc.ts` | `"off"` | Inscription publique fermée (défaut sûr) |
+| `MCP_SHARED_SECRET` | `lib/session.ts` | vide | Pont MCP act-as **désactivé** (aucune surface ajoutée) |
+| `MCP_ACT_AS_ALLOWLIST` | `lib/session.ts` | vide | N'importe quel User existant est incarnable |
+| `UPLOAD_DIR` | `lib/uploads.ts` | `<cwd>/data/uploads` | En conteneur, doit valoir `/data/uploads` (volume) — sinon images perdues au rebuild |
+
+- ⚠️ **Leçon de la PR #38** : `MCP_ACT_AS_ALLOWLIST` a été **inerte en prod** pendant une semaine — lue par le code et documentée comme livrée, mais absente du bloc `environment:`. Une garde de sécurité qu'on croit active et qui ne l'est pas est pire que pas de garde. Réflexe : toute nouvelle variable lue par `src/` doit être ajoutée AU MÊME MOMENT dans `.env.example` **et** dans `docker-compose.yml`.
+- `NODE_ENV` (flag `secure` des cookies) est posé par Next et le Dockerfile — ne pas le définir à la main. `E2E_PORT`, `PORT` et `CI` ne servent qu'aux tests.
+- ⚠️ **`AUTH_SECRET` n'est lue nulle part dans `src/`.** Elle n'existe que comme placeholder dans `ci.yml`, `vitest.config.ts` et `tests/e2e-server.mjs` (vestige d'un design d'auth abandonné). Ce n'est pas une variable de configuration : elle n'a aucun effet.
 
 ## Intégration MCP (outils notes_*)
 
 - Les outils MCP de gotyeah-notes vivent dans le dépôt **`gotyeah-mcp`** (`gotyeah-mcp/mcp_remote/notes_tools.py`), **greffés sur le hub MCP Sonar** (et **pas** un serveur séparé) : on réutilise son OAuth fédéré à l'IdP **Pocket ID** déjà branché dans claude.ai (volonté : ne pas dupliquer l'auth). ⚠️ Le code MCP a été **consolidé de `gotyeah_sonar` vers `gotyeah-mcp`** (commit `6f80180`, 2026-07-01) : ne plus toucher `gotyeah_sonar` pour les outils `notes_*`.
 - **Pont de confiance** : `lib/session.ts > getSession()` accepte, à défaut de cookie valide, un appel du MCP via `X-MCP-Secret` (== env `MCP_SHARED_SECRET`, comparaison constant-time) + `X-Act-As-Email` → mappé sur un **User existant** (email normalisé trim+lowercase). Entièrement **OFF tant que `MCP_SHARED_SECRET` est vide** → aucune surface ajoutée par défaut. L'auth web cookie/password est inchangée. **Allowlist optionnelle `MCP_ACT_AS_ALLOWLIST`** (emails séparés par virgule) : si définie, seuls ces emails sont incarnables (sinon refus) ; chaque incarnation est journalisée (`console.info('[mcp-act-as]…')`).
 - ⚠️ **`src/proxy.ts` est le middleware** (Next 16 a renommé `middleware` → `proxy`). Il s'exécute AVANT les routes et 401-ait tout `/api/*` sans cookie : il **laisse passer** les appels portant `x-mcp-secret` + `x-act-as-email` (la validation autoritaire reste dans `session.ts`). Toute future auth par en-têtes doit aussi être whitelistée là.
-- **Outils — pages/sections** : `notes_list_workspaces`, `notes_list_pages`, `notes_get_page`, `notes_create_page`, `notes_update_page`, `notes_delete_page`, `notes_search`, `notes_list_sections`, `notes_create_section`.
-- **Outils — databases (v2)** : `notes_get_database`, `notes_create_database`, `notes_delete_database`, `notes_create_property`, `notes_update_property`, `notes_delete_property`, `notes_list_records`, `notes_get_record`, `notes_create_record`, `notes_update_record`, `notes_delete_record`, `notes_create_view`, `notes_update_view`, `notes_delete_view`. Une database EST une page → `notes_get_page` renvoie `database: {id}`. Les records se manipulent **par NOM** de propriété (traduit en ids + options select via le schéma, côté `gotyeah-mcp/mcp_remote/notes_tools.py`).
-- **Outils — templates** : `notes_list_templates`, `notes_create_database_from_template` (depuis n'importe quel template), `notes_create_ticket_database` / `notes_create_bug_database` (raccourcis builtins), `notes_set_record_template` (modèle de corps LIBRE d'une database).
-- **Outils — sprints (backlog)** : `notes_list_sprints`, `notes_create_sprint`, `notes_update_sprint` (state `active`=démarrer / `completed`=terminer ; avec `database_id` → renvoie les issues non terminées au backlog), `notes_delete_sprint`. Affecter une issue à un sprint : param `sprint` (par NOM, ou `"backlog"`) de `notes_create_record` / `notes_update_record`.
-- **Activation** (sur le Pi) : même secret dans les deux `.env` — `MCP_SHARED_SECRET` ici, `NOTES_API_BASE_URL=http://gotyeah_notes:3000` + `NOTES_MCP_SECRET` côté MCP (dépôt `gotyeah-mcp` ; les deux conteneurs sont sur le réseau `nginx-proxy-manager_default`) — puis `docker compose up -d` et rafraîchir le connecteur claude.ai. **✅ Actif en prod (2026-06-29)** ; l'email du User a été aligné sur le gmail (= email IdP) car le match est exact.
+
+### Les 36 outils `notes_*` (état du code, `remote.py`)
+
+- **Pages / sections (9)** : `notes_list_workspaces`, `notes_list_pages`, `notes_get_page`, `notes_create_page`, `notes_update_page`, `notes_delete_page`, `notes_search`, `notes_list_sections`, `notes_create_section`.
+- **Databases / propriétés / records / vues (15)** : `notes_get_database`, `notes_create_database`, `notes_delete_database`, `notes_create_property`, `notes_update_property`, `notes_add_select_option`, `notes_delete_property`, `notes_list_records`, `notes_get_record`, `notes_create_record`, `notes_update_record`, `notes_delete_record`, `notes_create_view`, `notes_update_view`, `notes_delete_view`. Une database EST une page → `notes_get_page` renvoie `database: {id}`. Les records se manipulent **par NOM** de propriété (traduit en ids + options select via le schéma, côté `notes_tools.py`).
+  - `notes_update_property` ne fait que **renommer / réordonner**. Pour **ajouter** une option à un select existant : `notes_add_select_option` (**idempotent**, no-op si l'option existe déjà, comparaison insensible à la casse ; **add-only**, il ne retire ni ne renomme jamais). Changer le **type** d'une propriété est refusé par l'API (`400 type cannot be changed`) — c'est voulu, pas un manque.
+- **Templates / modèles (8)** : `notes_list_templates`, `notes_create_template`, `notes_update_template`, `notes_delete_template`, `notes_create_database_from_template` (depuis n'importe quel template), `notes_create_ticket_database` / `notes_create_bug_database` (raccourcis builtins), `notes_set_record_template` (modèle de corps LIBRE d'une database). Les templates fournis (`builtin-*`) sont en **lecture seule** : `update`/`delete` refusent avant l'appel HTTP. ⚠️ `notes_update_template` remplace la liste de `sections` en ENTIER et regénère un id pour toute section sans `id` → repasser les ids existants (via `notes_list_templates`), sinon les cartes déjà sectionnées se décrochent.
+- **Sprints / backlog (4)** : `notes_list_sprints`, `notes_create_sprint`, `notes_update_sprint` (state `active`=démarrer / `completed`=terminer ; avec `database_id` → renvoie les issues non terminées au backlog), `notes_delete_sprint`. Affecter une issue à un sprint : param `sprint` (par NOM, ou `"backlog"`) de `notes_create_record` / `notes_update_record`.
+
+⚠️ **Le MCP ne couvre pas toute l'API.** Sans outil dédié à ce jour : corbeille (`/api/trash`), upload d'images (`/api/upload`, `/api/files/[name]`), historique des révisions (`/api/records/[id]/revisions`), duplication serveur (`/api/records/[id]/duplicate`), restauration (`/api/records/[id]/restore`), config d'instance (`/api/config`). Ne conclus pas « la fonctionnalité n'existe pas » parce qu'aucun outil `notes_*` ne l'expose.
+
+- **Activation** (sur le Pi) : même secret dans les deux `.env` — `MCP_SHARED_SECRET` ici, `NOTES_API_BASE_URL=http://gotyeah_notes:3000` + `NOTES_MCP_SECRET` côté MCP (dépôt `gotyeah-mcp` ; les deux conteneurs sont sur le réseau `nginx-proxy-manager_default`) — puis `docker compose up -d` et rafraîchir le connecteur claude.ai. **✅ Actif en prod (2026-06-29)** ; l'email du User a été aligné sur le gmail (= email IdP).
+- **Déploiement du MCP** : `gotyeah-mcp` est à jour sur `main` (dernier lot : `notes_add_select_option`, PR #3 mergée le 2026-07-17) et le connecteur claude.ai a été rafraîchi. Après tout ajout d'outil : push `gotyeah-mcp` sur `main` **puis** rafraîchir le connecteur dans claude.ai — sans ce rafraîchissement, le nouvel outil reste invisible côté client.
 - Variables d'env : voir `.env.example`.
 
 ## Reste à faire
 
-- [x] ~~**Activer le MCP**~~ : fait (2026-06-29). Secrets posés sur le Pi, pont actif, connecteur claude.ai rafraîchi.
-- [x] ~~**MCP v2 — databases/records**~~ : fait (2026-06-29). 14 outils `notes_*` (databases, properties, records, views) côté `gotyeah-mcp`, records par nom. Voir section *Intégration MCP*.
-- [x] ~~**Système de modèles (templates)**~~ : fait (2026-06-30). Modèle `Template` (workspace), page `/templates`, corps sectionné à libellés fixes, menu de template par carte, scaffold `POST /api/databases {templateId}`. ticket/bug = templates fournis. Outils MCP templates côté `gotyeah-mcp`.
-- [x] ~~**Backlog (façon Jira)**~~ : fait (2026-06-30). 5e type de vue `backlog` (`BacklogView.tsx`), modèle Prisma `Sprint` + `Record.sprintId` (onDelete SetNull), API sprints (`/api/databases/[id]/sprints`, `/api/sprints/[id]`), template fourni `builtin-scrum` (Sprint absent du template — c'est un modèle, les points/épic/statut sont des colonnes câblées dans `View.config`). Panneau épics (select coloré), DnD issues entre sprints/backlog, story points par sprint, démarrer/terminer un sprint. Testé e2e back/API (19 assertions). **Front à valider dans le navigateur.**
-- [x] ~~**Cohabitation Backlog / Board / Sprint**~~ : fait (2026-06-30). Kanban « sprint-aware » (`View.config.sprintScope`) : board scrum scopé au sprint actif (« Sprint actif »), sélecteur de sprint + boutons démarrer/terminer dans l'en-tête du board, création de carte affectée au sprint courant. **Un seul sprint actif** (409). **Clôture renvoie les issues non terminées au backlog** (transaction). Testé e2e API (13 assertions). **Front (board scopé, sélecteur, DnD) à valider dans le navigateur.**
-- [x] ~~**MCP — sprints (côté MCP)**~~ : fait (2026-06-30). 4 outils `notes_*_sprint` (list/create/update/delete, `update` gère démarrer/terminer + renvoi des incomplètes au backlog si `database_id`) + param `sprint` (par NOM, ou `"backlog"`) sur create/update_record, dans `gotyeah-mcp`. Logique pure testée (16/16). ⚠️ **À déployer** : push `gotyeah-mcp` sur `main` + rafraîchir le connecteur dans claude.ai.
-- [x] ~~**Match email IdP→User insensible à la casse**~~ : fait (2026-07-11, lot durcissement B). `normalizeEmail` (trim+lowercase) appliqué sur register/login/`getServiceUser` + migration one-shot `scripts/normalize-emails.mjs` (détecte et refuse les collisions de casse).
-- [ ] **MCP v3 (optionnel)** : `update_property` ne gère que rename/position (changer type/options d'un select casserait les records). Édition des options select par nom à ajouter si besoin.
-- [ ] **Builds hors Pi** : déplacer le build Docker en CI (GitHub Actions) + `docker pull` au déploiement, pour supprimer les pics RAM/swap au déploiement.
+> L'historique git est la source de vérité de ce qui a été livré. Cette liste ne sert qu'à
+> (a) éviter de refaire un lot déjà fait, (b) tracer ce qui reste. Si une ligne te semble
+> en contradiction avec le code, **crois le code** et corrige la ligne.
+
+### Livré (repères — détail dans `git log`)
+
+- [x] ~~**Pont MCP + MCP v2/v3 (databases, records, templates, sprints, options select)**~~ : 2026-06-29 → 2026-07-17. 36 outils `notes_*` côté `gotyeah-mcp`, déployés, connecteur rafraîchi. Voir *Intégration MCP*.
+- [x] ~~**Système de modèles (templates)**~~ : 2026-06-30. Modèle `Template` (workspace), page `/templates`, corps sectionné à libellés fixes, scaffold `POST /api/databases {templateId}`.
+- [x] ~~**Backlog façon Jira + cohabitation Board/Sprint**~~ : 2026-06-30. Vue `backlog`, modèle `Sprint`, kanban « sprint-aware » (`sprintScope`), un seul sprint actif (409), clôture renvoyant les issues non terminées au backlog.
+- [x] ~~**Auth OIDC (Pocket ID) + `LEGACY_LOGIN`**~~ : 2026-07-02 (`0cee15f`, `33d47a7`). Connexion OIDC à côté du formulaire ; `LEGACY_LOGIN=off` = « comptes GotYeah uniquement ».
+- [x] ~~**Corbeille (soft delete) + upload d'images local**~~ : 2026-07-10 (`e386d7c`, `4f2c08c`). `/api/trash`, `/api/records/[id]/restore`, purge auto 30 j ; `/api/upload` + `/api/files/[name]`, purge des orphelins 30 j.
+- [x] ~~**Type de propriété « relation »**~~ : 2026-07-10 (`23a69f3`). Types, API et filtres.
+- [x] ~~**Lot durcissement sécurité**~~ : 2026-07-11. Voir *Déploiement > Sécurité*. Inclut le **match email insensible à la casse** (`normalizeEmail` + `scripts/normalize-emails.mjs`).
+- [x] ~~**Lot Discovery / éditeur / vues**~~ : 2026-07-16 → 2026-07-18. Liens internes `@page` (`5f8d38c`), duplication serveur atomique (`2cc0e48`), sélection multiple + actions groupées (`ca74c3b`), RecordPanel redimensionnable (`0e41983`), réordonnancement des onglets de vues (`a572d3e`), chemin des homonymes dans Cmd+K (`b2a6aa2`), repli récursif de la sidebar (`48666bb`), édition inline sur les cartes kanban (`1eb86a1`).
+- [x] ~~**Historique des modifications d'un record**~~ : 2026-07-17 (`17c05d4`). Modèle `RecordRevision`, `GET /api/records/[id]/revisions`, onglet dédié dans le `RecordPanel`.
+- [x] ~~**Notes de version (patch notes) de sprint**~~ : 2026-07-16/17 (`a919329`, `e00579a`, `a9e7927`). Générées à la clôture, auto-appendées à la page « Patch notes », affichage lecture seule dans le backlog.
+
+### Reste
+
+- [ ] **Builds hors Pi** : le build Docker tourne toujours **sur le Pi** (`deploy.yml` → `docker compose up -d --build`), RAM-intensif sur arm64. Cible : builder l'image en CI (`ci.yml` n'a aujourd'hui aucun job Docker) + `docker pull` au déploiement.
+- [x] ~~**`MCP_ACT_AS_ALLOWLIST` absente du `docker-compose.yml`**~~ : fait (18/07/2026, PR #38). Reste à la **renseigner** dans le `.env` du Pi pour que la garde s'applique réellement (vide = tout User existant reste incarnable).
+- [ ] **MCP — édition fine des options select** : `notes_add_select_option` couvre l'**ajout** ; **renommer / recolorer / réordonner / retirer** une option reste hors MCP (l'API le permet via `PATCH /api/properties/[id] {config}`, et refuse déjà de retirer une option encore référencée — c'est donc exposable sans risque, juste pas exposé).
+- [ ] **`View.config.createInUnassignedOnly` sans UI** : le flag existe (`lib/db.ts`) et est respecté par le kanban (`KanbanView.tsx`), mais **aucun écran ne l'écrit** — il faut éditer le `config` de la vue à la main. À câbler dans les réglages de vue si on le garde.
+- [ ] **Dupliquer — phase B** : `POST /api/records/[id]/duplicate` (phase A) n'est câblé que dans **KanbanView** et **BacklogView**. Reste à l'exposer dans TableView / GalleryView / CalendarView.
+- [ ] **Migrations Prisma versionnées** : le déploiement applique encore `prisma db push` (pas de dossier `prisma/migrations/`). Bascule vers `migrate deploy` + baseline = PR **#23** (draft).
+- [x] ~~**CI aveugle sur `fix/**`, `docs/**`, `chore/**`**~~ : fait (18/07/2026, PR #39). `ci.yml` déclenche désormais au push sur `main`, `feat/**`, `fix/**`, `docs/**` et `chore/**`.
 - [ ] (optionnel) UI Settings « Jetons d'accès » si un jour on veut un PAT en complément de l'IdP.
+
+## Process de travail (Dev Loop)
+
+Le process ne vit **pas** dans ce dépôt. Sa référence est la page **Dev Loop** du workspace notes (id `cmrci2y9i000b01nnmkel8m61`) — « document lu en premier par toute session IA » — complétée par le **Guide du process** (`cmrcjyk8w003w01nn3b0pkk7y`). Ce qui suit en est le strict nécessaire pour travailler dans ce repo ; en cas de doute, la page Dev Loop fait foi. Règle mère : **les notes font foi, pas la conversation** — ce qui n'est écrit ni dans une fiche ni dans un ticket n'existe pas.
+
+### La boucle
+
+Idée → fiche **Discovery** (inbox globale tous projets, `cmrci44xz000c01nnbg5iumkc`) cadrée par l'IA → **✅ Validée** par Gautier (go n°1) → l'IA crée le ticket dans le **📦 Board du projet** (ici database `cmri206zi009r01juyyyly8he`) → dev sur une branche → PR → merge `main` = **déploiement réel en production** (mécanique : cf. *Déploiement*). Les retours post-MEP réalimentent Discovery ou le Backlog.
+
+**8 statuts** : Backlog · Cadrage · Prêt · En dev · Review / Tests · Recette préprod · À MEP · Terminé.
+
+- **Réservés à Gautier** — « statuts de confirmation », l'IA n'y fait **JAMAIS** entrer une carte : **Validée** (Discovery), **Prêt**, **À MEP**, **Terminé**. Y entrer = sa signature.
+- **Permis à l'IA** : `Backlog → Cadrage` (**sur ordre explicite uniquement** — l'IA ne s'auto-saisit jamais d'un ticket), `Prêt → En dev`, puis `En dev → Review / Tests → Recette préprod` en autonomie, **sous condition DoD** : CI verte, chaque critère d'acceptation couvert par un test, self-review du diff faite, section 🧾 Recette du ticket remplie (manipulation → résultat attendu), Cahier de tests à jour (cf. *Socle de test*). CI rouge → l'IA reboucle en dev, seule.
+- **Fin de session ou blocage** : mettre à jour la section 🤝 État courant de la carte, passer `Main à = Gautier`, s'arrêter.
+- **Ne jamais rien supprimer** (carte, fiche) : les statuts « Abandonnée » / « Obsolète » existent pour ça.
+
+### Zone réservée : 🗣️ Notes de Gautier
+
+Chaque carte se termine par une section **« 🗣️ Notes de Gautier »** (décisions, contraintes, détails à ne pas oublier). L'IA la **lit en priorité** à chaque session sur la carte, en intègre le contenu dans les bonnes sections, et **n'y écrit JAMAIS**. Si elle manque sur une carte ancienne, l'IA l'ajoute vide.
+
+⚠️ **Piège technique** : le corps d'un record se réécrit en **remplacement TOTAL** (`content` comme `sectionsBody` — seules les `properties` sont mergées, cf. *Conventions clés du modèle*). Une mise à jour partielle qui ne réémet pas la section **efface les notes de Gautier**. Toujours relire le corps existant et réémettre 🗣️ Notes de Gautier à l'identique.
+
+### Tiering de risque T1/T2/T3 — posé au schéma, PAS actif
+
+Classement par **rayon d'impact**, décidé le 2026-07-17 : **T3** = auth, paiement, migration ou suppression de données, irréversible, sécurité (quelle que soit la taille) · **T1** = UI, copie, doc, ajout isolé, zéro surface données/sécurité · **T2** = tout le reste. Intention cible : T1 = auto-merge / deploy sans recette.
+
+⚠️ **État vérifié au 2026-07-18 — l'exception T1 est INACTIVE, ne t'en réclame pas.** Le tiering n'existe qu'au **schéma** : la propriété `Risque` (select T1/T2/T3) est bien sur le board, tout comme l'option de statut « Déployé T1 / à contrôler » — mais **aucun ticket n'est qualifié (0/27)** et aucune règle par tier n'est écrite. Les deux tickets qui la porteraient (« Propriété Risque … + circuits par tier », « DoR à géométrie variable ») sont **au Backlog**, non cadrés.
+
+**La règle qui s'applique aujourd'hui, sans exception : jamais de push sur `main` sans go explicite de Gautier**, parce qu'un push sur `main` déclenche un déploiement réel en production (seuls les pushes ne touchant **que** des `.md` en sont exemptés — `deploy.yml`, `paths-ignore`). Unique dérogation accordée à ce jour : l'**auto-merge des petits correctifs low-risk** (retours de recette, tweaks UI sans surface données ni sécurité), une fois la **CI verte**. Le go explicite reste requis pour l'auth, les données, les migrations, le schéma Prisma, la sécurité et tout changement de taille.
+
+### Discipline git
+
+- **Toujours `git push` la branche AVANT `gh pr create`.** `gh` ouvre la PR depuis l'état **distant** : l'oublier produit une PR amputée des commits locaux — c'est arrivé le 2026-07-16, et la prod est partie incomplète.
+- Branche par ticket, PR systématique. Pas de commit direct sur `main`.
 
 ## Ce qu'il NE faut PAS faire
 
@@ -208,19 +399,31 @@ Instance exposée durcie — variables d'env associées (défauts sûrs, cf. `.e
 - Pas de framework CSS autre que Tailwind.
 - Pas de state management global.
 - Pas de tRPC, GraphQL. Des `fetch` sur des routes Next.js.
-- Pas de `any` en TypeScript. Utiliser `unknown` + narrowing.
+- Pas de `any` en TypeScript. Utiliser `unknown` + narrowing. **Unique exception tolérée aujourd'hui** : le `initialContent: … as any` passé à `useCreateBlockNote({ schema: pageLinkSchema, … })` — 3 occurrences (`Editor.tsx`, `RecordPanel.tsx` ×2), toutes annotées `eslint-disable-next-line`, dues au typage de `initialContent` avec un schéma BlockNote custom. N'en ajoute pas d'autre, et ne prends pas ces 3 lignes pour une autorisation générale.
 - Pas de commentaires inutiles. Les commentaires expliquent le *pourquoi*, jamais le *quoi*.
 
 ## Commandes
 
 ```bash
-npm run dev          # dev server (ajouter --turbo pour Turbopack)
+npm ci --legacy-peer-deps   # ⚠️ OBLIGATOIRE : conflit de peer-deps connu
+                            #   (@blocknote/mantine veut @mantine/core@^8, le projet est en v9).
+                            #   Le lockfile ET l'install locale en dépendent — un `npm ci` nu échoue.
+npm run dev          # dev server. Next 16 utilise Turbopack PAR DÉFAUT (inutile d'ajouter --turbo) ;
+                     #   `npx next dev --webpack` pour repasser à webpack en cas de doute sur le bundler.
 npm run build        # build prod
-npm run db:push      # applique le schema Prisma à la DB
+npm start            # sert le build prod. ⚠️ En NODE_ENV=production le cookie de session est `secure`
+                     #   → invisible sur http://localhost : pour tester l'auth en local, reste sur `npm run dev`.
+npm run db:push      # applique le schema Prisma à la DB (pas de migrations versionnées)
 npm run db:studio    # UI Prisma pour inspecter la DB
 npm test             # tests unitaires + API (Vitest, DB SQLite jetable)
-npm run test:e2e     # tests E2E (Playwright, next dev sur DB jetable)
+npm run test:watch   # idem, en mode watch
+npm run test:e2e     # tests E2E (Playwright, next dev sur DB jetable hors projet)
+npx tsc --noEmit     # typecheck — il n'y a PAS de script `lint`/`typecheck`, ni de linter configuré
+                     #   (aucun ESLint/Biome/Prettier dans le repo). La CI vérifie via `npm run build`.
 ```
+
+- `postinstall` = `prisma generate` (jamais `db push` : aucune opération destructive à l'install). Après un changement de `schema.prisma` : `npx prisma generate` puis `npm run db:push`.
+- `node scripts/normalize-emails.mjs` : migration one-shot des emails en trim+lowercase (détecte et refuse les collisions de casse). Déjà passée en prod le 2026-07-11 — à ne rejouer que sur une base non normalisée.
 
 ## Socle de test
 
@@ -236,5 +439,5 @@ npm run test:e2e     # tests E2E (Playwright, next dev sur DB jetable)
 4. **TypeScript strict.** Pas de `any`.
 5. **Si tu hésites sur un choix, demande.** Mieux vaut une question qu'une refacto à défaire.
 6. **Teste tes modifications.** Lance les curl ou les vérifications manuelles et donne les résultats. Ne dis pas juste "à tester".
-7. **Utilise les helpers existants.** `parse*/serialize*` de `lib/db.ts`, `check*Access` de `lib/workspace.ts`, `nextPosition` de `lib/positions.ts`, `applyViewConfig` de `lib/client/viewFilters.ts`. Ne réimplémente pas ces logiques.
+7. **Utilise les helpers existants.** `parse*/serialize*` de `lib/db.ts`, `check*Access` de `lib/workspace.ts`, `nextPosition` de `lib/positions.ts`, `applyViewConfig` de `lib/client/viewFilters.ts`, `validateRelationValues` de `lib/relations.ts`, `trash*/purge*` de `lib/trash.ts`. Ne réimplémente pas ces logiques — et vérifie leur signature exacte dans *Architecture > Signatures des helpers* avant de les appeler.
 8. **zod v4** : utiliser `z.record(z.string(), z.unknown())` et non `z.record(z.unknown())` (le premier arg est la clé, pas la valeur).

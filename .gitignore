@@ -17,3 +17,6 @@ playwright/.cache
 
 # Uploads locaux (dev) — en prod, volume Docker /data/uploads
 /data/
+
+# Réglages Claude Code locaux (propres à chaque dev)
+.claude/
