@@ -6,7 +6,7 @@ import {
   ChevronDown, ChevronRight, Clock, FileText,
   Home, LayoutTemplate, Lock, LogOut, Plus, Settings, Trash2, Users,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   DndContext,
   DragEndEvent,
@@ -32,6 +32,11 @@ type Section = { id: string; name: string; type: string; icon: string | null; po
 type RecentPage = { id: string; title: string; icon: string | null };
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
+
+const SIDEBAR_DEFAULT_WIDTH = 256; // = l'ancien w-64
+const SIDEBAR_MIN_WIDTH = 180;
+const SIDEBAR_MAX_WIDTH = 520;
+const SIDEBAR_WIDTH_KEY = "sidebar:width";
 
 export default function Sidebar({ user }: { user: SessionUser }) {
   const { activeWorkspace } = useWorkspace();
@@ -163,8 +168,40 @@ export default function Sidebar({ user }: { user: SessionUser }) {
   const privateSection = sections.find((s) => s.type === "private");
   const teamSections = sections.filter((s) => s.type === "team");
 
+  // ── Largeur redimensionnable (même pattern que RecordPanel) ────────────────
+  // Lecture en effet et non en initializer : la sidebar est rendue au SSR,
+  // lire localStorage au premier render provoquerait un mismatch d'hydratation.
+  const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT_WIDTH);
+  useEffect(() => {
+    const saved = Number(window.localStorage.getItem(SIDEBAR_WIDTH_KEY));
+    if (saved >= SIDEBAR_MIN_WIDTH && saved <= SIDEBAR_MAX_WIDTH) setSidebarWidth(saved);
+  }, []);
+
+  const startResize = (e: React.PointerEvent) => {
+    e.preventDefault();
+    let latest = sidebarWidth;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.userSelect = "none";
+    const onMove = (ev: PointerEvent) => {
+      latest = Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, ev.clientX));
+      setSidebarWidth(latest);
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      document.body.style.userSelect = previousUserSelect;
+      window.localStorage.setItem(SIDEBAR_WIDTH_KEY, String(Math.round(latest)));
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+
   return (
-    <aside className="w-64 bg-[var(--surface)] border-r border-[var(--border)] h-screen overflow-y-auto p-2 text-sm flex flex-col">
+    <>
+    <aside
+      style={{ width: sidebarWidth }}
+      className="bg-[var(--surface)] h-screen shrink-0 overflow-y-auto p-2 text-sm flex flex-col"
+    >
       <WorkspaceSelector />
 
       {/* Navigation fixe */}
@@ -303,6 +340,17 @@ export default function Sidebar({ user }: { user: SessionUser }) {
         </div>
       </div>
     </aside>
+
+    <div
+      onPointerDown={startResize}
+      onDoubleClick={() => {
+        setSidebarWidth(SIDEBAR_DEFAULT_WIDTH);
+        window.localStorage.removeItem(SIDEBAR_WIDTH_KEY);
+      }}
+      className="w-1 shrink-0 h-screen bg-[var(--border)] hover:bg-[var(--accent)] cursor-ew-resize transition-colors"
+      title="Glisser pour redimensionner · double-clic pour réinitialiser"
+    />
+    </>
   );
 }
 
