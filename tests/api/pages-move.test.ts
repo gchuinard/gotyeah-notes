@@ -95,6 +95,58 @@ describe("setPageSection", () => {
     });
   });
 
+  it("déplacement sous un nouveau parent : position = dernière de la nouvelle fratrie", async () => {
+    const t = await makeTree("team", teamSectionId);
+    // Fratrie d'accueil : deux enfants déjà en place sous `root`.
+    await prisma.page.create({
+      data: { title: "a", workspaceId, ownerId: userId, parentId: t.root.id, visibility: "team", position: 5 },
+    });
+    await prisma.page.create({
+      data: { title: "b", workspaceId, ownerId: userId, parentId: t.root.id, visibility: "team", position: 42 },
+    });
+    const orphan = await prisma.page.create({
+      data: { title: "orphan", workspaceId, ownerId: userId, sectionId: teamSectionId, visibility: "team", position: 1 },
+    });
+
+    expect((await setPageSection(orphan.id, { parentId: t.root.id })).ok).toBe(true);
+    const moved = await prisma.page.findUniqueOrThrow({ where: { id: orphan.id } });
+    const siblings = await prisma.page.findMany({
+      where: { parentId: t.root.id, id: { not: orphan.id } },
+      select: { position: true },
+    });
+    expect(moved.position).toBeGreaterThan(Math.max(...siblings.map((s) => s.position)));
+  });
+
+  it("déplacement vers une autre section : position dernière parmi les RACINES de cette section", async () => {
+    const t = await makeTree("private", privateSectionId);
+    await prisma.page.create({
+      data: { title: "racine team", workspaceId, ownerId: userId, sectionId: teamSectionId, visibility: "team", position: 77 },
+    });
+
+    expect((await setPageSection(t.root.id, { sectionId: teamSectionId })).ok).toBe(true);
+    const moved = await prisma.page.findUniqueOrThrow({ where: { id: t.root.id } });
+    const roots = await prisma.page.findMany({
+      where: { sectionId: teamSectionId, parentId: null, id: { not: t.root.id } },
+      select: { position: true },
+    });
+    expect(moved.position).toBeGreaterThan(Math.max(...roots.map((r) => r.position)));
+    // Les enfants ne sont pas repositionnés : seul le rattachement de la racine change.
+    expect((await prisma.page.findUniqueOrThrow({ where: { id: t.child.id } })).position).toBe(1000);
+  });
+
+  it("non-régression DnD : conteneur inchangé → position intacte", async () => {
+    const t = await makeTree("team", teamSectionId);
+    await prisma.page.create({
+      data: { title: "voisine", workspaceId, ownerId: userId, sectionId: teamSectionId, visibility: "team", position: 9999 },
+    });
+
+    expect((await setPageSection(t.root.id, { sectionId: teamSectionId })).ok).toBe(true);
+    expect((await prisma.page.findUniqueOrThrow({ where: { id: t.root.id } })).position).toBe(1000);
+
+    expect((await setPageSection(t.child.id, { parentId: t.root.id })).ok).toBe(true);
+    expect((await prisma.page.findUniqueOrThrow({ where: { id: t.child.id } })).position).toBe(1000);
+  });
+
   it("enfant déplacé en racine (parentId=null) sans sectionId : section privée par défaut, visibility private", async () => {
     const t = await makeTree("team", teamSectionId);
     const res = await setPageSection(t.child.id, { parentId: null });
@@ -124,6 +176,24 @@ describe("PATCH /api/pages/[id]", () => {
     const t = await makeTree("team", teamSectionId);
     expect((await PATCH(patchReq({ sectionId: privateSectionId }), patchParams(t.child.id))).status).toBe(400);
     expect((await PATCH(patchReq({ parentId: t.grandchild.id }), patchParams(t.root.id))).status).toBe(400);
+  });
+
+  it("404 sur un parent d'un autre workspace (la garde tient AU NIVEAU ROUTE)", async () => {
+    const t = await makeTree("team", teamSectionId);
+    const other = await seedUserWithWorkspace(`ws-${Date.now()}@x.tld`);
+    const foreign = await prisma.page.create({
+      data: {
+        title: "étrangère",
+        workspaceId: other.workspace.id,
+        ownerId: other.user.id,
+        visibility: "team",
+        position: 1000,
+      },
+    });
+
+    const res = await PATCH(patchReq({ parentId: foreign.id }), patchParams(t.root.id));
+    expect(res.status).toBe(404);
+    expect((await prisma.page.findUniqueOrThrow({ where: { id: t.root.id } })).parentId).toBeNull();
   });
 
   it("régression : PATCH title seul ne touche ni section ni visibility", async () => {

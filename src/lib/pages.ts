@@ -120,6 +120,11 @@ async function collectDescendantIds(
  * - la visibility est RE-DÉRIVÉE (racine : depuis le type de section ; enfant :
  *   depuis le parent) et PROPAGÉE récursivement à tout le sous-arbre, le tout
  *   dans une seule transaction.
+ * - si le RATTACHEMENT change effectivement, la page est mise en DERNIÈRE
+ *   position parmi ses nouveaux frères : sa position venait d'une autre fratrie
+ *   et la ferait s'intercaler au hasard. Le recalcul est conditionnel pour ne
+ *   pas repousser la page en bas sur un PATCH qui ne déplace rien (le DnD de la
+ *   sidebar, lui, envoie `position` seul et ne passe pas ici).
  */
 export async function setPageSection(
   pageId: string,
@@ -188,9 +193,33 @@ export async function setPageSection(
       nextSectionId = resolved;
     }
 
+    // MAX + 1 comme createPage (Page n'utilise pas nextPosition), scopé à la
+    // fratrie cible : les enfants d'un parent, ou les racines d'une section.
+    let nextPositionValue: number | undefined;
+    const containerChanged =
+      nextParentId !== current.parentId || nextSectionId !== current.sectionId;
+    if (containerChanged) {
+      const last = await tx.page.findFirst({
+        where: {
+          id: { not: pageId },
+          workspaceId: current.workspaceId,
+          parentId: nextParentId,
+          ...(nextParentId === null && nextSectionId ? { sectionId: nextSectionId } : {}),
+        },
+        orderBy: { position: "desc" },
+        select: { position: true },
+      });
+      nextPositionValue = (last?.position ?? 0) + 1;
+    }
+
     const page = await tx.page.update({
       where: { id: pageId },
-      data: { parentId: nextParentId, sectionId: nextSectionId, visibility: nextVisibility },
+      data: {
+        parentId: nextParentId,
+        sectionId: nextSectionId,
+        visibility: nextVisibility,
+        ...(nextPositionValue === undefined ? {} : { position: nextPositionValue }),
+      },
     });
 
     // Propager la visibility à tout le sous-arbre (dénormalisation).
