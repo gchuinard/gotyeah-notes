@@ -30,9 +30,16 @@ export default function AppShell({ children, user }: Props) {
   return (
     <>
       <Sidebar user={user} />
-      <main className="flex-1 overflow-y-auto">
+      {/* <main> empilait Header et contenu en FLUX : un enfant en `h-full` (DatabaseShell,
+          SettingsPage, l'accueil) réclamait alors 100 % de <main> sans déduire le Header,
+          et débordait de sa hauteur exacte — d'où une 2e barre verticale parasite, qui ne
+          faisait défiler que ces 56 px. `flex flex-col` fait partager la hauteur au lieu de
+          l'empiler ; le `h-full` se résout désormais contre la zone restante.
+          <main> RESTE le conteneur défilant : le Header est `sticky` par-dessus lui, et son
+          fond translucide + backdrop-blur n'a d'effet que si le contenu passe derrière. */}
+      <main className="flex-1 flex flex-col overflow-y-auto">
         <Header user={user} />
-        {children}
+        <div className="flex-1 min-h-0">{children}</div>
       </main>
       <SearchPalette />
     </>
