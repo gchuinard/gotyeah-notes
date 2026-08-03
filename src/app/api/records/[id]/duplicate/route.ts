@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
-import { checkRecordAccess } from "@/lib/workspace";
+import { checkRecordAccess, hasRole } from "@/lib/workspace";
 import { nextPosition } from "@/lib/positions";
 import { parseRecord } from "@/lib/db";
 
@@ -19,6 +19,9 @@ export async function POST(
   const { id } = await params;
   const access = await checkRecordAccess(id, user.id);
   if (!access) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!hasRole(access.membership, "editor")) {
+    return NextResponse.json({ error: "Rôle insuffisant" }, { status: 403 });
+  }
 
   const src = access.record;
   const { databaseId } = access;

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
-import { getMembership } from "@/lib/workspace";
+import { getMembership, hasRole } from "@/lib/workspace";
 
 const createSectionSchema = z.object({
   workspaceId: z.string().min(1),
@@ -46,6 +46,10 @@ export async function POST(req: Request) {
 
   const membership = await getMembership(user.id, workspaceId);
   if (!membership) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  // Créer une section = organiser la sidebar : geste éditeur (seul le DELETE est admin).
+  if (!hasRole(membership, "editor")) {
+    return NextResponse.json({ error: "Rôle insuffisant" }, { status: 403 });
+  }
 
   const last = await prisma.section.findFirst({
     where: { workspaceId },

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
-import { checkViewAccess } from "@/lib/workspace";
+import { checkViewAccess, hasRole } from "@/lib/workspace";
 import { serializeView, parseView, type ViewConfig } from "@/lib/db";
 
 const patchViewSchema = z.object({
@@ -36,6 +36,9 @@ export async function PATCH(
 
   const access = await checkViewAccess(id, user.id);
   if (!access) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!hasRole(access.membership, "editor")) {
+    return NextResponse.json({ error: "Rôle insuffisant" }, { status: 403 });
+  }
 
   const { name, config, position } = result.data;
 
@@ -61,6 +64,10 @@ export async function DELETE(
   const { id } = await params;
   const access = await checkViewAccess(id, user.id);
   if (!access) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  // Suppression DÉFINITIVE (View sans corbeille) : admin.
+  if (!hasRole(access.membership, "admin")) {
+    return NextResponse.json({ error: "Rôle insuffisant" }, { status: 403 });
+  }
 
   const viewCount = await prisma.view.count({
     where: { databaseId: access.databaseId },

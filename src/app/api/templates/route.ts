@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
-import { getMembership } from "@/lib/workspace";
+import { getMembership, hasRole } from "@/lib/workspace";
 import { BUILTIN_TEMPLATES, parseTemplateRow } from "@/lib/templates";
 
 export async function GET(req: Request) {
@@ -59,6 +59,10 @@ export async function POST(req: Request) {
 
   const membership = await getMembership(user.id, workspaceId);
   if (!membership) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  // Préparer un modèle n'est pas destructif : geste éditeur (seul le DELETE est admin).
+  if (!hasRole(membership, "editor")) {
+    return NextResponse.json({ error: "Rôle insuffisant" }, { status: 403 });
+  }
 
   const template = await prisma.template.create({
     data: {

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
-import { getMembership } from "@/lib/workspace";
+import { getMembership, hasRole } from "@/lib/workspace";
 import { createPage } from "@/lib/pages";
 import { prisma } from "@/lib/prisma";
 
@@ -51,6 +51,9 @@ export async function POST(req: Request) {
   }
   const membership = await getMembership(user.id, workspaceId);
   if (!membership) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!hasRole(membership, "editor")) {
+    return NextResponse.json({ error: "Rôle insuffisant" }, { status: 403 });
+  }
 
   const page = await createPage({ title, parentId, workspaceId, ownerId: user.id, sectionId });
   return NextResponse.json(page);

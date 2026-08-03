@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
-import { getMembership } from "@/lib/workspace";
+import { getMembership, hasRole } from "@/lib/workspace";
 import { deleteSectionReassigningRoots } from "@/lib/pages";
 
 const patchSectionSchema = z.object({
@@ -19,7 +19,7 @@ async function getSectionWithMembership(sectionId: string, userId: string) {
   if (!section) return null;
   const membership = await getMembership(userId, section.workspaceId);
   if (!membership) return null;
-  return section;
+  return { section, membership };
 }
 
 export async function PATCH(
@@ -30,8 +30,12 @@ export async function PATCH(
   if (!user) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
 
   const { id } = await params;
-  const section = await getSectionWithMembership(id, user.id);
-  if (!section) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const access = await getSectionWithMembership(id, user.id);
+  if (!access) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  // Renommer / réordonner la sidebar : geste éditeur.
+  if (!hasRole(access.membership, "editor")) {
+    return NextResponse.json({ error: "Rôle insuffisant" }, { status: 403 });
+  }
 
   // req.json() sans catch renvoyait 500 sur un body vide/malformé → 400 structuré (zod).
   const body = await req.json().catch(() => null);
@@ -62,8 +66,12 @@ export async function DELETE(
   if (!user) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
 
   const { id } = await params;
-  const section = await getSectionWithMembership(id, user.id);
-  if (!section) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const access = await getSectionWithMembership(id, user.id);
+  if (!access) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  // Suppression DÉFINITIVE (Section sans corbeille) : admin.
+  if (!hasRole(access.membership, "admin")) {
+    return NextResponse.json({ error: "Rôle insuffisant" }, { status: 403 });
+  }
 
   const result = await deleteSectionReassigningRoots(id);
   if (!result.ok) {

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
-import { checkRecordAccess } from "@/lib/workspace";
+import { checkRecordAccess, hasRole } from "@/lib/workspace";
 
 /** Restaure un record en corbeille. Refuse si la page hôte est elle-même en corbeille. */
 export async function POST(_: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -12,6 +12,10 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
   // includeTrashed : accéder au record trashé pour l'auth (membership + confidentialité).
   const access = await checkRecordAccess(id, user.id, true);
   if (!access) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  // Restaurer = inverse de la mise à la corbeille, même niveau : editor.
+  if (!hasRole(access.membership, "editor")) {
+    return NextResponse.json({ error: "Rôle insuffisant" }, { status: 403 });
+  }
 
   // On ne restaure pas un record dans une page hôte encore en corbeille : restaurer la page.
   const host = await prisma.record.findUnique({

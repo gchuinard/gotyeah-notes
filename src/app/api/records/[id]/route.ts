@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
-import { checkRecordAccess } from "@/lib/workspace";
+import { checkRecordAccess, hasRole } from "@/lib/workspace";
 import { validateRelationValues } from "@/lib/relations";
 import {
   serializeRecord,
@@ -73,6 +73,10 @@ export async function PATCH(
 
   const access = await checkRecordAccess(id, user.id);
   if (!access) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  // Gate AVANT le diff des révisions et la transaction : un refus n'écrit rien.
+  if (!hasRole(access.membership, "editor")) {
+    return NextResponse.json({ error: "Rôle insuffisant" }, { status: 403 });
+  }
 
   const {
     title,
@@ -196,6 +200,10 @@ export async function DELETE(
 
   const access = await checkRecordAccess(id, user.id, permanent);
   if (!access) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  // Double gate : corbeille (réversible) = editor, ?permanent=1 (définitif) = admin.
+  if (!hasRole(access.membership, permanent ? "admin" : "editor")) {
+    return NextResponse.json({ error: "Rôle insuffisant" }, { status: 403 });
+  }
 
   if (permanent) {
     await prisma.record.delete({ where: { id } });
