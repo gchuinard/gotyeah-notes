@@ -175,6 +175,43 @@ export async function getMembership(userId: string, workspaceId: string) {
   });
 }
 
+export type WorkspaceRole = "admin" | "editor" | "viewer";
+
+export const WORKSPACE_ROLES: WorkspaceRole[] = ["admin", "editor", "viewer"];
+
+const ROLE_RANK: Record<WorkspaceRole, number> = { viewer: 0, editor: 1, admin: 2 };
+
+/**
+ * Rôles hiérarchiques : admin ⊇ editor ⊇ viewer. Tolère null (résultat brut de
+ * getMembership) et un role inconnu en base (→ false, jamais d'exception).
+ * Le mapping bool → 403 reste dans les routes, comme le mapping null → 404.
+ */
+export function hasRole(
+  membership: { role: string } | null | undefined,
+  required: WorkspaceRole
+): boolean {
+  if (!membership) return false;
+  const rank = ROLE_RANK[membership.role as WorkspaceRole];
+  return rank !== undefined && rank >= ROLE_RANK[required];
+}
+
+/**
+ * Pour les routes SANS contexte workspace (/api/upload, /api/config) : le rôle
+ * étant par-workspace, on approxime par « required quelque part » — un user
+ * lecteur-partout ne peut ni uploader ni toucher la config d'instance.
+ */
+export async function hasRoleInAnyWorkspace(
+  userId: string,
+  required: WorkspaceRole
+): Promise<boolean> {
+  const allowed = WORKSPACE_ROLES.filter((r) => ROLE_RANK[r] >= ROLE_RANK[required]);
+  const membership = await prisma.membership.findFirst({
+    where: { userId, role: { in: allowed } },
+    select: { role: true },
+  });
+  return membership !== null;
+}
+
 export async function createWorkspaceWithDefaults(name: string, userId: string) {
   return prisma.$transaction(async (tx) => {
     const workspace = await tx.workspace.create({
