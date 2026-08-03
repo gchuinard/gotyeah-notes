@@ -212,6 +212,68 @@ export async function hasRoleInAnyWorkspace(
   return membership !== null;
 }
 
+/**
+ * Change le rôle d'un membre. Garde-fou « dernier admin » : rétrograder le seul
+ * admin laisserait l'espace orphelin → refus. Count + update dans la MÊME
+ * transaction (deux rétrogradations concurrentes hors transaction passeraient
+ * toutes les deux le count). Union non-levante, façon setPageSection.
+ */
+export async function updateMemberRole(
+  workspaceId: string,
+  targetUserId: string,
+  role: WorkspaceRole
+): Promise<
+  | { ok: true; membership: { userId: string; role: string } }
+  | { ok: false; code: "not_found" | "last_admin" }
+> {
+  return prisma.$transaction(async (tx) => {
+    const target = await tx.membership.findUnique({
+      where: { userId_workspaceId: { userId: targetUserId, workspaceId } },
+      select: { role: true },
+    });
+    if (!target) return { ok: false as const, code: "not_found" as const };
+
+    if (target.role === "admin" && role !== "admin") {
+      const admins = await tx.membership.count({ where: { workspaceId, role: "admin" } });
+      if (admins <= 1) return { ok: false as const, code: "last_admin" as const };
+    }
+
+    const updated = await tx.membership.update({
+      where: { userId_workspaceId: { userId: targetUserId, workspaceId } },
+      data: { role },
+      select: { userId: true, role: true },
+    });
+    return { ok: true as const, membership: updated };
+  });
+}
+
+/**
+ * Retire un membre de l'espace (y compris soi-même = quitter l'espace).
+ * Même garde-fou transactionnel « dernier admin » que updateMemberRole.
+ */
+export async function removeMember(
+  workspaceId: string,
+  targetUserId: string
+): Promise<{ ok: true } | { ok: false; code: "not_found" | "last_admin" }> {
+  return prisma.$transaction(async (tx) => {
+    const target = await tx.membership.findUnique({
+      where: { userId_workspaceId: { userId: targetUserId, workspaceId } },
+      select: { role: true },
+    });
+    if (!target) return { ok: false as const, code: "not_found" as const };
+
+    if (target.role === "admin") {
+      const admins = await tx.membership.count({ where: { workspaceId, role: "admin" } });
+      if (admins <= 1) return { ok: false as const, code: "last_admin" as const };
+    }
+
+    await tx.membership.delete({
+      where: { userId_workspaceId: { userId: targetUserId, workspaceId } },
+    });
+    return { ok: true as const };
+  });
+}
+
 export async function createWorkspaceWithDefaults(name: string, userId: string) {
   return prisma.$transaction(async (tx) => {
     const workspace = await tx.workspace.create({
