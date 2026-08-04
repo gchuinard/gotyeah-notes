@@ -112,7 +112,7 @@ export const BUILTIN_TEMPLATES: TemplateShape[] = [
       { name: "Priorité", type: "select", config: { type: "select", options: SCRUM_PRIORITY } },
       { name: "Épic", type: "select", config: { type: "select", options: SCRUM_EPICS } },
       { name: "Story points", type: "number", config: { type: "number", format: "integer" } },
-      { name: "Assigné", type: "text", config: { type: "text" } },
+      { name: "Assigné", type: "user", config: { type: "user" } },
     ],
     sections: [
       { id: "desc", label: "Description" },
@@ -153,7 +153,7 @@ export const BUILTIN_TEMPLATES: TemplateShape[] = [
           ],
         },
       },
-      { name: "Assigné", type: "text", config: { type: "text" } },
+      { name: "Assigné", type: "user", config: { type: "user" } },
       { name: "Échéance", type: "date", config: { type: "date", includeTime: false } },
     ],
     sections: [
@@ -183,7 +183,7 @@ export const BUILTIN_TEMPLATES: TemplateShape[] = [
           ],
         },
       },
-      { name: "Assigné", type: "text", config: { type: "text" } },
+      { name: "Assigné", type: "user", config: { type: "user" } },
       { name: "Échéance", type: "date", config: { type: "date", includeTime: false } },
     ],
     sections: [

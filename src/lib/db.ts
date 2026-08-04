@@ -49,7 +49,17 @@ export type PropertyType =
   | "checkbox"
   | "url"
   | "email"
-  | "relation";
+  | "relation"
+  | "user";
+
+/**
+ * Types dont la valeur de record est un TABLEAU. ⚠️ À consulter partout où l'on
+ * décide « scalaire ou liste » (drop kanban, filtres, actions groupées) : écrire
+ * une string dans un champ tableau corrompt le record SANS erreur de compilation.
+ */
+export function isMultiValueType(type: string): boolean {
+  return type === "multiselect" || type === "user";
+}
 
 /** Une option d'un champ select ou multiselect. */
 export type SelectOption = {
@@ -65,6 +75,11 @@ export type SelectOption = {
  * relation : la valeur du record est un string[] d'ids de Record appartenant à
  * `targetDatabaseId` (même workspace). Pas de backlink en v1 ; un id dont le
  * record a été supprimé est un « lien mort » toléré à l'affichage.
+ *
+ * user : config VIDE à dessein. Les candidats sont les MEMBRES de l'espace hôte
+ * (déduit de database → page → workspaceId) : figer une liste dans le config se
+ * périmerait à chaque arrivée/départ, et dupliquer le workspaceId créerait une
+ * seconde source de vérité.
  */
 export type PropertyConfig =
   | { type: "select";      options: SelectOption[] }
@@ -72,7 +87,7 @@ export type PropertyConfig =
   | { type: "number";      format: "integer" | "decimal" | "currency" | "percent" }
   | { type: "date";        includeTime: boolean }
   | { type: "relation";    targetDatabaseId: string }
-  | { type: "title" | "text" | "checkbox" | "url" | "email" };
+  | { type: "title" | "text" | "checkbox" | "url" | "email" | "user" };
 
 /**
  * Valeur possible pour une propriété user dans Record.properties.
@@ -82,6 +97,7 @@ export type PropertyConfig =
  * - select          → string (SelectOption.id)
  * - multiselect     → string[] (SelectOption.id[])
  * - relation        → string[] (Record.id[] de la database cible)
+ * - user            → string[] (User.id[] des membres de l'espace hôte)
  * - date            → string ISO 8601
  * - null = la propriété existe dans le schéma mais n'a pas de valeur sur ce record
  */

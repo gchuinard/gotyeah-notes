@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 import { checkRecordAccess, hasRole } from "@/lib/workspace";
 import { validateRelationValues } from "@/lib/relations";
+import { validateUserValues } from "@/lib/assignees";
 import {
   serializeRecord,
   parseRecord,
@@ -99,6 +100,16 @@ export async function PATCH(
     );
     if (!relationCheck.ok) {
       return NextResponse.json({ error: relationCheck.error }, { status: 400 });
+    }
+    // Sur le patch BRUT, jamais sur le merge : un assigné devenu ex-membre ne
+    // doit pas bloquer les écritures suivantes sur les autres champs.
+    const assigneeCheck = await validateUserValues(
+      access.workspaceId,
+      access.databaseId,
+      rawProperties as RecordProperties
+    );
+    if (!assigneeCheck.ok) {
+      return NextResponse.json({ error: assigneeCheck.error }, { status: 400 });
     }
     const existing = parseRecord(access.record).properties;
     mergedProperties = mergeRecordProperties(existing, rawProperties as RecordProperties);

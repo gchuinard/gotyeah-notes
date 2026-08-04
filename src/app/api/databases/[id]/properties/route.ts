@@ -22,6 +22,7 @@ const PROPERTY_TYPES = [
   "url",
   "email",
   "relation",
+  "user",
 ] as const;
 
 const createPropertySchema = z.object({

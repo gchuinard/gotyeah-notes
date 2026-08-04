@@ -55,6 +55,8 @@ type Props = {
   view: ParsedView;
   properties: ParsedDatabaseProperty[];
   readOnly?: boolean;
+  /** Espace de la database — source des membres pour les propriétés « utilisateur ». */
+  workspaceId?: string;
 };
 
 type KanbanCol = {
@@ -175,10 +177,12 @@ function KanbanCardContent({
   record,
   previewProps,
   isDragging = false,
+  workspaceId,
 }: {
   record: ParsedRecord;
   previewProps: ParsedDatabaseProperty[];
   isDragging?: boolean;
+  workspaceId?: string;
 }) {
   const visibleProps = previewProps.filter(
     (p) => record.properties[p.id] !== undefined && record.properties[p.id] !== null
@@ -200,7 +204,7 @@ function KanbanCardContent({
             <div key={p.id} className="flex items-center gap-1.5 min-w-0 text-xs">
               <span className="shrink-0 text-[var(--text-muted)] truncate max-w-[90px]">{p.name}</span>
               <div className="min-w-0">
-                <CellDisplay property={p} record={record} />
+                <CellDisplay property={p} record={record} workspaceId={workspaceId} />
               </div>
             </div>
           ))}
@@ -225,6 +229,7 @@ function KanbanCard({
   onDelete,
   onDuplicate,
   readOnly,
+  workspaceId,
 }: {
   record: ParsedRecord;
   /** Colonne de rendu : un record multiselect apparaît dans plusieurs colonnes. */
@@ -239,6 +244,7 @@ function KanbanCard({
   onDelete: () => void;
   onDuplicate: () => void;
   readOnly: boolean;
+  workspaceId?: string;
 }) {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleValue, setTitleValue] = useState(record.title);
@@ -373,7 +379,7 @@ function KanbanCard({
                 </span>
                 {readOnly ? (
                   <div className="min-w-0 max-w-full">
-                    <CellDisplay property={p} record={record} />
+                    <CellDisplay property={p} record={record} workspaceId={workspaceId} />
                   </div>
                 ) : (
                   <div
@@ -384,6 +390,7 @@ function KanbanCard({
                     <Cell
                       property={p}
                       record={record}
+                      workspaceId={workspaceId}
                       onSave={(value) => onPropSave?.(record.id, p, value)}
                       onEditingChange={(editing) =>
                         setEditingPropId((prev) => (editing ? p.id : prev === p.id ? null : prev))
@@ -417,6 +424,7 @@ export function KanbanColView({
   onRenameOption,
   createOnlyInUnassigned,
   readOnly = false,
+  workspaceId,
 }: {
   col: KanbanCol;
   previewProps: ParsedDatabaseProperty[];
@@ -432,6 +440,7 @@ export function KanbanColView({
   onRenameOption: (optionId: string, newName: string) => void;
   createOnlyInUnassigned: boolean;
   readOnly?: boolean;
+  workspaceId?: string;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: col.id });
 
@@ -534,6 +543,7 @@ export function KanbanColView({
               onDelete={() => onDeleteRecord(record)}
               onDuplicate={() => onDuplicateRecord(record)}
               readOnly={readOnly}
+              workspaceId={workspaceId}
             />
           ))}
           {col.records.length === 0 && (
@@ -644,7 +654,7 @@ function SprintBoardHeader({
 
 // ─── KanbanView (main) ────────────────────────────────────────────────────────
 
-export default function KanbanView({ databaseId, view, properties, readOnly = false }: Props) {
+export default function KanbanView({ databaseId, view, properties, readOnly = false, workspaceId }: Props) {
   const { confirm, alert } = useDialog();
   const {
     data: records,
@@ -1206,6 +1216,7 @@ export default function KanbanView({ databaseId, view, properties, readOnly = fa
                 onRenameOption={handleRenameOption}
                 createOnlyInUnassigned={view.config.createInUnassignedOnly ?? false}
                 readOnly={readOnly}
+                workspaceId={workspaceId}
               />
             ))}
           </div>
@@ -1213,7 +1224,7 @@ export default function KanbanView({ databaseId, view, properties, readOnly = fa
           <DragOverlay>
             {activeRecord ? (
               <div className="cursor-grabbing shadow-xl">
-                <KanbanCardContent record={activeRecord} previewProps={previewProps} />
+                <KanbanCardContent record={activeRecord} previewProps={previewProps} workspaceId={workspaceId} />
               </div>
             ) : null}
           </DragOverlay>
@@ -1226,6 +1237,7 @@ export default function KanbanView({ databaseId, view, properties, readOnly = fa
           record={selectedRecord}
           properties={properties}
           databaseId={databaseId}
+          workspaceId={workspaceId}
           onClose={() => setSelectedRecordId(null)}
           readOnly={readOnly}
         />
@@ -1239,6 +1251,7 @@ export default function KanbanView({ databaseId, view, properties, readOnly = fa
           selectedIds={selectedIds}
           mutate={mutate}
           onClear={clearSelection}
+          workspaceId={workspaceId}
         />
       )}
     </div>

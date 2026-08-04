@@ -28,7 +28,7 @@ type Form = {
   kanbanGroupProperty: string;
 };
 
-const COLUMN_TYPES = ["text", "number", "select", "multiselect", "date", "checkbox", "url", "email"];
+const COLUMN_TYPES = ["text", "number", "select", "multiselect", "date", "checkbox", "url", "email", "user"];
 // Palette partagée (lib/propertyColors) : une couleur hors palette serait refusée
 // par la validation serveur, rendant les options d'une DB scaffoldée non éditables.
 const OPTION_COLORS: readonly string[] = SELECT_COLORS;
