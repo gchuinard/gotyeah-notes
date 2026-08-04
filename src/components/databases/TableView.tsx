@@ -1,7 +1,7 @@
 "use client";
 import useSWR, { mutate as globalMutate } from "swr";
 import { useCallback, useMemo, useRef, useState, useEffect } from "react";
-import { Plus, Trash2, GripVertical } from "lucide-react";
+import { Plus, GripVertical } from "lucide-react";
 import {
   DndContext,
   DragEndEvent,
@@ -26,6 +26,7 @@ import AddPropertyModal from "@/components/databases/AddPropertyModal";
 import PropertyPopover from "@/components/databases/PropertyPopover";
 import RecordPanel from "@/components/databases/RecordPanel";
 import BulkActionBar from "@/components/databases/BulkActionBar";
+import CardActions from "@/components/databases/CardActions";
 import { SelectCheckbox } from "@/components/databases/SelectCheckbox";
 import { useRecordDeepLink } from "@/lib/client/useRecordDeepLink";
 
@@ -36,7 +37,12 @@ const DEFAULT_TITLE_WIDTH = 250;
 const MIN_COL_WIDTH = 80;
 const MAX_COL_WIDTH = 600;
 // Fixed-width columns (row# + delete + add-property)
-const FIXED_COLS_WIDTH = 56 + 32 + 40;
+// Colonnes non redimensionnables : poignée+index, actions de ligne (2 icônes),
+// « + propriété ». ⚠️ En table-layout:fixed la largeur vient de la PREMIÈRE
+// ligne (le <thead>) : le <th> correspondant doit porter la même valeur, sinon
+// les icônes débordent de la colonne.
+const ROW_ACTIONS_WIDTH = 52;
+const FIXED_COLS_WIDTH = 56 + ROW_ACTIONS_WIDTH;
 
 function getColWidth(propId: string, propType: string, widths: Record<string, number>): number {
   if (propId in widths) return widths[propId];
@@ -140,6 +146,7 @@ function SortableRow({
   onToggleSelect,
   onSave,
   onDelete,
+  onDuplicate,
   onTitleClick,
   readOnly,
   workspaceId,
@@ -152,6 +159,7 @@ function SortableRow({
   onToggleSelect: () => void;
   onSave: (property: ParsedDatabaseProperty, value: PropertyValue | null) => void;
   onDelete: () => void;
+  onDuplicate: () => void;
   onTitleClick: () => void;
   readOnly: boolean;
   workspaceId?: string;
@@ -242,17 +250,9 @@ function SortableRow({
         );
       })}
 
-      {/* Delete action — fixed width, not resizable */}
-      <td className="px-1 py-1.5" style={{ width: 32, minWidth: 32 }}>
-        {!readOnly && (
-          <button
-            onClick={onDelete}
-            className="opacity-0 group-hover:opacity-100 text-[var(--text-muted)] hover:text-red-500 transition-opacity"
-            title="Supprimer l'enregistrement"
-          >
-            <Trash2 size={13} />
-          </button>
-        )}
+      {/* Row actions (dupliquer / supprimer) — fixed width, not resizable */}
+      <td className="px-1 py-1.5" style={{ width: ROW_ACTIONS_WIDTH, minWidth: ROW_ACTIONS_WIDTH }}>
+        {!readOnly && <CardActions onDuplicate={onDuplicate} onDelete={onDelete} />}
       </td>
     </tr>
   );
@@ -534,6 +534,24 @@ export default function TableView({
 
   // ── Delete row ────────────────────────────────────────────────────────────
 
+
+  // ── Duplicate record ────────────────────────────────────────────────────────
+  // Copie SERVEUR atomique (titre « (copie) », propriétés, corps, sprint) :
+  // aucune reconstruction côté client, donc rien à garder en phase.
+
+  const handleDuplicateRecord = useCallback(
+    async (record: ParsedRecord) => {
+      try {
+        const res = await fetch(`/api/records/${record.id}/duplicate`, { method: "POST" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        mutate();
+      } catch (err) {
+        console.error("Échec de la duplication", err);
+      }
+    },
+    [mutate]
+  );
+
   const handleDeleteRecord = useCallback(
     async (record: ParsedRecord) => {
       if (!records) return;
@@ -694,8 +712,12 @@ export default function TableView({
                   );
                 })}
 
-                {/* Add property — fixed, not resizable */}
-                <th className="px-2 py-2" style={{ width: 40, minWidth: 40 }}>
+                {/* Add property — fixed, not resizable. C'est la MÊME colonne que
+                    les actions de ligne du corps : sa largeur les gouverne. */}
+                <th
+                  className="px-2 py-2"
+                  style={{ width: ROW_ACTIONS_WIDTH, minWidth: ROW_ACTIONS_WIDTH }}
+                >
                   {!readOnly && (
                     <button
                       onClick={() => setShowAddProperty(true)}
@@ -734,6 +756,7 @@ export default function TableView({
                       onToggleSelect={() => toggleSelect(record.id)}
                       onSave={(property, value) => handleSave(record, property, value)}
                       onDelete={() => handleDeleteRecord(record)}
+                      onDuplicate={() => handleDuplicateRecord(record)}
                       onTitleClick={() => setSelectedRecordId(record.id)}
                       readOnly={readOnly}
                       workspaceId={workspaceId}

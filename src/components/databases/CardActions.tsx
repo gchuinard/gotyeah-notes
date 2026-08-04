@@ -25,12 +25,21 @@ export default function CardActions({
   className = "",
 }: {
   onDuplicate: () => void;
-  onDelete: () => void;
+  /** Omis = pas de bouton Supprimer. Galerie et Calendrier n'en exposaient aucun ;
+   *  ce lot n'ajoute que la duplication, il n'invente pas une affordance de
+   *  suppression là où il n'y en avait pas. */
+  onDelete?: () => void;
   /** Positionnement/layout du conteneur (absolute pour le kanban, inline pour le backlog). */
   className?: string;
 }) {
   return (
     <div
+      // ⚠️ Sur le CONTENEUR, pas seulement sur les boutons : la gouttière entre
+      // les deux icônes — et toute zone du conteneur non couverte par un bouton —
+      // laisserait sinon le clic remonter au parent, qui ouvre la carte (kanban),
+      // ou pire CRÉE un enregistrement (case du calendrier).
+      onClick={(e) => e.stopPropagation()}
+      onPointerDown={(e) => e.stopPropagation()}
       className={[
         "flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity",
         className,
@@ -46,16 +55,18 @@ export default function CardActions({
       >
         <Copy size={14} />
       </button>
-      <button
-        type="button"
-        aria-label="Supprimer"
-        title="Supprimer"
-        onClick={withStopPropagation(onDelete)}
-        onPointerDown={(e) => e.stopPropagation()}
-        className="p-0.5 rounded text-[var(--text-muted)] hover:text-red-500 hover:bg-[var(--surface-hover)]"
-      >
-        <Trash2 size={14} />
-      </button>
+      {onDelete && (
+        <button
+          type="button"
+          aria-label="Supprimer"
+          title="Supprimer"
+          onClick={withStopPropagation(onDelete)}
+          onPointerDown={(e) => e.stopPropagation()}
+          className="p-0.5 rounded text-[var(--text-muted)] hover:text-red-500 hover:bg-[var(--surface-hover)]"
+        >
+          <Trash2 size={14} />
+        </button>
+      )}
     </div>
   );
 }

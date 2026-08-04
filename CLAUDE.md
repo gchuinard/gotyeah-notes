@@ -170,7 +170,9 @@ src/
 │       ├── Cell.tsx                 # Édition inline par type (+ SelectBadge, réutilisé ailleurs)
 │       ├── BulkActionBar.tsx        # Barre flottante de sélection multiple (N PATCH optimistes)
 │       ├── SelectCheckbox.tsx       # Case de multi-sélection ronde, partagée Table/Kanban
-│       ├── CardActions.tsx          # Dupliquer / Supprimer au survol (Kanban + Backlog)
+│       ├── CardActions.tsx          # Dupliquer / Supprimer au survol — les 5 vues.
+│       │                            #   `onDelete` OPTIONNEL : Galerie et Calendrier
+│       │                            #   n'exposent que la duplication
 │       ├── PropertyPopover.tsx · AddPropertyModal.tsx · SortControls.tsx · FilterControls.tsx
 │       └── portal.tsx               # Composant Portal partagé
 └── lib/
@@ -397,9 +399,9 @@ Toutes les variables réellement lues (`process.env`). Source de vérité : `.en
 - [x] ~~**MCP — édition fine des options select**~~ : fait (2026-07-30). `notes_update_select_option` (renommer / recolorer / réordonner) + `notes_remove_select_option` (refus serveur si l'option est encore référencée, traduit en consigne).
 - [x] ~~**MCP — trous de la matrice CRUD (corbeille, sections, workspaces)**~~ : fait (2026-07-30). 12 outils ajoutés (49 au total), descriptions de suppression corrigées, table d'entités + test anti-régression (`notes_entities.py`). ⚠️ **Pas encore déployé ni rafraîchi côté connecteur claude.ai.**
 - [x] ~~**Kanban regroupé par assigné + filtre « Moi » (lot B)**~~ : fait (04/08/2026). Axe `user` groupable (colonnes = membres, via `buildKanbanColumns`), colonne « Membre retiré » pour les assignés partis, jeton `@me` résolu client ET serveur.
-- [ ] **`View.config.createInUnassignedOnly` sans UI** : le flag existe (`lib/db.ts`) et est respecté par le kanban (`KanbanView.tsx`), mais **aucun écran ne l'écrit** — il faut éditer le `config` de la vue à la main. À câbler dans les réglages de vue si on le garde.
-- [ ] **Dupliquer — phase B** : `POST /api/records/[id]/duplicate` (phase A) n'est câblé que dans **KanbanView** et **BacklogView**. Reste à l'exposer dans TableView / GalleryView / CalendarView.
-- [ ] **Migrations Prisma versionnées** : le déploiement applique encore `prisma db push` (pas de dossier `prisma/migrations/`). Bascule vers `migrate deploy` + baseline = PR **#23** (draft).
+- [x] ~~**`View.config.createInUnassignedOnly` sans UI**~~ : fait (04/08/2026). Bascule « Créer seulement dans « Sans valeur » » dans le menu ⋯ de l'onglet de vue (`DatabaseShell > TabMenu`), proposée uniquement sur une vue kanban.
+- [x] ~~**Dupliquer — phase B**~~ : fait (04/08/2026). `CardActions` est désormais utilisé par les 5 vues ; son `onDelete` est **optionnel** (Galerie et Calendrier n'exposaient aucune suppression, ce lot n'en a pas inventé une).
+- [ ] **Migrations Prisma versionnées** : le déploiement applique encore `prisma db push`. PR **#23**, rebasée sur main le 04/08, baseline `0_init` **régénérée** depuis le schéma courant (l'ancienne datait de juillet et manquait `RecordRevision`, `patchNotesPageId`, `releaseNotes`, l'index `Session.expiresAt`). ⚠️ **La baseline doit décrire la prod TELLE QU'ELLE EST** : mettre le delta dans une 2e migration ferait échouer `migrate deploy` sur des colonnes déjà créées par `db push`. Le `migrate resolve --applied 0_init` se joue via le workflow **`baseline-prisma.yml`** (`workflow_dispatch`, confirmation `BASELINE`, snapshot vérifié, verrou `deploy-prod` partagé avec la MEP) — **à lancer AVANT le merge**.
 - [x] ~~**CI aveugle sur `fix/**`, `docs/**`, `chore/**`**~~ : fait (18/07/2026, PR #39). `ci.yml` déclenche désormais au push sur `main`, `feat/**`, `fix/**`, `docs/**` et `chore/**`.
 - [ ] (optionnel) UI Settings « Jetons d'accès » si un jour on veut un PAT en complément de l'IdP.
 

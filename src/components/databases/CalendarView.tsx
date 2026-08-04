@@ -5,6 +5,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { ParsedDatabaseProperty, ParsedRecord, ParsedView, SelectOption } from "@/lib/db";
 import { applyViewConfig } from "@/lib/client/viewFilters";
 import { colorClass } from "@/components/databases/Cell";
+import CardActions from "@/components/databases/CardActions";
 import RecordPanel from "@/components/databases/RecordPanel";
 import { useRecordDeepLink } from "@/lib/client/useRecordDeepLink";
 
@@ -129,23 +130,36 @@ function RecordPill({
   record,
   properties,
   onClick,
+  onDuplicate,
 }: {
   record: ParsedRecord;
   properties: ParsedDatabaseProperty[];
   onClick: (r: ParsedRecord) => void;
+  /** Omis en lecture seule : la pilule n'expose alors aucune action. */
+  onDuplicate?: (r: ParsedRecord) => void;
 }) {
   const cls = pillColorClass(record, properties);
   const title = record.title || "Sans titre";
   const display = title.length > 22 ? title.slice(0, 22) + "…" : title;
 
+  // Les actions vivent HORS du <button> (un bouton ne peut pas en contenir un
+  // autre) : wrapper positionné, pilule dessous, icônes en surimpression.
   return (
-    <button
-      onClick={(e) => { e.stopPropagation(); onClick(record); }}
-      className={`w-full text-left text-xs rounded px-1.5 py-0.5 truncate leading-5 ${cls} hover:opacity-80 transition-opacity`}
-      title={title}
-    >
-      {display}
-    </button>
+    <div className="group relative">
+      <button
+        onClick={(e) => { e.stopPropagation(); onClick(record); }}
+        className={`w-full text-left text-xs rounded px-1.5 py-0.5 truncate leading-5 ${cls} hover:opacity-80 transition-opacity`}
+        title={title}
+      >
+        {display}
+      </button>
+      {onDuplicate && (
+        <CardActions
+          className="absolute inset-y-0 right-0.5 z-10"
+          onDuplicate={() => onDuplicate(record)}
+        />
+      )}
+    </div>
   );
 }
 
@@ -158,6 +172,7 @@ function CalendarCell({
   dayRecords,
   properties,
   onRecordClick,
+  onDuplicateRecord,
   onCellClick,
   readOnly,
 }: {
@@ -167,6 +182,7 @@ function CalendarCell({
   dayRecords: ParsedRecord[];
   properties: ParsedDatabaseProperty[];
   onRecordClick: (r: ParsedRecord) => void;
+  onDuplicateRecord: (r: ParsedRecord) => void;
   onCellClick: (d: Date) => void;
   readOnly: boolean;
 }) {
@@ -198,7 +214,13 @@ function CalendarCell({
 
       {/* Record pills */}
       {visible.map((r) => (
-        <RecordPill key={r.id} record={r} properties={properties} onClick={onRecordClick} />
+        <RecordPill
+          key={r.id}
+          record={r}
+          properties={properties}
+          onClick={onRecordClick}
+          onDuplicate={readOnly ? undefined : onDuplicateRecord}
+        />
       ))}
 
       {overflow > 0 && (
@@ -281,6 +303,22 @@ export default function CalendarView({
     }
     return map;
   }, [displayedRecords, calendarPropId]);
+
+  // ── Duplicate record ────────────────────────────────────────────────────────
+  // Copie SERVEUR atomique (titre « (copie) », propriétés, corps, sprint).
+
+  const handleDuplicateRecord = useCallback(
+    async (record: ParsedRecord) => {
+      try {
+        const res = await fetch(`/api/records/${record.id}/duplicate`, { method: "POST" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        mutate();
+      } catch (err) {
+        console.error("Échec de la duplication", err);
+      }
+    },
+    [mutate]
+  );
 
   // ── Record click → panel ─────────────────────────────────────────────────────
 
@@ -441,6 +479,7 @@ export default function CalendarView({
                     dayRecords={dayRecords}
                     properties={properties}
                     onRecordClick={handleRecordClick}
+                    onDuplicateRecord={handleDuplicateRecord}
                     onCellClick={handleCellClick}
                     readOnly={readOnly}
                   />
