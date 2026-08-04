@@ -2,11 +2,14 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import useSWR, { mutate as globalMutate } from "swr";
 import {
   ArrowLeft, User, Users, HardDrive, Palette,
-  Eye, EyeOff, Check,
+  Eye, EyeOff, Check, Trash2, UserPlus,
 } from "lucide-react";
 import type { SessionUser } from "@/lib/session";
+import { useWorkspace, type WorkspaceRole } from "@/contexts/WorkspaceContext";
+import { useDialog } from "@/contexts/DialogContext";
 
 // ─── Themes ──────────────────────────────────────────────────────────────────
 
@@ -28,10 +31,10 @@ const THEMES = [
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const NAV = [
-  { id: "profile",    label: "Profil",       icon: User },
-  { id: "users",      label: "Utilisateurs", icon: Users },
-  { id: "storage",    label: "Stockage",     icon: HardDrive },
-  { id: "appearance", label: "Apparence",    icon: Palette },
+  { id: "profile",    label: "Profil",    icon: User },
+  { id: "users",      label: "Membres",   icon: Users },
+  { id: "storage",    label: "Stockage",  icon: HardDrive },
+  { id: "appearance", label: "Apparence", icon: Palette },
 ] as const;
 
 type Section = (typeof NAV)[number]["id"];
@@ -75,37 +78,6 @@ function SaveButton({ label = "Enregistrer" }: { label?: string }) {
     >
       {label}
     </button>
-  );
-}
-
-function Toggle({ checked, onChange, label, description }: {
-  checked: boolean;
-  onChange: (v: boolean) => void;
-  label: string;
-  description?: string;
-}) {
-  return (
-    <div className="flex items-start justify-between gap-6">
-      <div>
-        <p className="text-sm font-medium text-[var(--text)]">{label}</p>
-        {description && (
-          <p className="text-xs text-[var(--text-muted)] mt-0.5">{description}</p>
-        )}
-      </div>
-      <button
-        type="button"
-        onClick={() => onChange(!checked)}
-        className={`relative shrink-0 w-10 h-5 rounded-full transition-colors ${
-          checked ? "bg-blue-500" : "bg-gray-300"
-        }`}
-      >
-        <span
-          className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
-            checked ? "translate-x-5" : "translate-x-0"
-          }`}
-        />
-      </button>
-    </div>
   );
 }
 
@@ -250,65 +222,216 @@ function ProfileSection({ user }: { user: SessionUser }) {
   );
 }
 
-function UsersSection() {
-  const [openRegistration, setOpenRegistration] = useState(false);
-  const [ssoEnabled, setSsoEnabled]             = useState(false);
-  const [defaultRole, setDefaultRole]           = useState<"viewer" | "editor" | "admin">("editor");
+type Member = {
+  userId: string;
+  role: WorkspaceRole;
+  email: string;
+  displayName: string;
+  createdAt: string;
+};
 
-  const roles = [
-    { id: "viewer" as const,  label: "Lecteur",  description: "Peut lire les pages" },
-    { id: "editor" as const,  label: "Éditeur",  description: "Peut créer et modifier" },
-    { id: "admin"  as const,  label: "Admin",    description: "Accès complet" },
-  ];
+const ROLE_OPTIONS: { id: WorkspaceRole; label: string; description: string }[] = [
+  { id: "viewer", label: "Lecteur", description: "Lecture seule totale" },
+  { id: "editor", label: "Éditeur", description: "Crée et modifie le contenu" },
+  { id: "admin",  label: "Admin",   description: "Structure, suppressions définitives, membres" },
+];
+
+const membersFetcher = (url: string) =>
+  fetch(url).then((r) => {
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+  });
+
+/** Membres de l'ESPACE ACTIF : liste, ajout par email (compte existant), rôle, retrait. */
+function MembersSection({ user }: { user: SessionUser }) {
+  const { activeWorkspace, isAdmin } = useWorkspace();
+  const { confirm } = useDialog();
+  const wsId = activeWorkspace?.id ?? null;
+  const key = wsId ? `/api/workspaces/${wsId}/members` : null;
+  const { data: members, mutate } = useSWR<Member[]>(key, membersFetcher);
+
+  const [email, setEmail]   = useState("");
+  // Moindre privilège : lecteur proposé par défaut, on élève explicitement.
+  const [role, setRole]     = useState<WorkspaceRole>("viewer");
+  const [adding, setAdding] = useState(false);
+  const [error, setError]   = useState<string | null>(null);
+
+  // Se retirer / se rétrograder soi-même change son propre rôle → resynchroniser
+  // la liste des workspaces (badge lecture seule, entrées de nav, etc.).
+  const refreshSelf = (targetUserId: string) => {
+    if (targetUserId === user.id) globalMutate("/api/workspaces");
+  };
+
+  const addMember = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = email.trim();
+    if (!wsId || !trimmed || adding) return;
+    setAdding(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/workspaces/${wsId}/members`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: trimmed, role }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError((body as { error?: string }).error ?? `Erreur ${res.status}`);
+        return;
+      }
+      setEmail("");
+      setRole("viewer");
+      mutate();
+    } catch {
+      setError("Impossible d'ajouter le membre.");
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const changeRole = async (m: Member, newRole: WorkspaceRole) => {
+    if (!wsId || newRole === m.role) return;
+    setError(null);
+    const res = await fetch(`/api/workspaces/${wsId}/members/${m.userId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role: newRole }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setError((body as { error?: string }).error ?? `Erreur ${res.status}`);
+    }
+    mutate();
+    refreshSelf(m.userId);
+  };
+
+  const removeMember = async (m: Member) => {
+    if (!wsId) return;
+    const self = m.userId === user.id;
+    const ok = await confirm({
+      title: self ? "Quitter cet espace ?" : `Retirer ${m.displayName} ?`,
+      message: self
+        ? "Tu perdras l'accès à cet espace (un admin pourra te ré-ajouter)."
+        : `${m.displayName} perdra l'accès à cet espace.`,
+      confirmLabel: self ? "Quitter" : "Retirer",
+      tone: "danger",
+    });
+    if (!ok) return;
+    setError(null);
+    const res = await fetch(`/api/workspaces/${wsId}/members/${m.userId}`, { method: "DELETE" });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setError((body as { error?: string }).error ?? `Erreur ${res.status}`);
+    }
+    mutate();
+    refreshSelf(m.userId);
+  };
+
+  if (!activeWorkspace) {
+    return (
+      <div className="max-w-lg">
+        <SectionTitle title="Membres" description="Aucun espace actif." />
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-lg">
-      <SectionTitle title="Gestion des utilisateurs" description="Contrôlez l'accès et les permissions." />
+      <SectionTitle
+        title={`Membres de « ${activeWorkspace.name} »`}
+        description="Qui a accès à cet espace, et avec quel rôle."
+      />
 
-      <div className="flex flex-col gap-5">
-        <Toggle
-          checked={openRegistration}
-          onChange={setOpenRegistration}
-          label="Inscription ouverte"
-          description="Autorise n'importe qui à créer un compte sans invitation."
-        />
-        <Divider />
-        <Toggle
-          checked={ssoEnabled}
-          onChange={setSsoEnabled}
-          label="SSO / OAuth"
-          description="Connexion via un fournisseur externe (Google, GitHub, etc.)."
-        />
-        <Divider />
-
-        {/* Rôle par défaut */}
-        <div>
-          <p className="text-sm font-medium text-[var(--text)] mb-1">
-            Rôle par défaut pour les nouveaux utilisateurs
-          </p>
-          <p className="text-xs text-[var(--text-muted)] mb-3">
-            Ce rôle est attribué automatiquement à l&apos;inscription.
-          </p>
-          <div className="grid grid-cols-3 gap-2">
-            {roles.map((r) => (
-              <button
-                key={r.id}
-                type="button"
-                onClick={() => setDefaultRole(r.id)}
-                className={`flex flex-col items-start p-3 rounded-lg border text-left transition-colors ${
-                  defaultRole === r.id
-                    ? "border-blue-400 bg-blue-50"
-                    : "border-[var(--border)] hover:border-gray-300"
-                }`}
+      {/* Ajout par email — le compte doit déjà exister (connexion GotYeah). */}
+      {isAdmin && (
+        <>
+          <form onSubmit={addMember} className="flex items-end gap-2 mb-2">
+            <div className="flex-1 flex flex-col gap-1.5">
+              <Label>Ajouter par email</Label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => { setEmail(e.target.value); setError(null); }}
+                placeholder="email@exemple.fr"
+                className={fieldClass}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Rôle</Label>
+              <select
+                value={role}
+                onChange={(e) => setRole(e.target.value as WorkspaceRole)}
+                className={`${fieldClass} w-auto`}
               >
-                <span className={`text-sm font-medium ${defaultRole === r.id ? "text-blue-600" : "text-[var(--text)]"}`}>
-                  {r.label}
-                </span>
-                <span className="text-xs text-[var(--text-muted)] mt-0.5">{r.description}</span>
+                {ROLE_OPTIONS.map((r) => (
+                  <option key={r.id} value={r.id}>{r.label}</option>
+                ))}
+              </select>
+            </div>
+            <button
+              type="submit"
+              disabled={adding || !email.trim()}
+              className="shrink-0 flex items-center gap-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded-lg px-3 py-2 text-sm font-medium transition-colors disabled:opacity-50"
+            >
+              <UserPlus size={14} />
+              {adding ? "Ajout…" : "Ajouter"}
+            </button>
+          </form>
+          <p className="text-xs text-[var(--text-muted)] mb-4">
+            Le compte doit déjà exister (la personne se connecte une première fois), puis tu
+            l&apos;ajoutes ici. Lecteur par défaut : élève son rôle explicitement si besoin.
+          </p>
+        </>
+      )}
+
+      {error && <p className="text-xs text-red-500 mb-3">{error}</p>}
+
+      <div className="flex flex-col divide-y divide-[var(--border)] border border-[var(--border)] rounded-lg">
+        {(members ?? []).map((m) => (
+          <div key={m.userId} className="flex items-center gap-3 px-3 py-2.5">
+            <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-sm font-bold text-blue-600 shrink-0">
+              {m.displayName.charAt(0).toUpperCase()}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-[var(--text)] truncate">
+                {m.displayName}
+                {m.userId === user.id && (
+                  <span className="ml-1.5 text-xs text-[var(--text-muted)]">(toi)</span>
+                )}
+              </p>
+              <p className="text-xs text-[var(--text-muted)] truncate">{m.email}</p>
+            </div>
+            {isAdmin ? (
+              <select
+                value={m.role}
+                onChange={(e) => changeRole(m, e.target.value as WorkspaceRole)}
+                title={ROLE_OPTIONS.find((r) => r.id === m.role)?.description}
+                className="shrink-0 text-sm bg-[var(--surface)] border border-[var(--border)] rounded-md px-2 py-1 text-[var(--text)] outline-none focus:border-blue-400"
+              >
+                {ROLE_OPTIONS.map((r) => (
+                  <option key={r.id} value={r.id}>{r.label}</option>
+                ))}
+              </select>
+            ) : (
+              <span className="shrink-0 text-xs text-[var(--text-muted)]">
+                {ROLE_OPTIONS.find((r) => r.id === m.role)?.label ?? m.role}
+              </span>
+            )}
+            {(isAdmin || m.userId === user.id) && (
+              <button
+                type="button"
+                onClick={() => removeMember(m)}
+                title={m.userId === user.id ? "Quitter l'espace" : "Retirer de l'espace"}
+                className="shrink-0 p-1 rounded text-[var(--text-muted)] hover:text-red-500 hover:bg-red-500/10 transition-colors"
+              >
+                <Trash2 size={14} />
               </button>
-            ))}
+            )}
           </div>
-        </div>
+        ))}
+        {members === undefined && (
+          <p className="px-3 py-4 text-xs text-[var(--text-muted)]">Chargement…</p>
+        )}
       </div>
     </div>
   );
@@ -467,6 +590,14 @@ function AppearanceSection() {
 
 export default function SettingsPage({ user }: { user: SessionUser }) {
   const [active, setActive] = useState<Section>("profile");
+  const { workspaces } = useWorkspace();
+
+  // Membres : liste visible par tout membre (gestion réservée admin dans l'écran).
+  // Stockage : config d'INSTANCE, réservée aux admins d'au moins un espace (le
+  // serveur refuse en 403 de toute façon — le masquage n'est que du confort).
+  const adminSomewhere = workspaces.some((w) => w.role === "admin");
+  const visibleNav = NAV.filter(({ id }) => id !== "storage" || adminSomewhere);
+  const effectiveActive = visibleNav.some((n) => n.id === active) ? active : "profile";
 
   return (
     <div className="flex h-full text-sm">
@@ -483,12 +614,12 @@ export default function SettingsPage({ user }: { user: SessionUser }) {
           <h1 className="font-semibold text-[var(--text)]">Paramètres</h1>
         </div>
         <div className="flex flex-col gap-0.5 p-2">
-          {NAV.map(({ id, label, icon: Icon }) => (
+          {visibleNav.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               onClick={() => setActive(id)}
               className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-colors ${
-                active === id
+                effectiveActive === id
                   ? "bg-blue-50 text-blue-600 font-medium"
                   : "text-[var(--text-muted)] hover:bg-[var(--surface-hover)]"
               }`}
@@ -502,10 +633,10 @@ export default function SettingsPage({ user }: { user: SessionUser }) {
 
       {/* Content */}
       <main className="flex-1 overflow-y-auto p-8">
-        {active === "profile"    && <ProfileSection user={user} />}
-        {active === "users"      && <UsersSection />}
-        {active === "storage"    && <StorageSection />}
-        {active === "appearance" && <AppearanceSection />}
+        {effectiveActive === "profile"    && <ProfileSection user={user} />}
+        {effectiveActive === "users"      && <MembersSection user={user} />}
+        {effectiveActive === "storage"    && <StorageSection />}
+        {effectiveActive === "appearance" && <AppearanceSection />}
       </main>
     </div>
   );
