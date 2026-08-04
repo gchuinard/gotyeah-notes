@@ -53,12 +53,43 @@ export type PropertyType =
   | "user";
 
 /**
+ * Valeur RÉSERVÉE d'un ViewFilter sur une propriété `user` : « l'utilisateur qui
+ * regarde ». View.config est stocké en base et PARTAGÉ par tous les membres —
+ * y écrire un userId donnerait les cartes de son AUTEUR à tout le monde. Le
+ * jeton est donc résolu à la lecture (resolveFilterTokens), côté client comme
+ * côté serveur. Un « @ » en tête ne peut pas collisionner avec un cuid.
+ */
+export const CURRENT_USER_TOKEN = "@me";
+
+/**
  * Types dont la valeur de record est un TABLEAU. ⚠️ À consulter partout où l'on
  * décide « scalaire ou liste » (drop kanban, filtres, actions groupées) : écrire
  * une string dans un champ tableau corrompt le record SANS erreur de compilation.
  */
 export function isMultiValueType(type: string): boolean {
   return type === "multiselect" || type === "user";
+}
+
+/**
+ * Retire d'une valeur multi-valeurs les ids absents de `knownIds`.
+ *
+ * ⚠️ Raison d'être : `validateUserValues` refuse (400) TOUT tableau d'assignés
+ * contenant un id qui n'est plus membre — or la moindre écriture d'une propriété
+ * `user` réémet le tableau ENTIER. Sans ce nettoyage, une carte gardant l'id d'un
+ * membre parti devient définitivement inéditable : le drop kanban, la cellule et
+ * les actions groupées échouent tous en 400, avec un simple rollback muet.
+ *
+ * `null` en retour = « retirer la clé » (convention de mergeRecordProperties).
+ * Une valeur scalaire est renvoyée telle quelle : la règle ne vise que les tableaux.
+ */
+export function withoutUnknownIds(
+  value: PropertyValue | null,
+  knownIds: readonly string[]
+): PropertyValue | null {
+  if (!Array.isArray(value)) return value;
+  const known = new Set(knownIds);
+  const kept = (value as string[]).filter((id) => known.has(id));
+  return kept.length > 0 ? kept : null;
 }
 
 /** Une option d'un champ select ou multiselect. */

@@ -47,7 +47,12 @@ export default async function PageView({
     <>
       <VisitRecorder pageId={page.id} />
       {database ? (
-        <DatabaseShell databaseId={database.id} readOnly={readOnly} isAdmin={isAdmin} />
+        <DatabaseShell
+          databaseId={database.id}
+          readOnly={readOnly}
+          isAdmin={isAdmin}
+          currentUserId={user.id}
+        />
       ) : (
         <EditorClient
           key={page.id}

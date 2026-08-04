@@ -51,6 +51,8 @@ type Props = {
   /** Suppression DÉFINITIVE d'un sprint : réservée aux admins. */
   isAdmin?: boolean;
   workspaceId?: string;
+  /** Utilisateur qui regarde — résout le jeton « Moi » des filtres. */
+  currentUserId?: string;
 };
 
 /** Une « lane » = un sprint (avec ses issues) ou le backlog (sprint = null). */
@@ -663,7 +665,9 @@ function SprintEditModal({
 
 // ─── BacklogView (main) ───────────────────────────────────────────────────────
 
-export default function BacklogView({ databaseId, view, properties, readOnly = false, isAdmin = false, workspaceId }: Props) {
+export default function BacklogView({
+  databaseId, view, properties, readOnly = false, isAdmin = false, workspaceId, currentUserId,
+}: Props) {
   const { confirm, alert } = useDialog();
   const {
     data: records,
@@ -715,7 +719,7 @@ export default function BacklogView({ databaseId, view, properties, readOnly = f
   const baseRecords = useMemo(() => {
     if (!records) return [];
     const byPosition = [...records].sort((a, b) => a.position - b.position);
-    return applyViewConfig(byPosition, { ...cfg, sorts: [] }, properties);
+    return applyViewConfig(byPosition, { ...cfg, sorts: [] }, properties, currentUserId);
   }, [records, cfg, properties]);
 
   const { counts: epicCounts, none: epicNoneCount } = useMemo(() => {

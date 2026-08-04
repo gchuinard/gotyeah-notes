@@ -11,6 +11,7 @@ import type {
   SelectOption,
   PropertyValue,
 } from "@/lib/db";
+import { CURRENT_USER_TOKEN } from "@/lib/db";
 import Portal from "@/components/databases/portal";
 import { useWorkspaceMembers } from "@/lib/client/useWorkspaceMembers";
 
@@ -181,6 +182,10 @@ function FilterValueInput({
           className="flex-1 min-w-0 text-sm bg-[var(--surface)] border border-[var(--border)] rounded px-2 py-1 text-[var(--text)] outline-none focus:border-[var(--accent)]"
         >
           <option value="">— choisir —</option>
+          {/* « Moi » stocke un JETON, pas un userId : le config de vue est partagé
+              entre membres, y figer un id donnerait les cartes de son auteur à
+              tout le monde. Résolu à la lecture (resolveFilterTokens). */}
+          <option value={CURRENT_USER_TOKEN}>Moi</option>
           {members.map((m) => (
             <option key={m.userId} value={m.userId}>{m.displayName}</option>
           ))}

@@ -28,9 +28,12 @@ const fetcher = (url: string) =>
  * fetch pour toute l'app.
  */
 export function useWorkspaceMembers(workspaceId: string | null | undefined) {
-  const { data, isLoading } = useSWR<WorkspaceMember[]>(
+  const { data, isLoading, error } = useSWR<WorkspaceMember[]>(
     workspaceId ? `/api/workspaces/${workspaceId}/members` : null,
     fetcher
   );
-  return { members: data ?? [], isLoading };
+  // `error` est exposé À DESSEIN : un consommateur qui regroupe un board par
+  // assigné doit pouvoir refuser de peindre un board FAUX (zéro colonne de
+  // membre, toutes les cartes déclarées orphelines) plutôt que de mentir.
+  return { members: data ?? [], isLoading, error };
 }

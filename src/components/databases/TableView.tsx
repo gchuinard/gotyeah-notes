@@ -54,6 +54,8 @@ type Props = {
   isAdmin?: boolean;
   /** Espace de la database — source des membres pour les propriétés « utilisateur ». */
   workspaceId?: string;
+  /** Utilisateur qui regarde — résout le jeton « Moi » des filtres. */
+  currentUserId?: string;
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -284,6 +286,7 @@ export default function TableView({
   readOnly = false,
   isAdmin = false,
   workspaceId,
+  currentUserId,
 }: Props) {
   const { confirm } = useDialog();
   const { data: records, error, isLoading, mutate } = useSWR<ParsedRecord[]>(
@@ -298,7 +301,7 @@ export default function TableView({
 
   const sortedRecords = useMemo(() => {
     const byPosition = [...(records ?? [])].sort((a, b) => a.position - b.position);
-    return applyViewConfig(byPosition, _view.config, properties);
+    return applyViewConfig(byPosition, _view.config, properties, currentUserId);
   }, [records, _view.config, properties]);
 
   // ── Column widths ─────────────────────────────────────────────────────────
@@ -481,7 +484,7 @@ export default function TableView({
 
     // Pré-remplissage dérivé des filtres eq (select/text) de la vue : le record
     // satisfait le filtre par construction et reste visible après revalidation.
-    const seed = deriveSeedFromFilters(_view.config.filters ?? [], properties);
+    const seed = deriveSeedFromFilters(_view.config.filters ?? [], properties, currentUserId);
 
     const tempRecord: ParsedRecord = {
       id: tempId,

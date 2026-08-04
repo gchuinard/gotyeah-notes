@@ -14,7 +14,7 @@ import {
   type RecordProperties,
   type ViewFilter,
 } from "@/lib/db";
-import { applyFilters } from "@/lib/client/viewFilters";
+import { applyFilters, resolveFilterTokens } from "@/lib/client/viewFilters";
 import { emptySectionsBody } from "@/lib/templates";
 import { validateRelationValues } from "@/lib/relations";
 import { validateUserValues } from "@/lib/assignees";
@@ -89,12 +89,15 @@ export async function GET(
   let records = parseManyRecords(rows);
 
   // Filtre optionnel : réutilise applyFilters (mêmes opérateurs que le front).
+  // ⚠️ Le jeton « @me » DOIT être résolu ici aussi : non résolu, il filtrerait
+  // sur la chaîne littérale et renverrait 0 record sans la moindre erreur.
   if (filters.length > 0) {
     const props = await prisma.databaseProperty.findMany({
       where: { databaseId },
       orderBy: { position: "asc" },
     });
-    records = applyFilters(records, filters, parseManyDatabaseProperties(props));
+    const parsedProps = parseManyDatabaseProperties(props);
+    records = applyFilters(records, resolveFilterTokens(filters, user.id, parsedProps), parsedProps);
   }
 
   // Total AVANT pagination (le corps reste un tableau nu : contrat SWR inchangé).

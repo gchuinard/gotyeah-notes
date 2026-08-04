@@ -1,3 +1,4 @@
+import { CURRENT_USER_TOKEN } from "@/lib/db";
 import type {
   ParsedDatabaseProperty,
   ParsedRecord,
@@ -11,6 +12,39 @@ import type {
 function getRawValue(record: ParsedRecord, property: ParsedDatabaseProperty): unknown {
   if (property.type === "title") return record.title ?? "";
   return record.properties[property.id] ?? null;
+}
+
+/**
+ * Remplace le jeton « @me » d'un filtre par l'id de l'utilisateur qui regarde.
+ *
+ * Le jeton est ce qui permet à UNE vue partagée de montrer à chacun SES cartes :
+ * `View.config` est en base et commun à tous les membres, y figer un userId
+ * donnerait les cartes de son auteur à tout le monde.
+ *
+ * ⚠️ Sans identité (`currentUserId` absent), le filtre est laissé TEL QUEL : il
+ * ne matche alors rien et la vue est vide. C'est délibéré — un board vide se
+ * remarque, un board qui montre les cartes de tout le monde ne se remarque pas.
+ *
+ * Renvoie le tableau d'origine s'il ne contient aucun jeton (aucune allocation
+ * inutile, et l'identité des références reste stable pour les mémos React).
+ *
+ * Fonction PURE → testable en environnement node, et utilisée AUSSI côté serveur
+ * (GET /api/databases/[id]/records accepte un param `filter`).
+ */
+export function resolveFilterTokens(
+  filters: ViewFilter[],
+  currentUserId: string | null | undefined,
+  properties: ParsedDatabaseProperty[]
+): ViewFilter[] {
+  if (!currentUserId) return filters;
+  const isUserFilter = (f: ViewFilter) =>
+    f.value === CURRENT_USER_TOKEN &&
+    properties.find((p) => p.id === f.propertyId)?.type === "user";
+  // Scopé au type `user` : « @me » saisi à la main dans le filtre d'une colonne
+  // TEXTE resterait sinon réécrit en cuid, et cette vue passerait silencieusement
+  // à zéro résultat pour tout le monde.
+  if (!filters.some(isUserFilter)) return filters;
+  return filters.map((f) => (isUserFilter(f) ? { ...f, value: currentUserId } : f));
 }
 
 /**
@@ -32,13 +66,21 @@ function getRawValue(record: ParsedRecord, property: ParsedDatabaseProperty): un
  */
 export function deriveSeedFromFilters(
   filters: ViewFilter[],
-  properties: ParsedDatabaseProperty[]
+  properties: ParsedDatabaseProperty[],
+  currentUserId?: string | null
 ): RecordProperties {
   const seed: RecordProperties = {};
-  for (const filter of filters) {
+  // Résolu ICI et pas seulement chez l'appelant : sans ça, une carte créée dans
+  // une vue « Moi » naîtrait assignée à la chaîne littérale « @me » — refusée
+  // en 400 par validateUserValues.
+  for (const filter of resolveFilterTokens(filters, currentUserId, properties)) {
     const property = properties.find((p) => p.id === filter.propertyId);
     if (!property) continue;
     if (typeof filter.value !== "string") continue;
+    // Jeton NON résolu (identité inconnue) : ne rien semer. Le semer écrirait la
+    // chaîne « @me » dans un champ d'assignés → 400 de validateUserValues, et la
+    // création de carte échouerait au lieu de naître simplement sans assigné.
+    if (filter.value === CURRENT_USER_TOKEN) continue;
 
     // `user` filtre par `contains` (valeur = tableau) : sans cette branche, une
     // carte créée dans un board filtré par assigné naîtrait SANS assigné et
@@ -229,11 +271,18 @@ export function applySorts(
   });
 }
 
+/**
+ * `currentUserId` est un 4e argument OPTIONNEL : les sites d'appel existants
+ * restent valides, et applyFilters garde ses 3 arguments positionnels.
+ * Le passer est ce qui rend un filtre « Moi » opérant sur cette vue.
+ */
 export function applyViewConfig(
   records: ParsedRecord[],
   config: ViewConfig,
-  properties: ParsedDatabaseProperty[]
+  properties: ParsedDatabaseProperty[],
+  currentUserId?: string | null
 ): ParsedRecord[] {
-  const filtered = applyFilters(records, config.filters ?? [], properties);
+  const filters = resolveFilterTokens(config.filters ?? [], currentUserId, properties);
+  const filtered = applyFilters(records, filters, properties);
   return applySorts(filtered, config.sorts ?? [], properties);
 }

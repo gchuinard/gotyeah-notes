@@ -67,6 +67,7 @@ function renderKanbanCol(opts: {
         id: opts.optionId ?? "__null__",
         optionId: opts.optionId,
         label: opts.option?.name ?? "Sans valeur",
+        kind: opts.optionId === null ? ("unassigned" as const) : ("seed" as const),
         option: opts.option,
         records: opts.records,
       },

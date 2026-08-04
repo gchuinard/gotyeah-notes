@@ -335,11 +335,15 @@ export default function DatabaseShell({
   databaseId,
   readOnly = false,
   isAdmin = false,
+  currentUserId,
 }: {
   databaseId: string;
   readOnly?: boolean;
   /** Suppressions DÉFINITIVES (vue, colonne, sprint) : réservées aux admins. */
   isAdmin?: boolean;
+  /** Utilisateur qui regarde — résout le jeton « Moi » des filtres (résolu au
+   *  SSR : pas de flash, pas de route /api/me à créer). */
+  currentUserId?: string;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -478,7 +482,8 @@ export default function DatabaseShell({
     ? applyViewConfig(
         [...records].sort((a, b) => a.position - b.position),
         activeView.config,
-        data.properties
+        data.properties,
+        currentUserId
       ).length
     : totalCount;
 
@@ -598,6 +603,7 @@ export default function DatabaseShell({
             view={activeView}
             properties={data.properties}
             workspaceId={data.workspaceId}
+            currentUserId={currentUserId}
             readOnly={readOnly}
             isAdmin={isAdmin}
           />
@@ -607,6 +613,7 @@ export default function DatabaseShell({
             view={activeView}
             properties={data.properties}
             workspaceId={data.workspaceId}
+            currentUserId={currentUserId}
             readOnly={readOnly}
           />
         ) : activeView.type === "calendar" ? (
@@ -615,6 +622,7 @@ export default function DatabaseShell({
             view={activeView}
             properties={data.properties}
             workspaceId={data.workspaceId}
+            currentUserId={currentUserId}
             readOnly={readOnly}
           />
         ) : activeView.type === "gallery" ? (
@@ -623,6 +631,7 @@ export default function DatabaseShell({
             view={activeView}
             properties={data.properties}
             workspaceId={data.workspaceId}
+            currentUserId={currentUserId}
             readOnly={readOnly}
           />
         ) : activeView.type === "backlog" ? (
@@ -631,6 +640,7 @@ export default function DatabaseShell({
             view={activeView}
             properties={data.properties}
             workspaceId={data.workspaceId}
+            currentUserId={currentUserId}
             readOnly={readOnly}
             isAdmin={isAdmin}
           />

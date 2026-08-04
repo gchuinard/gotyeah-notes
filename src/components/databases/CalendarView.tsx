@@ -218,9 +218,13 @@ type Props = {
   properties: ParsedDatabaseProperty[];
   readOnly?: boolean;
   workspaceId?: string;
+  /** Utilisateur qui regarde — résout le jeton « Moi » des filtres. */
+  currentUserId?: string;
 };
 
-export default function CalendarView({ databaseId, view, properties, readOnly = false, workspaceId }: Props) {
+export default function CalendarView({
+  databaseId, view, properties, readOnly = false, workspaceId, currentUserId,
+}: Props) {
   const { data: records, isLoading, error, mutate } = useSWR<ParsedRecord[]>(
     `/api/databases/${databaseId}/records`,
     fetcher
@@ -262,7 +266,7 @@ export default function CalendarView({ databaseId, view, properties, readOnly = 
 
   const displayedRecords = useMemo(() => {
     if (!records) return [];
-    return applyViewConfig(records, view.config, properties);
+    return applyViewConfig(records, view.config, properties, currentUserId);
   }, [records, view.config, properties]);
 
   const recordsByDay = useMemo(() => {

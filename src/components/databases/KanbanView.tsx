@@ -27,7 +27,8 @@ import type {
   SelectOption,
   PropertyValue,
 } from "@/lib/db";
-import Cell, { SelectBadge, CellDisplay } from "@/components/databases/Cell";
+import Cell, { SelectBadge, CellDisplay, UserBadge } from "@/components/databases/Cell";
+import { withoutUnknownIds } from "@/lib/db";
 import { applyViewConfig, deriveSeedFromFilters } from "@/lib/client/viewFilters";
 import {
   groupValueOnDrop,
@@ -37,7 +38,10 @@ import {
   parseDndId,
   shouldShowKanbanAddButton,
   buildCardProps,
+  buildKanbanColumns,
 } from "@/lib/client/kanban";
+import type { KanbanColumn, KanbanColumnSeed } from "@/lib/client/kanban";
+import { useWorkspaceMembers } from "@/lib/client/useWorkspaceMembers";
 import { useDialog } from "@/contexts/DialogContext";
 import Portal from "@/components/databases/portal";
 import CardActions from "@/components/databases/CardActions";
@@ -48,7 +52,6 @@ import { useRecordDeepLink } from "@/lib/client/useRecordDeepLink";
 
 // ─── Constants / types ────────────────────────────────────────────────────────
 
-const NULL_COL = "__null__";
 
 type Props = {
   databaseId: string;
@@ -57,15 +60,17 @@ type Props = {
   readOnly?: boolean;
   /** Espace de la database — source des membres pour les propriétés « utilisateur ». */
   workspaceId?: string;
+  /** Utilisateur qui regarde — résout le jeton « Moi » des filtres. */
+  currentUserId?: string;
 };
 
-type KanbanCol = {
-  id: string;
-  optionId: string | null;
-  label: string;
-  option: SelectOption | null;
-  records: ParsedRecord[];
-};
+/**
+ * Colonne calculée par `buildKanbanColumns` (pure, testée), enrichie de l'option
+ * select correspondante — nécessaire au seul rendu du badge et au renommage
+ * inline. `option: null` sur un axe `user` : c'est ce qui neutralise le
+ * renommage, une propriété utilisateur n'ayant AUCUNE option à réécrire.
+ */
+type KanbanCol = KanbanColumn<ParsedRecord> & { option: SelectOption | null };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -74,38 +79,6 @@ const fetcher = (url: string) =>
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     return r.json();
   });
-
-function buildCols(records: ParsedRecord[], prop: ParsedDatabaseProperty): KanbanCol[] {
-  const options = (prop.config as { options?: SelectOption[] }).options ?? [];
-  const propId = prop.id;
-  const sorted = [...records].sort((a, b) => a.position - b.position);
-
-  const nullCol: KanbanCol = {
-    id: NULL_COL,
-    optionId: null,
-    label: "Sans valeur",
-    option: null,
-    records: sorted.filter((r) => {
-      const v = r.properties[propId];
-      return v === undefined || v === null || (Array.isArray(v) && (v as string[]).length === 0);
-    }),
-  };
-
-  return [
-    nullCol,
-    ...options.map((opt): KanbanCol => ({
-      id: opt.id,
-      optionId: opt.id,
-      label: opt.name,
-      option: opt,
-      records: sorted.filter((r) => {
-        const v = r.properties[propId];
-        if (prop.type === "multiselect") return Array.isArray(v) && (v as string[]).includes(opt.id);
-        return v === opt.id;
-      }),
-    })),
-  ];
-}
 
 function colOf(cols: KanbanCol[], dndId: string): KanbanCol | null {
   const { colId } = parseDndId(dndId);
@@ -124,7 +97,7 @@ function GroupBySelector({
   properties: ParsedDatabaseProperty[];
 }) {
   const eligible = properties.filter(
-    (p) => p.type === "select" || p.type === "multiselect"
+    (p) => p.type === "select" || p.type === "multiselect" || p.type === "user"
   );
   const [saving, setSaving] = useState(false);
 
@@ -151,7 +124,7 @@ function GroupBySelector({
       </p>
       {eligible.length === 0 ? (
         <p className="text-xs text-[var(--text-muted)]">
-          Aucune propriété de type Sélection dans cette base.
+          Aucune propriété de type Sélection ou Utilisateur dans cette base.
         </p>
       ) : (
         <div className="flex flex-wrap gap-2 justify-center">
@@ -442,7 +415,10 @@ export function KanbanColView({
   readOnly?: boolean;
   workspaceId?: string;
 }) {
-  const { setNodeRef, isOver } = useDroppable({ id: col.id });
+  // La colonne « Membre retiré » n'est PAS une cible de dépôt : son optionId est
+  // null, y déposer une carte appliquerait la sémantique « Sans valeur » et
+  // effacerait tous ses assignés.
+  const { setNodeRef, isOver } = useDroppable({ id: col.id, disabled: col.kind === "orphan" });
 
   const [isRenamingCol, setIsRenamingCol] = useState(false);
   const [colNameValue, setColNameValue] = useState(col.label);
@@ -496,6 +472,12 @@ export function KanbanColView({
               <SelectBadge option={col.option} />
             </span>
           )
+        ) : col.kind === "seed" ? (
+          // Axe « assigné » : pastille de membre, et AUCUN renommage — il n'y a
+          // pas d'option à réécrire, le PATCH serait sans objet.
+          <UserBadge userId={col.id} displayName={col.label} />
+        ) : col.kind === "orphan" ? (
+          <UserBadge userId={col.id} />
         ) : (
           <span className="text-sm font-medium text-[var(--text-muted)]">Sans valeur</span>
         )}
@@ -505,7 +487,8 @@ export function KanbanColView({
         {/* Bouton d'ajout ANCRÉ en tête de colonne : reste visible même quand la
             lane déborde (le board scrolle globalement, pas la lane). Le flag ne
             change QUE l'affichage, jamais la position. */}
-        {!readOnly && shouldShowKanbanAddButton(createOnlyInUnassigned, col.optionId) && (
+        {!readOnly && col.kind !== "orphan" &&
+          shouldShowKanbanAddButton(createOnlyInUnassigned, col.optionId) && (
           <button
             onClick={() => onAddRecord(col)}
             className="shrink-0 flex items-center gap-1 pl-1 pr-1.5 py-0.5 text-xs text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] rounded-md transition-colors"
@@ -654,7 +637,9 @@ function SprintBoardHeader({
 
 // ─── KanbanView (main) ────────────────────────────────────────────────────────
 
-export default function KanbanView({ databaseId, view, properties, readOnly = false, workspaceId }: Props) {
+export default function KanbanView({
+  databaseId, view, properties, readOnly = false, workspaceId, currentUserId,
+}: Props) {
   const { confirm, alert } = useDialog();
   const {
     data: records,
@@ -717,13 +702,41 @@ export default function KanbanView({ databaseId, view, properties, readOnly = fa
       scoped = targetSprint ? records.filter((r) => r.sprintId === targetSprint.id) : [];
     }
     const byPosition = [...scoped].sort((a, b) => a.position - b.position);
-    return applyViewConfig(byPosition, view.config, properties);
-  }, [records, sprintScope, targetSprint, view.config, properties]);
+    return applyViewConfig(byPosition, view.config, properties, currentUserId);
+  }, [records, sprintScope, targetSprint, view.config, properties, currentUserId]);
 
-  const columns = useMemo(
-    () => (groupByProp ? buildCols(displayedRecords, groupByProp) : []),
-    [displayedRecords, groupByProp]
-  );
+  // Axe « assigné » : les colonnes sont les MEMBRES de l'espace, pas des options
+  // (une propriété user n'en a pas). Clé SWR nulle sur les autres axes → aucun
+  // fetch sur un kanban classique.
+  const groupsByUser = groupByProp?.type === "user";
+  const {
+    members,
+    isLoading: membersLoading,
+    error: membersError,
+  } = useWorkspaceMembers(groupsByUser ? workspaceId : null);
+  const memberIds = useMemo(() => members.map((m) => m.userId), [members]);
+
+  const columns = useMemo<KanbanCol[]>(() => {
+    if (!groupByProp) return [];
+    const options = (groupByProp.config as { options?: SelectOption[] }).options ?? [];
+    const seeds: KanbanColumnSeed[] = groupsByUser
+      ? members.map((m) => ({ id: m.userId, label: m.displayName }))
+      : options.map((o) => ({ id: o.id, label: o.name }));
+
+    const byId = new Map(options.map((o) => [o.id, o] as const));
+    return buildKanbanColumns(
+      displayedRecords,
+      groupByProp.id,
+      groupByProp.type,
+      seeds,
+      // Seul l'axe user peut porter un id orphelin : un membre part sans garde-fou,
+      // là où le serveur refuse de retirer une option select encore référencée.
+      // ⚠️ JAMAIS pendant le chargement des membres : `seeds` serait vide et TOUTE
+      // carte assignée serait déclarée orpheline (le rendu est gardé plus bas,
+      // ceci est la seconde ceinture).
+      { includeOrphans: groupsByUser && !membersLoading, orphanLabel: "Membre retiré" }
+    ).map((col) => ({ ...col, option: col.optionId ? byId.get(col.optionId) ?? null : null }));
+  }, [displayedRecords, groupByProp, groupsByUser, members, membersLoading]);
 
   // Propriétés affichées/éditables sur la carte : top-2 par position + « Main à » et
   // « Projet » garanties (présence non soumise au slice(0,2)).
@@ -898,7 +911,7 @@ export default function KanbanView({ databaseId, view, properties, readOnly = fa
       // Pré-remplissage dérivé des filtres eq (select/text) de la vue : la carte
       // satisfait le filtre par construction et ne disparaît pas après revalidation.
       // La valeur d'axe (groupBy) PRIME sur un filtre visant la même propriété.
-      const seed = deriveSeedFromFilters(view.config.filters ?? [], properties);
+      const seed = deriveSeedFromFilters(view.config.filters ?? [], properties, currentUserId);
       const initProperties = mergeSeedWithGroupValue(seed, groupByPropId, initValue);
 
       const tempRecord: ParsedRecord = {
@@ -1003,6 +1016,11 @@ export default function KanbanView({ databaseId, view, properties, readOnly = fa
       const sourceCol = colOf(columns, activeDndId);
       const targetCol = colOf(columns, overId);
       if (!sourceCol || !targetCol) return;
+      // `disabled` sur le droppable ne couvre PAS un dépôt sur une CARTE de la
+      // colonne orpheline (elle reste un item sortable). Sans ce garde-fou, le
+      // drop y appliquerait la sémantique « Sans valeur » (optionId null) et
+      // effacerait tous les assignés de la carte déplacée.
+      if (targetCol.kind === "orphan") return;
 
       const targetRecords = targetCol.records.filter((r) => r.id !== activeRecordId);
       const overIsColumn = overRecordId === null;
@@ -1023,7 +1041,7 @@ export default function KanbanView({ databaseId, view, properties, readOnly = fa
       // Valeur d'axe après le drop : string (select) ou TABLEAU d'ids (multiselect).
       // null = retirer la clé (colonne « Sans valeur »).
       const activeRecord = records.find((r) => r.id === activeRecordId);
-      const nextGroupValue = isNewColumn
+      const dropped = isNewColumn
         ? groupValueOnDrop(
             groupByProp.type,
             activeRecord?.properties[groupByPropId],
@@ -1031,6 +1049,11 @@ export default function KanbanView({ databaseId, view, properties, readOnly = fa
             targetCol.optionId
           )
         : null;
+      // Un assigné parti reste dans la valeur de la carte ; le réémettre ferait
+      // refuser TOUT le tableau (400 de validateUserValues) et la carte serait
+      // indéplaçable — c'est justement celle qu'on vient sortir de la colonne
+      // « Membre retiré ». Le lien mort est donc lâché au premier déplacement.
+      const nextGroupValue = groupsByUser ? withoutUnknownIds(dropped, memberIds) : dropped;
 
       const snapshot = records;
       const optimistic = records.map((r) => {
@@ -1062,7 +1085,7 @@ export default function KanbanView({ databaseId, view, properties, readOnly = fa
           mutate(snapshot, { revalidate: false });
         });
     },
-    [columns, records, groupByPropId, groupByProp, mutate]
+    [columns, records, groupByPropId, groupByProp, groupsByUser, memberIds, mutate]
   );
 
   // ── Sprint board : scope + démarrer / terminer ─────────────────────────────
@@ -1144,6 +1167,26 @@ export default function KanbanView({ databaseId, view, properties, readOnly = fa
     return (
       <div className="flex items-center justify-center h-48 text-red-500 text-sm">
         Impossible de charger les enregistrements.
+      </div>
+    );
+  }
+
+  // Axe « assigné » : sans la liste des membres, il n'y a AUCUNE colonne à
+  // dessiner. Peindre quand même afficherait un board faux — toutes les cartes
+  // assignées regroupées sous « Membre retiré » — puis le réorganiserait sous le
+  // curseur à l'arrivée de la réponse.
+  if (groupsByUser && membersLoading) {
+    return (
+      <div className="flex items-center justify-center h-48 text-[var(--text-muted)] text-sm">
+        Chargement des membres…
+      </div>
+    );
+  }
+
+  if (groupsByUser && membersError) {
+    return (
+      <div className="flex items-center justify-center h-48 text-red-500 text-sm">
+        Impossible de charger les membres de l&apos;espace.
       </div>
     );
   }
