@@ -1,10 +1,11 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from "vitest";
 
 vi.mock("@/lib/session", () => ({ getSession: vi.fn() }));
 
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { seedUserWithWorkspace, seedMember } from "../helpers/seed";
+import { _resetRateLimit, RATE_LIMIT_MAX_FAILURES } from "@/lib/rateLimit";
 import { GET as membersGET, POST as membersPOST } from "@/app/api/workspaces/[id]/members/route";
 import { PATCH as memberPATCH, DELETE as memberDELETE } from "@/app/api/workspaces/[id]/members/[userId]/route";
 
@@ -56,6 +57,10 @@ beforeAll(async () => {
     })
   ).id;
 });
+// Le compteur d'anti-énumération est en mémoire et PARTAGÉ par les fichiers de
+// test : on repart de zéro à chaque cas, comme tests/api/login.test.ts.
+beforeEach(() => _resetRateLimit());
+
 afterAll(async () => {
   await prisma.$disconnect();
 });
@@ -112,6 +117,86 @@ describe("POST /api/workspaces/[id]/members (ajout par email)", () => {
       P({ id: workspaceId })
     );
     expect(res.status).toBe(404);
+  });
+});
+
+describe("POST /members — anti-énumération (rate-limit + trace)", () => {
+  const addUnknown = (asUser: string, tag: string) => {
+    as(asUser);
+    return membersPOST(
+      jsonReq(`/api/workspaces/${workspaceId}/members`, "POST", {
+        email: `inconnu-${tag}-${Math.random().toString(36).slice(2)}@x.tld`,
+      }),
+      P({ id: workspaceId })
+    );
+  };
+
+  it("bloque en 429 avec Retry-After après N sondages sur des comptes inexistants", async () => {
+    for (let i = 0; i < RATE_LIMIT_MAX_FAILURES; i++) {
+      expect((await addUnknown(adminId, `a${i}`)).status).toBe(404);
+    }
+    const blocked = await addUnknown(adminId, "over");
+    expect(blocked.status).toBe(429);
+    expect(Number(blocked.headers.get("Retry-After"))).toBeGreaterThan(0);
+  });
+
+  it("n'affecte pas un usage normal : sous le seuil, les messages restent explicites", async () => {
+    for (let i = 0; i < RATE_LIMIT_MAX_FAILURES - 1; i++) await addUnknown(adminId, `b${i}`);
+    // Le message de typo doit rester lisible — c'est tout l'intérêt d'avoir
+    // choisi le rate-limit plutôt qu'une réponse indifférenciée.
+    const res = await addUnknown(adminId, "last");
+    expect(res.status).toBe(404);
+    expect((await res.json()).error).toContain("introuvable");
+  });
+
+  it("un ajout réussi remet le compteur à zéro", async () => {
+    const invitee = await prisma.user.create({
+      data: {
+        email: `reset-${Date.now()}@x.tld`,
+        firstName: "R",
+        lastName: "S",
+        displayName: "Reset",
+        passwordHash: "not-a-real-hash",
+      },
+    });
+    for (let i = 0; i < RATE_LIMIT_MAX_FAILURES - 1; i++) await addUnknown(adminId, `c${i}`);
+
+    as(adminId);
+    const ok = await membersPOST(
+      jsonReq(`/api/workspaces/${workspaceId}/members`, "POST", { email: invitee.email }),
+      P({ id: workspaceId })
+    );
+    expect(ok.status).toBe(200);
+
+    // Sans le clearFailures, ce sondage serait le N-ième → 429.
+    expect((await addUnknown(adminId, "after-success")).status).toBe(404);
+  });
+
+  it("les compteurs sont par utilisateur : un admin bloqué n'en bloque pas un autre", async () => {
+    // Espace SÉPARÉ : ajouter un 2e admin à l'espace partagé casserait les cas
+    // « dernier admin » qui suivent.
+    const other = await seedUserWithWorkspace(`members-rl-${Date.now()}@x.tld`);
+    for (let i = 0; i < RATE_LIMIT_MAX_FAILURES; i++) await addUnknown(adminId, `d${i}`);
+    expect((await addUnknown(adminId, "blocked")).status).toBe(429);
+
+    as(other.user.id);
+    const res = await membersPOST(
+      jsonReq(`/api/workspaces/${other.workspace.id}/members`, "POST", {
+        email: `inconnu-other-${Date.now()}@x.tld`,
+      }),
+      P({ id: other.workspace.id })
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("le GET (liste des membres) n'est jamais limité", async () => {
+    for (let i = 0; i < RATE_LIMIT_MAX_FAILURES + 2; i++) await addUnknown(adminId, `e${i}`);
+    as(adminId);
+    const res = await membersGET(
+      req(`/api/workspaces/${workspaceId}/members`),
+      P({ id: workspaceId })
+    );
+    expect(res.status).toBe(200);
   });
 });
 
