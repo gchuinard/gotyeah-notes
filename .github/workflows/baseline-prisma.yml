@@ -34,11 +34,18 @@ jobs:
   baseline:
     runs-on: ubuntu-latest
     steps:
+      # ⚠️ Le test se fait en shell, PAS dans un `if:` d'expression GitHub
+      # Actions : les comparaisons de chaînes y sont insensibles à la casse,
+      # « baseline » suffirait donc à déclencher une écriture en production.
       - name: Vérifier la confirmation
-        if: ${{ github.event.inputs.confirm != 'BASELINE' }}
+        env:
+          CONFIRM: ${{ github.event.inputs.confirm }}
         run: |
-          echo "Confirmation absente ou incorrecte — rien n'a été exécuté."
-          exit 1
+          set -eu
+          if [ "$CONFIRM" != "BASELINE" ]; then
+            echo "Confirmation absente ou incorrecte — rien n'a été exécuté."
+            exit 1
+          fi
 
       - name: Baseline via SSH
         uses: appleboy/ssh-action@v1.2.0
@@ -76,15 +83,38 @@ jobs:
 
             docker compose build migrate
 
+            # ── Contrôle PRÉALABLE : la base réelle correspond-elle à 0_init ? ──
+            # C'est LE test qui compte. Marquer 0_init « appliqué » sur une base
+            # qui a dérivé (colonne héritée d'un vieux db push, table oubliée)
+            # figerait l'écart pour toujours : `migrate deploy` ne rejoue JAMAIS
+            # une migration déjà appliquée et ne revérifie pas son checksum —
+            # l'erreur ne surgirait qu'en requête, en production.
+            # --exit-code : 0 = identique, 2 = différence, 1 = erreur.
+            set +e
+            docker compose run --rm --entrypoint sh migrate -c \
+              'npx prisma migrate diff --from-url "$DATABASE_URL" --to-migrations prisma/migrations --exit-code' \
+              2>&1 | tee /tmp/baseline-diff.log
+            DIFF_RC=${PIPESTATUS[0]}
+            set -e
+            if [ "$DIFF_RC" -ne 0 ]; then
+              echo "La base de PRODUCTION diverge de la baseline (code $DIFF_RC) — voir ci-dessus."
+              echo "Ne pas baseliner : l'écart doit d'abord être expliqué et résorbé."
+              exit 1
+            fi
+            echo "Base conforme à 0_init."
+
             # Marque 0_init comme appliqué SANS jouer son SQL.
             docker compose run --rm --entrypoint sh migrate \
-              -c "npx prisma migrate resolve --applied 0_init"
+              -c "npx prisma migrate resolve --applied 0_init" 2>&1 | tee /tmp/baseline-resolve.log
 
-            # Contrôle : plus aucune migration en attente. Si cette commande
-            # tentait d'appliquer quoi que ce soit, la baseline serait fausse.
-            OUT=$(docker compose run --rm migrate 2>&1)
-            echo "$OUT"
-            echo "$OUT" | grep -qiE "no pending migrations|aucune migration" || {
+            # Vérification finale. NB : ce message est attendu PAR CONSTRUCTION
+            # (0_init vient d'être marquée appliquée) — il confirme seulement que
+            # le prochain déploiement ne tentera rien. C'est le contrôle préalable
+            # ci-dessus qui garantit que le schéma est juste.
+            # `tee` et non une variable : sous `set -e`, une capture `OUT=$(…)`
+            # tuerait le script avant d'avoir pu afficher la sortie de Prisma.
+            docker compose run --rm migrate 2>&1 | tee /tmp/baseline-deploy.log
+            grep -qiE "no pending migrations|aucune migration" /tmp/baseline-deploy.log || {
               echo "migrate deploy n'a pas confirmé « no pending migrations » — vérifier avant de merger."
               exit 1
             }

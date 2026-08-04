@@ -86,12 +86,28 @@ des `DROP` destructifs).
   cd /home/pi/sites/gotyeah-notes
   git fetch && git checkout feat/prisma-migrations   # amène les fichiers de migration
   docker compose build migrate
-  # snapshot de sécurité avant toute manip (cf. §Sauvegardes) puis :
+
+  # 1. Snapshot de sécurité — la commande n'est pas ailleurs dans ce README,
+  #    elle est reprise telle quelle de .github/workflows/deploy.yml.
+  BACKUP_DIR=/home/pi/backups/gotyeah-notes; STAMP=$(date +%Y%m%d-%H%M%S); mkdir -p "$BACKUP_DIR"
+  DB_VOL=$(docker volume ls -q | grep -E '(^|_)gotyeah-db$' | head -1)
+  docker run --rm --user 0:0 -v "$DB_VOL":/data:ro -v "$BACKUP_DIR":/backup     keinos/sqlite3:latest sqlite3 /data/dev.db ".backup '/backup/pre-baseline-$STAMP.db'"
+
+  # 2. La base correspond-elle VRAIMENT à 0_init ? (0 = oui, 2 = elle a dérivé)
+  docker compose run --rm --entrypoint sh migrate -c     'npx prisma migrate diff --from-url "$DATABASE_URL" --to-migrations prisma/migrations --exit-code'
+
+  # 3. Seulement si l'étape 2 sort en 0 :
   docker compose run --rm --entrypoint sh migrate -c "npx prisma migrate resolve --applied 0_init"
-  docker compose run --rm migrate                    # migrate deploy → doit être « No pending migrations »
+  docker compose run --rm migrate                    # migrate deploy → « No pending migrations »
   ```
   Une fois cette baseline faite, la branche peut être mergée sur `main` : les
   déploiements suivants appliquent seulement les **nouvelles** migrations.
+- ⚠️ **`0_init` est FIGÉE après la baseline.** Une migration marquée appliquée
+  n'est jamais rejouée par `migrate deploy`, qui ne revérifie pas son checksum :
+  la modifier produirait un déploiement vert sur un schéma incomplet, et l'erreur
+  n'apparaîtrait qu'à la première requête touchant la colonne absente. Toute
+  évolution du schéma passe par une **nouvelle** migration. Le job CI
+  *Baseline figée* refuse toute modification de ce fichier.
 
 ### Sauvegardes
 
