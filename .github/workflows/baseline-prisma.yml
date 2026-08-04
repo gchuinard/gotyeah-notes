@@ -90,9 +90,12 @@ jobs:
             # une migration déjà appliquée et ne revérifie pas son checksum —
             # l'erreur ne surgirait qu'en requête, en production.
             # --exit-code : 0 = identique, 2 = différence, 1 = erreur.
+            # ⚠️ Prisma 7 : `--from-url` N'EXISTE PLUS — c'est `--from-config-datasource`
+            # (il lit DATABASE_URL via prisma.config.ts). Avec l'ancienne option, la
+            # commande imprime son aide et sort en 1 : un échec bruyant, pas silencieux.
             set +e
             docker compose run --rm --entrypoint sh migrate -c \
-              'npx prisma migrate diff --from-url "$DATABASE_URL" --to-migrations prisma/migrations --exit-code' \
+              'npx prisma migrate diff --from-config-datasource --to-migrations prisma/migrations --exit-code' \
               2>&1 | tee /tmp/baseline-diff.log
             DIFF_RC=${PIPESTATUS[0]}
             set -e

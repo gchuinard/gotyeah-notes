@@ -75,7 +75,10 @@ des `DROP` destructifs).
 - **Créer une migration** (dev) : modifier `prisma/schema.prisma`, puis
   `npx prisma migrate dev --name <intitulé>`. La CI (job *Migrations*) échoue si un
   `schema.prisma` est modifié sans migration correspondante.
-- **Baseline (unique, sur la prod existante)** — la base de prod a été créée
+- **Baseline** — ✅ **FAITE en production le 2026-08-05** (`Migration 0_init marked as
+  applied.`, puis `No pending migrations to apply.`). Ne pas rejouer : la procédure
+  ci-dessous n'est conservée que pour un futur environnement repartant d'un `db push`.
+  La base de prod avait été créée
   historiquement par `db push`, sans historique de migration. Avant le tout premier
   `migrate deploy`, il faut la « baseliner » **une seule fois** (marque `0_init` comme
   déjà appliqué, sans le rejouer). Le plus sûr est de passer par le workflow dédié
@@ -94,7 +97,7 @@ des `DROP` destructifs).
   docker run --rm --user 0:0 -v "$DB_VOL":/data:ro -v "$BACKUP_DIR":/backup     keinos/sqlite3:latest sqlite3 /data/dev.db ".backup '/backup/pre-baseline-$STAMP.db'"
 
   # 2. La base correspond-elle VRAIMENT à 0_init ? (0 = oui, 2 = elle a dérivé)
-  docker compose run --rm --entrypoint sh migrate -c     'npx prisma migrate diff --from-url "$DATABASE_URL" --to-migrations prisma/migrations --exit-code'
+  docker compose run --rm --entrypoint sh migrate -c     'npx prisma migrate diff --from-config-datasource --to-migrations prisma/migrations --exit-code'
 
   # 3. Seulement si l'étape 2 sort en 0 :
   docker compose run --rm --entrypoint sh migrate -c "npx prisma migrate resolve --applied 0_init"
