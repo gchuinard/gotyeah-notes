@@ -49,6 +49,7 @@ type Props = {
   databaseId: string;
   view: ParsedView;
   properties: ParsedDatabaseProperty[];
+  readOnly?: boolean;
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -134,6 +135,7 @@ function SortableRow({
   onSave,
   onDelete,
   onTitleClick,
+  readOnly,
 }: {
   record: ParsedRecord;
   index: number;
@@ -144,8 +146,12 @@ function SortableRow({
   onSave: (property: ParsedDatabaseProperty, value: PropertyValue | null) => void;
   onDelete: () => void;
   onTitleClick: () => void;
+  readOnly: boolean;
 }) {
-  const { attributes, listeners, setNodeRef, isDragging } = useSortable({ id: record.id });
+  const { attributes, listeners, setNodeRef, isDragging } = useSortable({
+    id: record.id,
+    disabled: readOnly,
+  });
 
   return (
     <tr
@@ -159,28 +165,32 @@ function SortableRow({
       {/* Drag handle + (row number ↔ selection checkbox) — fixed width, not resizable */}
       <td className="px-2 py-1.5 select-none" style={{ width: 56, minWidth: 56 }}>
         <div className="flex items-center gap-1">
-          <span
-            {...attributes}
-            {...listeners}
-            className="opacity-0 group-hover:opacity-100 cursor-grab active:cursor-grabbing text-[var(--text-muted)] transition-opacity shrink-0 touch-none"
-          >
-            <GripVertical size={13} />
-          </span>
+          {!readOnly && (
+            <span
+              {...attributes}
+              {...listeners}
+              className="opacity-0 group-hover:opacity-100 cursor-grab active:cursor-grabbing text-[var(--text-muted)] transition-opacity shrink-0 touch-none"
+            >
+              <GripVertical size={13} />
+            </span>
+          )}
           {/* Case de sélection : visible au survol OU quand la ligne est cochée.
               Contrôle distinct du clic d'ouverture du panneau. */}
-          <SelectCheckbox
-            selected={selected}
-            onToggle={onToggleSelect}
-            label="Sélectionner la ligne"
-            className={[
-              "shrink-0",
-              selected ? "grid" : "hidden group-hover:grid",
-            ].join(" ")}
-          />
+          {!readOnly && (
+            <SelectCheckbox
+              selected={selected}
+              onToggle={onToggleSelect}
+              label="Sélectionner la ligne"
+              className={[
+                "shrink-0",
+                selected ? "grid" : "hidden group-hover:grid",
+              ].join(" ")}
+            />
+          )}
           <span
             className={[
               "text-xs text-[var(--text-muted)] tabular-nums",
-              selected ? "hidden" : "inline group-hover:hidden",
+              readOnly ? "inline" : selected ? "hidden" : "inline group-hover:hidden",
             ].join(" ")}
           >
             {index + 1}
@@ -210,24 +220,30 @@ function SortableRow({
             style={{ width: w, minWidth: w, maxWidth: w }}
             className="px-3 py-1.5 text-[var(--text)] overflow-hidden"
           >
-            <Cell
-              property={property}
-              record={record}
-              onSave={(value) => onSave(property, value)}
-            />
+            {readOnly ? (
+              <CellDisplay property={property} record={record} />
+            ) : (
+              <Cell
+                property={property}
+                record={record}
+                onSave={(value) => onSave(property, value)}
+              />
+            )}
           </td>
         );
       })}
 
       {/* Delete action — fixed width, not resizable */}
       <td className="px-1 py-1.5" style={{ width: 32, minWidth: 32 }}>
-        <button
-          onClick={onDelete}
-          className="opacity-0 group-hover:opacity-100 text-[var(--text-muted)] hover:text-red-500 transition-opacity"
-          title="Supprimer l'enregistrement"
-        >
-          <Trash2 size={13} />
-        </button>
+        {!readOnly && (
+          <button
+            onClick={onDelete}
+            className="opacity-0 group-hover:opacity-100 text-[var(--text-muted)] hover:text-red-500 transition-opacity"
+            title="Supprimer l'enregistrement"
+          >
+            <Trash2 size={13} />
+          </button>
+        )}
       </td>
     </tr>
   );
@@ -254,7 +270,12 @@ function DragRow({ record }: { record: ParsedRecord }) {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function TableView({ databaseId, view: _view, properties: initialProperties }: Props) {
+export default function TableView({
+  databaseId,
+  view: _view,
+  properties: initialProperties,
+  readOnly = false,
+}: Props) {
   const { confirm } = useDialog();
   const { data: records, error, isLoading, mutate } = useSWR<ParsedRecord[]>(
     `/api/databases/${databaseId}/records`,
@@ -642,31 +663,36 @@ export default function TableView({ databaseId, view: _view, properties: initial
                       style={{ width: w, minWidth: w }}
                       className={[
                         "relative px-3 py-2 text-left text-xs font-medium text-[var(--text-muted)] uppercase tracking-wide overflow-hidden",
-                        p.type !== "title" ? "cursor-pointer hover:bg-[var(--surface-hover)]" : "",
+                        !readOnly && p.type !== "title" ? "cursor-pointer hover:bg-[var(--surface-hover)]" : "",
                       ].join(" ")}
                       onClick={() => {
-                        if (p.type === "title") return;
+                        if (readOnly || p.type === "title") return;
                         setOpenPopoverId((prev) => (prev === p.id ? null : p.id));
                       }}
                     >
                       <span className="truncate block pr-3">{p.name}</span>
-                      <ResizeHandle
-                        onMouseDown={(e) => handleResizeMouseDown(p.id, p.type, e)}
-                        onDoubleClick={(e) => handleResizeDblClick(p.id, p.type, e)}
-                      />
+                      {/* Le resize persiste dans le config PARTAGÉ de la vue → pas en RO. */}
+                      {!readOnly && (
+                        <ResizeHandle
+                          onMouseDown={(e) => handleResizeMouseDown(p.id, p.type, e)}
+                          onDoubleClick={(e) => handleResizeDblClick(p.id, p.type, e)}
+                        />
+                      )}
                     </th>
                   );
                 })}
 
                 {/* Add property — fixed, not resizable */}
                 <th className="px-2 py-2" style={{ width: 40, minWidth: 40 }}>
-                  <button
-                    onClick={() => setShowAddProperty(true)}
-                    className="text-[var(--text-muted)] hover:text-[var(--text)] transition-colors"
-                    title="Ajouter une propriété"
-                  >
-                    <Plus size={14} />
-                  </button>
+                  {!readOnly && (
+                    <button
+                      onClick={() => setShowAddProperty(true)}
+                      className="text-[var(--text-muted)] hover:text-[var(--text)] transition-colors"
+                      title="Ajouter une propriété"
+                    >
+                      <Plus size={14} />
+                    </button>
+                  )}
                 </th>
               </tr>
             </thead>
@@ -697,21 +723,24 @@ export default function TableView({ databaseId, view: _view, properties: initial
                       onSave={(property, value) => handleSave(record, property, value)}
                       onDelete={() => handleDeleteRecord(record)}
                       onTitleClick={() => setSelectedRecordId(record.id)}
+                      readOnly={readOnly}
                     />
                   ))}
                 </SortableContext>
               )}
-              <tr>
-                <td colSpan={sorted.length + 2} className="px-3 py-1.5">
-                  <button
-                    onClick={handleAddRecord}
-                    className="flex items-center gap-1.5 text-sm text-[var(--text-muted)] hover:text-[var(--text)] transition-colors"
-                  >
-                    <Plus size={13} />
-                    Nouveau
-                  </button>
-                </td>
-              </tr>
+              {!readOnly && (
+                <tr>
+                  <td colSpan={sorted.length + 2} className="px-3 py-1.5">
+                    <button
+                      onClick={handleAddRecord}
+                      className="flex items-center gap-1.5 text-sm text-[var(--text-muted)] hover:text-[var(--text)] transition-colors"
+                    >
+                      <Plus size={13} />
+                      Nouveau
+                    </button>
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -753,17 +782,20 @@ export default function TableView({ databaseId, view: _view, properties: initial
           properties={properties}
           databaseId={databaseId}
           onClose={() => setSelectedRecordId(null)}
+          readOnly={readOnly}
         />
       )}
 
-      {/* Barre d'action groupée (sélection multiple) */}
-      <BulkActionBar
-        properties={properties}
-        records={records}
-        selectedIds={selectedIds}
-        mutate={mutate}
-        onClear={clearSelection}
-      />
+      {/* Barre d'action groupée (sélection multiple) — jamais montée en RO */}
+      {!readOnly && (
+        <BulkActionBar
+          properties={properties}
+          records={records}
+          selectedIds={selectedIds}
+          mutate={mutate}
+          onClear={clearSelection}
+        />
+      )}
     </>
   );
 }

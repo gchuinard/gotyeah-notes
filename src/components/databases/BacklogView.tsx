@@ -47,6 +47,7 @@ type Props = {
   databaseId: string;
   view: ParsedView;
   properties: ParsedDatabaseProperty[];
+  readOnly?: boolean;
 };
 
 /** Une « lane » = un sprint (avec ses issues) ou le backlog (sprint = null). */
@@ -138,7 +139,7 @@ function RowMeta({
 
 function BacklogRow({
   record, previewProps, statusProp, epicProp, pointsProp, autoEdit,
-  onTitleSave, onRowClick, onDelete, onDuplicate,
+  onTitleSave, onRowClick, onDelete, onDuplicate, readOnly = false,
 }: {
   record: ParsedRecord;
   previewProps?: ParsedDatabaseProperty[];
@@ -150,6 +151,7 @@ function BacklogRow({
   onRowClick: (record: ParsedRecord) => void;
   onDelete: () => void;
   onDuplicate: () => void;
+  readOnly?: boolean;
 }) {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleValue, setTitleValue] = useState(record.title);
@@ -170,7 +172,7 @@ function BacklogRow({
   };
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id: record.id });
+    useSortable({ id: record.id, disabled: readOnly });
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -187,16 +189,18 @@ function BacklogRow({
         isDragging ? "opacity-40" : "hover:bg-[var(--surface)] hover:border-[var(--border)]",
       ].join(" ")}
     >
-      <span
-        {...(isEditingTitle ? {} : listeners)}
-        className={[
-          "shrink-0 text-[var(--text-muted)] opacity-0 group-hover:opacity-100 transition-opacity",
-          isEditingTitle ? "" : "cursor-grab active:cursor-grabbing",
-        ].join(" ")}
-        title="Déplacer"
-      >
-        <GripVertical size={14} />
-      </span>
+      {!readOnly && (
+        <span
+          {...(isEditingTitle ? {} : listeners)}
+          className={[
+            "shrink-0 text-[var(--text-muted)] opacity-0 group-hover:opacity-100 transition-opacity",
+            isEditingTitle ? "" : "cursor-grab active:cursor-grabbing",
+          ].join(" ")}
+          title="Déplacer"
+        >
+          <GripVertical size={14} />
+        </span>
+      )}
 
       {isEditingTitle ? (
         <input
@@ -224,7 +228,9 @@ function BacklogRow({
       </div>
 
       {/* Actions directes (dupliquer / supprimer), visibles au survol. */}
-      <CardActions className="shrink-0" onDuplicate={onDuplicate} onDelete={onDelete} />
+      {!readOnly && (
+        <CardActions className="shrink-0" onDuplicate={onDuplicate} onDelete={onDelete} />
+      )}
     </div>
   );
 }
@@ -311,7 +317,7 @@ export function SprintLane({
   lane, collapsed, onToggleCollapse,
   statusProp, epicProp, pointsProp, previewProps, doneOptionId, newRecordId,
   onAddRecord, onTitleSave, onRowClick, onDeleteRecord, onDuplicateRecord,
-  onRenameSprint, onSprintAction, onEditSprint, onDeleteSprint,
+  onRenameSprint, onSprintAction, onEditSprint, onDeleteSprint, readOnly = false,
 }: {
   lane: Lane;
   collapsed: boolean;
@@ -331,6 +337,7 @@ export function SprintLane({
   onSprintAction: (id: string, state: SprintState) => void;
   onEditSprint: (sprint: ParsedSprint) => void;
   onDeleteSprint: (id: string) => void;
+  readOnly?: boolean;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: lane.id });
   const sprint = lane.sprint;
@@ -399,9 +406,9 @@ export function SprintLane({
           />
         ) : (
           <span
-            className={sprint ? "text-sm font-semibold text-[var(--text)] cursor-text" : "text-sm font-semibold text-[var(--text)]"}
-            onClick={() => { if (sprint) setIsRenaming(true); }}
-            title={sprint ? "Cliquer pour renommer" : undefined}
+            className={sprint && !readOnly ? "text-sm font-semibold text-[var(--text)] cursor-text" : "text-sm font-semibold text-[var(--text)]"}
+            onClick={() => { if (sprint && !readOnly) setIsRenaming(true); }}
+            title={sprint && !readOnly ? "Cliquer pour renommer" : undefined}
           >
             {sprint ? sprint.name : "Backlog"}
           </span>
@@ -431,7 +438,7 @@ export function SprintLane({
         {/* Bouton d'ajout ANCRÉ en tête de lane : reste visible même quand la lane
             déborde (le corps ne scrolle pas, le board oui). Absent tant que la lane
             est repliée — il réapparaît au dépliage. */}
-        {!collapsed && (
+        {!collapsed && !readOnly && (
           <button
             onClick={() => onAddRecord(lane)}
             className="shrink-0 flex items-center gap-1 pl-1 pr-1.5 py-0.5 text-xs text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] rounded-md transition-colors"
@@ -442,7 +449,7 @@ export function SprintLane({
           </button>
         )}
 
-        {sprint && (
+        {sprint && !readOnly && (
           <button
             ref={menuBtnRef}
             onClick={(e) => { e.stopPropagation(); setMenuOpen(true); }}
@@ -511,6 +518,7 @@ export function SprintLane({
                 onRowClick={onRowClick}
                 onDelete={() => onDeleteRecord(record)}
                 onDuplicate={() => onDuplicateRecord(record)}
+                readOnly={readOnly}
               />
             ))}
           </SortableContext>
@@ -641,7 +649,7 @@ function SprintEditModal({
 
 // ─── BacklogView (main) ───────────────────────────────────────────────────────
 
-export default function BacklogView({ databaseId, view, properties }: Props) {
+export default function BacklogView({ databaseId, view, properties, readOnly = false }: Props) {
   const { confirm, alert } = useDialog();
   const {
     data: records,
@@ -1149,15 +1157,17 @@ export default function BacklogView({ databaseId, view, properties }: Props) {
           onDragEnd={handleDragEnd}
         >
           <div className="p-4 flex flex-col gap-3 max-w-3xl mx-auto">
-            <div className="flex items-center justify-end">
-              <button
-                onClick={createSprint}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm rounded-md bg-[var(--surface)] border border-[var(--border)] hover:bg-[var(--surface-hover)] text-[var(--text)] transition-colors"
-              >
-                <Plus size={14} />
-                Créer un sprint
-              </button>
-            </div>
+            {!readOnly && (
+              <div className="flex items-center justify-end">
+                <button
+                  onClick={createSprint}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm rounded-md bg-[var(--surface)] border border-[var(--border)] hover:bg-[var(--surface-hover)] text-[var(--text)] transition-colors"
+                >
+                  <Plus size={14} />
+                  Créer un sprint
+                </button>
+              </div>
+            )}
 
             {lanes.map((lane) => (
               <SprintLane
@@ -1180,6 +1190,7 @@ export default function BacklogView({ databaseId, view, properties }: Props) {
                 onSprintAction={sprintAction}
                 onEditSprint={(s) => setEditingSprintId(s.id)}
                 onDeleteSprint={deleteSprint}
+                readOnly={readOnly}
               />
             ))}
           </div>
@@ -1205,6 +1216,7 @@ export default function BacklogView({ databaseId, view, properties }: Props) {
           properties={properties}
           databaseId={databaseId}
           onClose={() => setSelectedRecordId(null)}
+          readOnly={readOnly}
         />
       )}
 

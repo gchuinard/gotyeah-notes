@@ -54,6 +54,7 @@ type Props = {
   databaseId: string;
   view: ParsedView;
   properties: ParsedDatabaseProperty[];
+  readOnly?: boolean;
 };
 
 type KanbanCol = {
@@ -223,6 +224,7 @@ function KanbanCard({
   onCardClick,
   onDelete,
   onDuplicate,
+  readOnly,
 }: {
   record: ParsedRecord;
   /** Colonne de rendu : un record multiselect apparaît dans plusieurs colonnes. */
@@ -236,6 +238,7 @@ function KanbanCard({
   onCardClick?: (record: ParsedRecord) => void;
   onDelete: () => void;
   onDuplicate: () => void;
+  readOnly: boolean;
 }) {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleValue, setTitleValue] = useState(record.title);
@@ -263,7 +266,7 @@ function KanbanCard({
   };
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id: cardDndId(colId, record.id) });
+    useSortable({ id: cardDndId(colId, record.id), disabled: readOnly });
 
   // Après un drag, dnd-kit émet un clic parasite : on l'ignore brièvement pour ne
   // pas entrer en édition de titre juste après un dépôt.
@@ -289,7 +292,7 @@ function KanbanCard({
       ref={setNodeRef}
       style={style}
       {...attributes}
-      {...(isEditing ? {} : listeners)}
+      {...(isEditing || readOnly ? {} : listeners)}
       onClick={() => {
         if (!isEditing) onCardClick?.(record);
       }}
@@ -307,7 +310,7 @@ function KanbanCard({
       >
         {/* Case de sélection : visible au survol OU quand la carte est cochée.
             Contrôle distinct du clic d'ouverture / du drag (stopPropagation). */}
-        {!isEditing && (
+        {!isEditing && !readOnly && (
           <SelectCheckbox
             selected={selected}
             onToggle={onToggleSelect}
@@ -320,11 +323,13 @@ function KanbanCard({
         )}
 
         {/* Actions directes (dupliquer / supprimer), visibles au survol. */}
-        <CardActions
-          className="absolute top-1.5 right-1.5"
-          onDuplicate={onDuplicate}
-          onDelete={onDelete}
-        />
+        {!readOnly && (
+          <CardActions
+            className="absolute top-1.5 right-1.5"
+            onDuplicate={onDuplicate}
+            onDelete={onDelete}
+          />
+        )}
 
         {isEditingTitle ? (
           <input
@@ -341,9 +346,13 @@ function KanbanCard({
           />
         ) : (
           // Simple clic sur le titre → édition inline (n'ouvre PAS le panneau).
+          // En lecture seule, le clic remonte à la carte → ouvre le panneau.
           <p
-            className="text-sm font-semibold text-[var(--text)] leading-snug break-words pl-5 pr-12 cursor-text"
-            onClick={(e) => {
+            className={[
+              "text-sm font-semibold text-[var(--text)] leading-snug break-words pr-12",
+              readOnly ? "" : "pl-5 cursor-text",
+            ].join(" ")}
+            onClick={readOnly ? undefined : (e) => {
               e.stopPropagation();
               if (justDraggedRef.current) return;
               setIsEditingTitle(true);
@@ -362,20 +371,26 @@ function KanbanCard({
                 <span className="shrink-0 text-[var(--text-muted)] truncate max-w-[90px]" title={p.name}>
                   {p.name}
                 </span>
-                <div
-                  className="min-w-0 max-w-full"
-                  onClick={(e) => e.stopPropagation()}
-                  onPointerDown={(e) => e.stopPropagation()}
-                >
-                  <Cell
-                    property={p}
-                    record={record}
-                    onSave={(value) => onPropSave?.(record.id, p, value)}
-                    onEditingChange={(editing) =>
-                      setEditingPropId((prev) => (editing ? p.id : prev === p.id ? null : prev))
-                    }
-                  />
-                </div>
+                {readOnly ? (
+                  <div className="min-w-0 max-w-full">
+                    <CellDisplay property={p} record={record} />
+                  </div>
+                ) : (
+                  <div
+                    className="min-w-0 max-w-full"
+                    onClick={(e) => e.stopPropagation()}
+                    onPointerDown={(e) => e.stopPropagation()}
+                  >
+                    <Cell
+                      property={p}
+                      record={record}
+                      onSave={(value) => onPropSave?.(record.id, p, value)}
+                      onEditingChange={(editing) =>
+                        setEditingPropId((prev) => (editing ? p.id : prev === p.id ? null : prev))
+                      }
+                    />
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -401,6 +416,7 @@ export function KanbanColView({
   onDuplicateRecord,
   onRenameOption,
   createOnlyInUnassigned,
+  readOnly = false,
 }: {
   col: KanbanCol;
   previewProps: ParsedDatabaseProperty[];
@@ -415,6 +431,7 @@ export function KanbanColView({
   onDuplicateRecord: (record: ParsedRecord) => void;
   onRenameOption: (optionId: string, newName: string) => void;
   createOnlyInUnassigned: boolean;
+  readOnly?: boolean;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: col.id });
 
@@ -463,9 +480,9 @@ export function KanbanColView({
             />
           ) : (
             <span
-              className="cursor-text"
-              onClick={() => setIsRenamingCol(true)}
-              title="Cliquer pour renommer"
+              className={readOnly ? "" : "cursor-text"}
+              onClick={readOnly ? undefined : () => setIsRenamingCol(true)}
+              title={readOnly ? undefined : "Cliquer pour renommer"}
             >
               <SelectBadge option={col.option} />
             </span>
@@ -479,7 +496,7 @@ export function KanbanColView({
         {/* Bouton d'ajout ANCRÉ en tête de colonne : reste visible même quand la
             lane déborde (le board scrolle globalement, pas la lane). Le flag ne
             change QUE l'affichage, jamais la position. */}
-        {shouldShowKanbanAddButton(createOnlyInUnassigned, col.optionId) && (
+        {!readOnly && shouldShowKanbanAddButton(createOnlyInUnassigned, col.optionId) && (
           <button
             onClick={() => onAddRecord(col)}
             className="shrink-0 flex items-center gap-1 pl-1 pr-1.5 py-0.5 text-xs text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] rounded-md transition-colors"
@@ -516,6 +533,7 @@ export function KanbanColView({
               onCardClick={onCardClick}
               onDelete={() => onDeleteRecord(record)}
               onDuplicate={() => onDuplicateRecord(record)}
+              readOnly={readOnly}
             />
           ))}
           {col.records.length === 0 && (
@@ -532,7 +550,7 @@ export function KanbanColView({
 // ─── SprintBoardHeader (board scopé à un sprint) ──────────────────────────────
 
 function SprintBoardHeader({
-  sprints, scope, targetSprint, onScopeChange, onStart, onComplete,
+  sprints, scope, targetSprint, onScopeChange, onStart, onComplete, readOnly = false,
 }: {
   sprints: ParsedSprint[];
   scope: string;
@@ -540,6 +558,7 @@ function SprintBoardHeader({
   onScopeChange: (scope: string) => void;
   onStart: () => void;
   onComplete: () => void;
+  readOnly?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -553,6 +572,18 @@ function SprintBoardHeader({
       : scope === "active"
         ? targetSprint ? targetSprint.name : "Sprint actif"
         : targetSprint ? targetSprint.name : "Sprint";
+
+  // Lecture seule : le sélecteur PATCHe le config partagé et démarrer/terminer
+  // sont des mutations → on n'affiche que le libellé du scope courant.
+  if (readOnly) {
+    return (
+      <div className="flex items-center gap-2 px-4 py-2 border-b border-[var(--border)] shrink-0">
+        <span className="px-2.5 py-1 text-sm rounded-md bg-[var(--surface)] border border-[var(--border)] text-[var(--text)]">
+          {label}
+        </span>
+      </div>
+    );
+  }
 
   return (
     <div className="flex items-center gap-2 px-4 py-2 border-b border-[var(--border)] shrink-0">
@@ -613,7 +644,7 @@ function SprintBoardHeader({
 
 // ─── KanbanView (main) ────────────────────────────────────────────────────────
 
-export default function KanbanView({ databaseId, view, properties }: Props) {
+export default function KanbanView({ databaseId, view, properties, readOnly = false }: Props) {
   const { confirm, alert } = useDialog();
   const {
     data: records,
@@ -1108,6 +1139,14 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
   }
 
   if (!groupByProp) {
+    // Le sélecteur PATCHe le config partagé de la vue → message statique en RO.
+    if (readOnly) {
+      return (
+        <div className="flex items-center justify-center h-48 text-[var(--text-muted)] text-sm">
+          Vue kanban non configurée.
+        </div>
+      );
+    }
     return (
       <GroupBySelector
         view={view}
@@ -1133,6 +1172,7 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
           onScopeChange={handleScopeChange}
           onStart={handleStartSprint}
           onComplete={handleCompleteSprint}
+          readOnly={readOnly}
         />
       )}
 
@@ -1165,6 +1205,7 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
                 onDuplicateRecord={handleDuplicateRecord}
                 onRenameOption={handleRenameOption}
                 createOnlyInUnassigned={view.config.createInUnassignedOnly ?? false}
+                readOnly={readOnly}
               />
             ))}
           </div>
@@ -1186,17 +1227,20 @@ export default function KanbanView({ databaseId, view, properties }: Props) {
           properties={properties}
           databaseId={databaseId}
           onClose={() => setSelectedRecordId(null)}
+          readOnly={readOnly}
         />
       )}
 
-      {/* Barre d'action groupée (sélection multiple) */}
-      <BulkActionBar
-        properties={properties}
-        records={records}
-        selectedIds={selectedIds}
-        mutate={mutate}
-        onClear={clearSelection}
-      />
+      {/* Barre d'action groupée (sélection multiple) — jamais montée en RO */}
+      {!readOnly && (
+        <BulkActionBar
+          properties={properties}
+          records={records}
+          selectedIds={selectedIds}
+          mutate={mutate}
+          onClear={clearSelection}
+        />
+      )}
     </div>
   );
 }

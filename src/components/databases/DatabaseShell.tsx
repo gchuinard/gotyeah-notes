@@ -122,6 +122,7 @@ function SortableViewTab({
   onToggleMenu,
   onCloseMenu,
   onDelete,
+  readOnly,
 }: {
   view: ParsedView;
   isActive: boolean;
@@ -139,9 +140,10 @@ function SortableViewTab({
   onToggleMenu: () => void;
   onCloseMenu: () => void;
   onDelete: () => void;
+  readOnly: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id: view.id });
+    useSortable({ id: view.id, disabled: readOnly });
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -188,7 +190,7 @@ function SortableViewTab({
       )}
 
       {/* ⋯ context button */}
-      {!isEditing && (
+      {!isEditing && !readOnly && (
         <button
           ref={(el) => { if (el) menuBtnRefs.current.set(view.id, el); }}
           onClick={(e) => { e.stopPropagation(); onToggleMenu(); }}
@@ -326,7 +328,13 @@ function AddViewPopover({
 
 // ─── DatabaseShell ────────────────────────────────────────────────────────────
 
-export default function DatabaseShell({ databaseId }: { databaseId: string }) {
+export default function DatabaseShell({
+  databaseId,
+  readOnly = false,
+}: {
+  databaseId: string;
+  readOnly?: boolean;
+}) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { confirm, alert } = useDialog();
@@ -543,26 +551,34 @@ export default function DatabaseShell({ databaseId }: { databaseId: string }) {
                 onToggleMenu={() => setTabMenuOpenId((prev) => (prev === view.id ? null : view.id))}
                 onCloseMenu={() => setTabMenuOpenId(null)}
                 onDelete={() => handleDeleteView(view)}
+                readOnly={readOnly}
               />
             ))}
           </SortableContext>
         </DndContext>
 
         {/* Add view button */}
-        <button
-          ref={addButtonRef}
-          onClick={() => setShowAddView((v) => !v)}
-          className="ml-1 p-2 shrink-0 text-[var(--text-muted)] hover:text-[var(--text)] transition-colors"
-          title="Ajouter une vue"
-        >
-          <Plus size={14} />
-        </button>
+        {!readOnly && (
+          <button
+            ref={addButtonRef}
+            onClick={() => setShowAddView((v) => !v)}
+            className="ml-1 p-2 shrink-0 text-[var(--text-muted)] hover:text-[var(--text)] transition-colors"
+            title="Ajouter une vue"
+          >
+            <Plus size={14} />
+          </button>
+        )}
       </div>
 
-      {/* Sort / Filter / Count toolbar */}
+      {/* Sort / Filter / Count toolbar — les contrôles PATCHent le config PARTAGÉ
+          de la vue : masqués en lecture seule, seul le compteur reste. */}
       <div className="flex items-center gap-1 px-4 py-1.5 border-b border-[var(--border)] shrink-0">
-        <SortControls view={activeView} properties={data.properties} databaseId={databaseId} />
-        <FilterControls view={activeView} properties={data.properties} databaseId={databaseId} />
+        {!readOnly && (
+          <>
+            <SortControls view={activeView} properties={data.properties} databaseId={databaseId} />
+            <FilterControls view={activeView} properties={data.properties} databaseId={databaseId} />
+          </>
+        )}
         <span className="ml-auto text-xs text-[var(--text-muted)] tabular-nums">
           {countLabel}
         </span>
@@ -575,30 +591,35 @@ export default function DatabaseShell({ databaseId }: { databaseId: string }) {
             databaseId={databaseId}
             view={activeView}
             properties={data.properties}
+            readOnly={readOnly}
           />
         ) : activeView.type === "kanban" ? (
           <KanbanView
             databaseId={databaseId}
             view={activeView}
             properties={data.properties}
+            readOnly={readOnly}
           />
         ) : activeView.type === "calendar" ? (
           <CalendarView
             databaseId={databaseId}
             view={activeView}
             properties={data.properties}
+            readOnly={readOnly}
           />
         ) : activeView.type === "gallery" ? (
           <GalleryView
             databaseId={databaseId}
             view={activeView}
             properties={data.properties}
+            readOnly={readOnly}
           />
         ) : activeView.type === "backlog" ? (
           <BacklogView
             databaseId={databaseId}
             view={activeView}
             properties={data.properties}
+            readOnly={readOnly}
           />
         ) : (
           <div className="flex items-center justify-center h-48 text-[var(--text-muted)] text-sm">

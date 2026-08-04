@@ -12,9 +12,9 @@ type TrashRecord = TrashPage & { pageId: string };
 type TrashData = { pages: TrashPage[]; records: TrashRecord[] };
 
 function Row({
-  icon, title, onRestore, onPurge,
+  icon, title, onRestore, onPurge, canPurge,
 }: {
-  icon: string | null; title: string; onRestore: () => void; onPurge: () => void;
+  icon: string | null; title: string; onRestore: () => void; onPurge: () => void; canPurge: boolean;
 }) {
   return (
     <div className="group flex items-center gap-1.5 px-2 py-1 rounded hover:bg-[var(--surface-hover)] text-[var(--text-muted)]">
@@ -31,28 +31,32 @@ function Row({
       >
         <RotateCcw size={12} />
       </button>
-      <button
-        onClick={onPurge}
-        title="Supprimer définitivement"
-        className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-[var(--surface-active)] text-red-500"
-      >
-        <X size={13} />
-      </button>
+      {/* Purge = suppression DÉFINITIVE (?permanent=1) → admin seulement. */}
+      {canPurge && (
+        <button
+          onClick={onPurge}
+          title="Supprimer définitivement"
+          className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-[var(--surface-active)] text-red-500"
+        >
+          <X size={13} />
+        </button>
+      )}
     </div>
   );
 }
 
 /** Corbeille : pages/records supprimés, restaurables ou purgeables (purge auto 30 j). */
 export default function TrashSection() {
-  const { activeWorkspace } = useWorkspace();
+  const { activeWorkspace, isViewer, isAdmin } = useWorkspace();
   const wsId = activeWorkspace?.id ?? null;
-  const key = wsId ? `/api/trash?workspaceId=${wsId}` : null;
+  // Un lecteur ne peut ni restaurer ni purger : rien d'actionnable, on n'affiche pas.
+  const key = wsId && !isViewer ? `/api/trash?workspaceId=${wsId}` : null;
   const { data } = useSWR<TrashData>(key, fetcher);
   const { confirm } = useDialog();
   const [open, setOpen] = useState(false);
 
   const count = (data?.pages.length ?? 0) + (data?.records.length ?? 0);
-  if (count === 0) return null;
+  if (isViewer || count === 0) return null;
 
   const refresh = () => {
     mutate(key);
@@ -99,6 +103,7 @@ export default function TrashSection() {
               title={p.title}
               onRestore={() => restore("pages", p.id)}
               onPurge={() => purge("pages", p.id, p.title)}
+              canPurge={isAdmin}
             />
           ))}
           {data!.records.map((r) => (
@@ -108,6 +113,7 @@ export default function TrashSection() {
               title={r.title}
               onRestore={() => restore("records", r.id)}
               onPurge={() => purge("records", r.id, r.title)}
+              canPurge={isAdmin}
             />
           ))}
         </div>

@@ -21,6 +21,7 @@ type Props = {
   initialTitle: string;
   initialIcon?: string | null;
   onTitleChange?: (title: string) => void;
+  readOnly?: boolean;
 };
 
 export default function Editor({
@@ -29,6 +30,7 @@ export default function Editor({
   initialTitle,
   initialIcon,
   onTitleChange,
+  readOnly = false,
 }: Props) {
   const router = useRouter();
   const themeMode = useThemeMode();
@@ -116,6 +118,9 @@ export default function Editor({
   const editor = useCreateBlockNote({ schema: pageLinkSchema, initialContent: parsed as any, dictionary: fr, uploadFile });
 
   const scheduleSave = (partial: Record<string, unknown>) => {
+    // Ceinture + bretelles avec editable={!readOnly} : aucun PATCH ne part en
+    // lecture seule (le flush au démontage devient un no-op, le brouillon reste vide).
+    if (readOnly) return;
     setSaving("saving");
     draftRef.current = { ...draftRef.current, ...partial };
     saverRef.current!.schedule(draftRef.current);
@@ -148,7 +153,9 @@ export default function Editor({
 
       {/* Zone icône */}
       <div className="mb-3 relative">
-        {icon ? (
+        {readOnly ? (
+          icon && <span className="text-5xl leading-none">{icon}</span>
+        ) : icon ? (
           <div className="group inline-flex items-center gap-1">
             <button
               onClick={() => setPickerOpen(true)}
@@ -185,19 +192,22 @@ export default function Editor({
       </div>
 
       {/* Convertir en database */}
-      <div className="mb-3">
-        <button
-          onClick={handleConvertToDatabase}
-          disabled={converting}
-          className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-600 transition-colors disabled:opacity-50"
-        >
-          <Table2 size={14} />
-          {converting ? "Conversion…" : "Convertir en database"}
-        </button>
-      </div>
+      {!readOnly && (
+        <div className="mb-3">
+          <button
+            onClick={handleConvertToDatabase}
+            disabled={converting}
+            className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-600 transition-colors disabled:opacity-50"
+          >
+            <Table2 size={14} />
+            {converting ? "Conversion…" : "Convertir en database"}
+          </button>
+        </div>
+      )}
 
       <input
         value={title}
+        readOnly={readOnly}
         onChange={(e) => {
           const v = e.target.value;
           setTitle(v);
@@ -210,6 +220,7 @@ export default function Editor({
 
       <BlockNoteView
         editor={editor}
+        editable={!readOnly}
         theme={themeMode}
         onChange={() => {
           scheduleSave({ content: JSON.stringify(editor.document) });

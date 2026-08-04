@@ -15,9 +15,10 @@ export async function GET() {
   const memberships = await prisma.membership.findMany({
     where: { userId: user.id },
     orderBy: { createdAt: "asc" },
-    select: { workspace: { select: { id: true, name: true } } },
+    select: { role: true, workspace: { select: { id: true, name: true } } },
   });
-  return NextResponse.json(memberships.map((m) => m.workspace));
+  // Champ additif : les consommateurs historiques ({ id, name }) l'ignorent.
+  return NextResponse.json(memberships.map((m) => ({ ...m.workspace, role: m.role })));
 }
 
 export async function POST(req: Request) {

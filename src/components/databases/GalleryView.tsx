@@ -108,9 +108,10 @@ type Props = {
   databaseId: string;
   view: ParsedView;
   properties: ParsedDatabaseProperty[];
+  readOnly?: boolean;
 };
 
-export default function GalleryView({ databaseId, view, properties }: Props) {
+export default function GalleryView({ databaseId, view, properties, readOnly = false }: Props) {
   const { data: records, isLoading, error, mutate } = useSWR<ParsedRecord[]>(
     `/api/databases/${databaseId}/records`,
     fetcher
@@ -223,7 +224,7 @@ export default function GalleryView({ databaseId, view, properties }: Props) {
               onClick={() => setSelectedRecordId(record.id)}
             />
           ))}
-          <NewRecordCard onClick={handleAddRecord} />
+          {!readOnly && <NewRecordCard onClick={handleAddRecord} />}
         </div>
       </div>
 
@@ -234,6 +235,7 @@ export default function GalleryView({ databaseId, view, properties }: Props) {
           properties={properties}
           databaseId={databaseId}
           onClose={() => setSelectedRecordId(null)}
+          readOnly={readOnly}
         />
       )}
     </>

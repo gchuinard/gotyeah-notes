@@ -6,7 +6,7 @@ import { useWorkspace, Workspace } from "@/contexts/WorkspaceContext";
 import { useDialog } from "@/contexts/DialogContext";
 
 export default function WorkspaceSelector() {
-  const { workspaces, activeWorkspace, switchWorkspace } = useWorkspace();
+  const { workspaces, activeWorkspace, switchWorkspace, isViewer } = useWorkspace();
   const { confirm } = useDialog();
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -69,6 +69,12 @@ export default function WorkspaceSelector() {
         className="w-full flex items-center justify-between gap-1 px-2 py-1.5 rounded hover:bg-[var(--surface-hover)] font-semibold text-[var(--text)] text-base"
       >
         <span className="truncate">{activeWorkspace?.name ?? "—"}</span>
+        {/* Signal UX : évite de prendre les boutons masqués pour un bug. */}
+        {isViewer && activeWorkspace && (
+          <span className="shrink-0 text-[10px] font-medium uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-[var(--surface-active)] text-[var(--text-muted)]">
+            Lecture seule
+          </span>
+        )}
         <ChevronDown size={14} className="shrink-0 text-[var(--text-muted)]" />
       </button>
 
@@ -88,16 +94,19 @@ export default function WorkspaceSelector() {
                 className={ws.id === activeWorkspace?.id ? "text-blue-500 shrink-0" : "invisible shrink-0"}
               />
               <span className="flex-1 text-sm truncate text-[var(--text)]">{ws.name}</span>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  deleteWorkspace(ws);
-                }}
-                className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[var(--surface-hover)] rounded"
-                title="Supprimer l'espace"
-              >
-                <Trash2 size={12} className="text-[var(--text-muted)]" />
-              </button>
+              {/* Suppression d'un espace : réservée à ses admins (rôle PAR espace). */}
+              {ws.role === "admin" && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    deleteWorkspace(ws);
+                  }}
+                  className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[var(--surface-hover)] rounded"
+                  title="Supprimer l'espace"
+                >
+                  <Trash2 size={12} className="text-[var(--text-muted)]" />
+                </button>
+              )}
             </div>
           ))}
 

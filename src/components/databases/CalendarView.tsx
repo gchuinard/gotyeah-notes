@@ -159,6 +159,7 @@ function CalendarCell({
   properties,
   onRecordClick,
   onCellClick,
+  readOnly,
 }: {
   date: Date;
   isCurrentMonth: boolean;
@@ -167,16 +168,17 @@ function CalendarCell({
   properties: ParsedDatabaseProperty[];
   onRecordClick: (r: ParsedRecord) => void;
   onCellClick: (d: Date) => void;
+  readOnly: boolean;
 }) {
   const visible = dayRecords.slice(0, MAX_PILLS);
   const overflow = dayRecords.length - MAX_PILLS;
 
   return (
     <div
-      onClick={() => onCellClick(date)}
+      onClick={readOnly ? undefined : () => onCellClick(date)}
       className={[
-        "min-h-[100px] border border-[var(--border)] p-1 flex flex-col gap-0.5 cursor-pointer",
-        "hover:bg-[var(--surface-hover)] transition-colors select-none",
+        "min-h-[100px] border border-[var(--border)] p-1 flex flex-col gap-0.5 select-none",
+        readOnly ? "" : "cursor-pointer hover:bg-[var(--surface-hover)] transition-colors",
         isToday ? "bg-[color-mix(in_srgb,var(--accent)_12%,transparent)]" : "",
       ].join(" ")}
     >
@@ -214,9 +216,10 @@ type Props = {
   databaseId: string;
   view: ParsedView;
   properties: ParsedDatabaseProperty[];
+  readOnly?: boolean;
 };
 
-export default function CalendarView({ databaseId, view, properties }: Props) {
+export default function CalendarView({ databaseId, view, properties, readOnly = false }: Props) {
   const { data: records, isLoading, error, mutate } = useSWR<ParsedRecord[]>(
     `/api/databases/${databaseId}/records`,
     fetcher
@@ -284,7 +287,7 @@ export default function CalendarView({ databaseId, view, properties }: Props) {
 
   const handleCellClick = useCallback(
     async (date: Date) => {
-      if (!calendarPropId) return;
+      if (readOnly || !calendarPropId) return;
       const dateStr = toLocalDateKey(date);
       const tempId = crypto.randomUUID();
       const now = new Date();
@@ -330,7 +333,7 @@ export default function CalendarView({ databaseId, view, properties }: Props) {
         console.error("Échec de la création du record calendrier", err);
       }
     },
-    [calendarPropId, databaseId, records, mutate]
+    [readOnly, calendarPropId, databaseId, records, mutate]
   );
 
   // ── States ────────────────────────────────────────────────────────────────────
@@ -352,6 +355,14 @@ export default function CalendarView({ databaseId, view, properties }: Props) {
   }
 
   if (!calendarProp) {
+    // Le sélecteur PATCHe le config partagé de la vue → message statique en RO.
+    if (readOnly) {
+      return (
+        <div className="flex items-center justify-center h-48 text-[var(--text-muted)] text-sm">
+          Vue calendrier non configurée.
+        </div>
+      );
+    }
     return (
       <DatePropertySelector view={view} databaseId={databaseId} dateProps={dateProps} />
     );
@@ -426,6 +437,7 @@ export default function CalendarView({ databaseId, view, properties }: Props) {
                     properties={properties}
                     onRecordClick={handleRecordClick}
                     onCellClick={handleCellClick}
+                    readOnly={readOnly}
                   />
                 );
               })}
@@ -441,6 +453,7 @@ export default function CalendarView({ databaseId, view, properties }: Props) {
           properties={properties}
           databaseId={databaseId}
           onClose={() => setSelectedRecordId(null)}
+          readOnly={readOnly}
         />
       )}
     </>
