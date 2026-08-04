@@ -33,9 +33,13 @@ export async function GET(
     },
   });
 
-  // db is guaranteed to exist since checkDatabaseAccess succeeded
+  // db is guaranteed to exist since checkDatabaseAccess succeeded.
+  // workspaceId est AJOUTÉ (champ additif) : le client en a besoin pour lister
+  // les membres de l'espace de CETTE database — activeWorkspace est le workspace
+  // de SESSION, faux dès qu'on ouvre une page par lien profond ou Cmd+K.
   return NextResponse.json({
     ...db!,
+    workspaceId: access.workspaceId,
     properties: parseManyDatabaseProperties(db!.properties),
     views: parseManyViews(db!.views),
   });

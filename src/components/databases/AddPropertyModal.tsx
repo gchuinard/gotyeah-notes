@@ -16,6 +16,7 @@ const TYPE_OPTIONS: { value: PropertyType; label: string }[] = [
   { value: "date",        label: "Date" },
   { value: "url",         label: "URL" },
   { value: "email",       label: "Email" },
+  { value: "user",        label: "Utilisateur" },
 ];
 
 type Props = {

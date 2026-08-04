@@ -9,13 +9,16 @@ import type {
   PropertyValue,
   SelectOption,
 } from "@/lib/db";
+import { isMultiValueType } from "@/lib/db";
 import { SelectBadge } from "@/components/databases/Cell";
 import { useDialog } from "@/contexts/DialogContext";
+import { useWorkspaceMembers } from "@/lib/client/useWorkspaceMembers";
 
 // Barre d'action flottante affichée dès qu'au moins un record est sélectionné.
 // Sélection éphémère, propre à la vue (Set<string> d'ids détenu par la vue).
-// Pour CHAQUE propriété select/multiselect, propose d'appliquer une valeur au
-// groupe : boucle de N PATCH optimistes, échec partiel toléré (rollback ciblé).
+// Pour CHAQUE propriété select/multiselect/utilisateur, propose d'appliquer une
+// valeur au groupe : boucle de N PATCH optimistes, échec partiel toléré
+// (rollback ciblé).
 
 type Props = {
   properties: ParsedDatabaseProperty[];
@@ -24,6 +27,8 @@ type Props = {
   selectedIds: Set<string>;
   mutate: KeyedMutator<ParsedRecord[]>;
   onClear: () => void;
+  /** Espace de la database — source des membres pour les propriétés « utilisateur ». */
+  workspaceId?: string;
 };
 
 // ─── Menu ouvert VERS LE HAUT (la barre est ancrée en bas de l'écran) ─────────
@@ -150,6 +155,69 @@ function BulkSelectControl({
   );
 }
 
+// ─── Contrôle par propriété « utilisateur » ───────────────────────────────────
+
+function BulkUserControl({
+  property,
+  workspaceId,
+  onApply,
+}: {
+  property: ParsedDatabaseProperty;
+  workspaceId?: string;
+  onApply: (property: ParsedDatabaseProperty, userId: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const { members } = useWorkspaceMembers(workspaceId);
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-1 px-2.5 py-1 text-sm rounded-md bg-[var(--surface)] border border-[var(--border)] hover:bg-[var(--surface-hover)] text-[var(--text)]"
+        title={`Appliquer « ${property.name} » à la sélection`}
+      >
+        <span className="truncate max-w-[120px]">{property.name}</span>
+        <ChevronDown size={13} className="shrink-0 text-[var(--text-muted)]" />
+      </button>
+      {open && (
+        <MenuUp anchorRef={btnRef} onClose={() => setOpen(false)}>
+          {members.length === 0 ? (
+            <p className="px-3 py-1.5 text-sm text-[var(--text-muted)] whitespace-nowrap">
+              Aucun membre
+            </p>
+          ) : (
+            members.map((m) => (
+              <button
+                key={m.userId}
+                className="w-full text-left px-3 py-1.5 text-sm hover:bg-[var(--surface-hover)] flex items-center gap-2 whitespace-nowrap"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  setOpen(false);
+                  onApply(property, m.userId);
+                }}
+              >
+                {m.displayName}
+              </button>
+            ))
+          )}
+          <button
+            className="w-full text-left px-3 py-1.5 text-sm hover:bg-[var(--surface-hover)] text-[var(--text-muted)] border-t border-[var(--border)]"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              setOpen(false);
+              onApply(property, null);
+            }}
+          >
+            Retirer la valeur
+          </button>
+        </MenuUp>
+      )}
+    </>
+  );
+}
+
 // ─── Barre principale ─────────────────────────────────────────────────────────
 
 export default function BulkActionBar({
@@ -158,13 +226,14 @@ export default function BulkActionBar({
   selectedIds,
   mutate,
   onClear,
+  workspaceId,
 }: Props) {
   const { alert } = useDialog();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
   const selectProps = properties.filter(
-    (p) => p.type === "select" || p.type === "multiselect"
+    (p) => p.type === "select" || p.type === "multiselect" || p.type === "user"
   );
 
   // Seuls les ids encore présents dans le cache comptent (un record supprimé
@@ -173,8 +242,8 @@ export default function BulkActionBar({
   const count = targets.length;
 
   // Applique une valeur au groupe : boucle de PATCH optimistes.
-  // - select      → remplace la valeur par l'option (ou null = vide).
-  // - multiselect → ajoute l'option aux valeurs existantes (union, non destructif).
+  // - select                  → remplace la valeur par l'option (ou null = vide).
+  // - multiselect / user       → ajoute la valeur aux existantes (union, non destructif).
   const applyOption = async (
     property: ParsedDatabaseProperty,
     optionId: string | null
@@ -185,7 +254,7 @@ export default function BulkActionBar({
 
     const computeValue = (r: ParsedRecord): PropertyValue | null => {
       if (optionId === null) return null;
-      if (property.type === "multiselect") {
+      if (isMultiValueType(property.type)) {
         const cur = Array.isArray(r.properties[property.id])
           ? (r.properties[property.id] as string[])
           : [];
@@ -268,9 +337,18 @@ export default function BulkActionBar({
         <div className="w-px h-5 bg-[var(--border)] mx-0.5 shrink-0" />
       )}
       <div className="flex items-center gap-1.5 overflow-x-auto">
-        {selectProps.map((p) => (
-          <BulkSelectControl key={p.id} property={p} onApply={applyOption} />
-        ))}
+        {selectProps.map((p) =>
+          p.type === "user" ? (
+            <BulkUserControl
+              key={p.id}
+              property={p}
+              workspaceId={workspaceId}
+              onApply={applyOption}
+            />
+          ) : (
+            <BulkSelectControl key={p.id} property={p} onApply={applyOption} />
+          )
+        )}
       </div>
     </div>,
     document.body

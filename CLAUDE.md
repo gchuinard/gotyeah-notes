@@ -39,7 +39,7 @@ Database        → liée 1-1 à une Page (pageId @unique). Une database EST une
                   templateId/recordSections = template source + squelette de sections estampé.
                   patchNotesPageId = page « Patch notes » (référence LIBRE, pas de relation Prisma).
 DatabaseProperty → colonnes dynamiques (name, type, position, config JSON).
-                  types : title|text|number|select|multiselect|date|checkbox|url|email|relation
+                  types : title|text|number|select|multiselect|date|checkbox|url|email|relation|user
 Record          → lignes de la database (title, properties JSON indexé par property.id).
                   templateId/sectionsBody = corps SECTIONNÉ (sinon corps libre `content`).
                   sprintId = sprint d'affectation (vue backlog), null = backlog. onDelete SetNull.
@@ -70,6 +70,7 @@ AppConfig       → réglages globaux de l'instance. Ligne UNIQUE id="app", uplo
 - **Record.title** vs property "title" : la property de type `"title"` (créée automatiquement avec la database) correspond au champ SQL `Record.title`, PAS à une entrée dans `Record.properties`. Le composant Cell bifurque sur ce cas.
 - **DatabaseProperty.type = "title"** : type spécial, un seul par database, créé auto, ne peut pas être supprimé ni dupliqué. Les garde-fous sont en place côté API.
 - **Propriété `relation`** : la valeur d'un record est un `string[]` d'ids de `Record` appartenant à `config.targetDatabaseId`. Tout POST/PATCH de properties passe par `lib/relations.ts > validateRelationValues()` (→ **400** si un id n'existe pas dans la database cible ou y est en corbeille). Pas de backlink en v1 ; un id dont le record a été supprimé est un « lien mort » toléré à l'affichage.
+- **Propriété `user` (assignés)** : la valeur d'un record est un `string[]` d'ids de `User` **membres de l'espace hôte**. Tout POST/PATCH de properties passe par `lib/assignees.ts > validateUserValues()` (→ **400** si un id n'est pas membre, ou si la valeur n'est pas un tableau de strings) — validé sur le **patch entrant SEULEMENT**, jamais sur le résultat du merge : sinon un membre retiré gèlerait toute écriture ultérieure sur les cartes qu'il occupait. Un membre parti reste un « lien mort » toléré, affiché grisé « Membre retiré ». C'est un type **multi-valeurs** (`isMultiValueType` de `lib/db.ts` : multiselect + user) : filtres/tris/kanban le traitent comme un multiselect, `eq/neq` y sont sans effet (l'UI mappe « est / n'est pas » sur `contains/notContains`). ⚠️ **La liste des membres n'est jamais affichée avec l'email** : `GET /api/workspaces/[id]/members` le renvoie à tout membre, l'exposer sur un board diffuserait les emails de l'espace — la cellule et le filtre n'affichent que le `displayName`.
 - **Record.coverUrl** : le champ existe et `GalleryView` l'affiche, mais **aucune route ne permet de l'écrire** aujourd'hui (ni `POST /records`, ni `PATCH /records/[id]`) — seul `POST /api/records/[id]/duplicate` le recopie. Ne construis pas de feature en supposant qu'il est alimenté.
 - **View.config** : remplacement TOTAL au PATCH (pas de merge). Le client envoie toujours le config complet.
 - **Record.properties au PATCH** : MERGE via `mergeRecordProperties()`, pas écrasement. Une valeur `null` supprime la clé. ⚠️ En revanche `content` et `sectionsBody` sont en **remplacement TOTAL** : une mise à jour partielle du corps EFFACE les sections non réémises. Relis le corps existant avant d'écrire.
@@ -123,7 +124,8 @@ src/
 │       ├── databases/
 │       │   ├── route.ts             # POST create (+ scaffold colonnes/kanban/backlog depuis templateId)
 │       │   └── [id]/
-│       │       ├── route.ts         # GET, PATCH (recordTemplate, patchNotesPageId), DELETE
+│       │       ├── route.ts         # GET (expose workspaceId : source des membres côté client),
+│       │       │                     #   PATCH (recordTemplate, patchNotesPageId), DELETE
 │       │       ├── properties/route.ts  # POST property (relation : cible dans le MÊME workspace)
 │       │       ├── records/route.ts     # GET list (params optionnels filter/limit/offset/includeContent
 │       │       │                        #   + X-Total-Count), POST record (corps sectionné, sprintId)
@@ -188,10 +190,13 @@ src/
     │                                #   parse*/serialize*, mergeRecordProperties, removePropertyKey,
     │                                #   stripRecordBody, diff/parse des révisions
     ├── relations.ts                 # validateRelationValues (intégrité des propriétés relation)
+    ├── assignees.ts                 # validateUserValues (les assignés sont-ils membres de l'espace ?)
     ├── propertyConfig.ts            # validatePropertyConfig (zod), removedOptionIds,
     │                                #   findReferencedOptionIds (nettoyage d'options select supprimées)
     ├── propertyColors.ts            # SELECT_COLORS (palette des options select)
     ├── templates.ts                 # Templates fournis (builtin-scrum/ticket/bug), emptySectionsBody
+    │                                #   ⚠️ leur colonne « Assigné » est de type `user` depuis le 04/08 :
+    │                                #   les databases scaffoldées AVANT gardent leur colonne texte
     ├── tree.ts                      # buildTree, buildBreadcrumb, collectSubtreeIds,
     │                                #   toggleBranchCollapsed, searchResultPathSegments
     ├── avatar.ts · appConfig.ts     # Couleur/initiales d'avatar · config runtime (quota d'upload)
@@ -200,6 +205,9 @@ src/
         ├── blocknoteSchema.tsx      # Schéma BlockNote partagé : inline content « pageLink » (@page)
         │                            #   + menu de suggestion. Importé par Editor ET RecordPanel
         ├── upload.ts                # uploadFile() branché sur BlockNote (coller/glisser une image)
+        ├── useWorkspaceMembers.ts   # Membres de l'espace de la DATABASE (≠ workspace de session)
+        │                            #   pour les cellules/filtres « utilisateur ». Clé SWR partagée
+        │                            #   avec Réglages → Membres
         ├── kanban.ts                # Logique pure du kanban (ids DnD, valeur de groupe au drop…)
         ├── reorder.ts               # intermediatePosition() : position entre deux items au drop
         ├── debouncedSaver.ts        # createDebouncedSaver — le debounce d'autosave, testable
@@ -381,6 +389,7 @@ Toutes les variables réellement lues (`process.env`). Source de vérité : `.en
 - [x] ~~**`MCP_ACT_AS_ALLOWLIST` absente du `docker-compose.yml`**~~ : fait (18/07/2026, PR #38). Reste à la **renseigner** dans le `.env` du Pi pour que la garde s'applique réellement (vide = tout User existant reste incarnable).
 - [x] ~~**MCP — édition fine des options select**~~ : fait (2026-07-30). `notes_update_select_option` (renommer / recolorer / réordonner) + `notes_remove_select_option` (refus serveur si l'option est encore référencée, traduit en consigne).
 - [x] ~~**MCP — trous de la matrice CRUD (corbeille, sections, workspaces)**~~ : fait (2026-07-30). 12 outils ajoutés (49 au total), descriptions de suppression corrigées, table d'entités + test anti-régression (`notes_entities.py`). ⚠️ **Pas encore déployé ni rafraîchi côté connecteur claude.ai.**
+- [ ] **Kanban regroupé par assigné (lot B)** : `KanbanView` ne propose comme axe que `select`/`multiselect` — une propriété `user` n'est pas groupable (et le filtre « Mes cartes » n'existe pas : `View.config` est partagé entre membres, il faudrait un jeton `@me` résolu à l'affichage). Ticket au Backlog, cadré.
 - [ ] **`View.config.createInUnassignedOnly` sans UI** : le flag existe (`lib/db.ts`) et est respecté par le kanban (`KanbanView.tsx`), mais **aucun écran ne l'écrit** — il faut éditer le `config` de la vue à la main. À câbler dans les réglages de vue si on le garde.
 - [ ] **Dupliquer — phase B** : `POST /api/records/[id]/duplicate` (phase A) n'est câblé que dans **KanbanView** et **BacklogView**. Reste à l'exposer dans TableView / GalleryView / CalendarView.
 - [ ] **Migrations Prisma versionnées** : le déploiement applique encore `prisma db push` (pas de dossier `prisma/migrations/`). Bascule vers `migrate deploy` + baseline = PR **#23** (draft).
@@ -467,5 +476,5 @@ npx tsc --noEmit     # typecheck — il n'y a PAS de script `lint`/`typecheck`, 
 4. **TypeScript strict.** Pas de `any`.
 5. **Si tu hésites sur un choix, demande.** Mieux vaut une question qu'une refacto à défaire.
 6. **Teste tes modifications.** Lance les curl ou les vérifications manuelles et donne les résultats. Ne dis pas juste "à tester".
-7. **Utilise les helpers existants.** `parse*/serialize*` de `lib/db.ts`, `check*Access` de `lib/workspace.ts`, `nextPosition` de `lib/positions.ts`, `applyViewConfig` de `lib/client/viewFilters.ts`, `validateRelationValues` de `lib/relations.ts`, `trash*/purge*` de `lib/trash.ts`. Ne réimplémente pas ces logiques — et vérifie leur signature exacte dans *Architecture > Signatures des helpers* avant de les appeler.
+7. **Utilise les helpers existants.** `parse*/serialize*` de `lib/db.ts`, `check*Access` de `lib/workspace.ts`, `nextPosition` de `lib/positions.ts`, `applyViewConfig` de `lib/client/viewFilters.ts`, `validateRelationValues` de `lib/relations.ts`, `validateUserValues` de `lib/assignees.ts`, `trash*/purge*` de `lib/trash.ts`. Ne réimplémente pas ces logiques — et vérifie leur signature exacte dans *Architecture > Signatures des helpers* avant de les appeler.
 8. **zod v4** : utiliser `z.record(z.string(), z.unknown())` et non `z.record(z.unknown())` (le premier arg est la clé, pas la valeur).

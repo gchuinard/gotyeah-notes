@@ -2,7 +2,7 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import useSWR, { mutate as globalMutate } from "swr";
 import {
-  X, Type, Hash, ChevronDown, List, Calendar, CheckSquare, Link, Mail,
+  X, Type, Hash, ChevronDown, List, Calendar, CheckSquare, Link, Mail, Users,
   LayoutTemplate, History,
 } from "lucide-react";
 import { useCreateBlockNote } from "@blocknote/react";
@@ -28,6 +28,7 @@ const PROP_ICONS: Record<string, React.ReactNode> = {
   checkbox:    <CheckSquare size={14} />,
   url:         <Link size={14} />,
   email:       <Mail size={14} />,
+  user:        <Users size={14} />,
 };
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
@@ -179,6 +180,8 @@ type Props = {
   record: ParsedRecord;
   properties: ParsedDatabaseProperty[];
   databaseId: string;
+  /** Espace de la database — source des membres pour les propriétés « utilisateur ». */
+  workspaceId?: string;
   onClose: () => void;
   readOnly?: boolean;
 };
@@ -189,6 +192,7 @@ export default function RecordPanel({
   record,
   properties,
   databaseId,
+  workspaceId,
   onClose,
   readOnly = false,
 }: Props) {
@@ -569,12 +573,13 @@ export default function RecordPanel({
                   </div>
                   <div className="flex items-center min-w-0 py-1.5 min-h-[36px] text-sm">
                     {readOnly ? (
-                      <CellDisplay property={property} record={record} />
+                      <CellDisplay property={property} record={record} workspaceId={workspaceId} />
                     ) : (
                       <Cell
                         property={property}
                         record={record}
                         onSave={(value) => saveProperty(property, value)}
+                        workspaceId={workspaceId}
                       />
                     )}
                   </div>

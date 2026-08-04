@@ -8,6 +8,8 @@ import type {
   SelectOption,
 } from "@/lib/db";
 import type { SelectColor } from "@/lib/propertyColors";
+import { getAvatarColor, getInitials } from "@/lib/avatar";
+import { useWorkspaceMembers, type WorkspaceMember } from "@/lib/client/useWorkspaceMembers";
 import Portal from "@/components/databases/portal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -24,6 +26,12 @@ type CellProps = {
    * neutraliser le drag & l'ouverture du panneau tant qu'un dropdown est ouvert.
    */
   onEditingChange?: (editing: boolean) => void;
+  /**
+   * Espace de la DATABASE affichée — source des membres pour le type `user`.
+   * ⚠️ Pas celui de la session : une page ouverte par lien profond ou Cmd+K peut
+   * appartenir à un autre espace, et on proposerait les mauvaises personnes.
+   */
+  workspaceId?: string | null;
 };
 
 // ─── Badge ────────────────────────────────────────────────────────────────────
@@ -55,6 +63,35 @@ export function SelectBadge({ option }: { option: SelectOption }) {
   );
 }
 
+/**
+ * Pastille d'un assigné : initiales colorées + nom.
+ * `displayName` absent = l'id ne correspond plus à un membre de l'espace → on
+ * garde le « lien mort » VISIBLE en grisé plutôt que de le faire disparaître.
+ */
+export function UserBadge({ userId, displayName }: { userId: string; displayName?: string }) {
+  const known = Boolean(displayName);
+  const name = displayName ?? "Membre retiré";
+  return (
+    <span
+      className={[
+        "inline-flex items-center gap-1 pl-0.5 pr-2 py-0.5 rounded-full text-xs font-medium",
+        known ? "bg-[var(--surface)] text-[var(--text)]" : "bg-[var(--surface)] text-[var(--text-muted)] opacity-60",
+      ].join(" ")}
+      title={name}
+    >
+      <span
+        className={[
+          "w-4 h-4 rounded-full grid place-items-center text-[9px] font-bold shrink-0",
+          known ? getAvatarColor(userId) : "bg-[var(--surface-active)] text-[var(--text-muted)]",
+        ].join(" ")}
+      >
+        {known ? getInitials(name) : "?"}
+      </span>
+      <span className="truncate max-w-[110px]">{name}</span>
+    </span>
+  );
+}
+
 // ─── Display (view mode) ──────────────────────────────────────────────────────
 
 const DATE_FMT = new Intl.DateTimeFormat("fr-FR", { dateStyle: "medium" });
@@ -66,10 +103,17 @@ const DATETIME_FMT = new Intl.DateTimeFormat("fr-FR", {
 export function CellDisplay({
   property,
   record,
+  workspaceId,
 }: {
   property: ParsedDatabaseProperty;
   record: ParsedRecord;
+  /** Espace de la DATABASE (pas de la session) — requis pour les assignés. */
+  workspaceId?: string | null;
 }) {
+  // Hook appelé INCONDITIONNELLEMENT (avant tout early return) ; la clé null
+  // évite le fetch pour les cellules qui ne sont pas de type utilisateur.
+  const { members } = useWorkspaceMembers(property.type === "user" ? workspaceId : null);
+
   if (property.type === "title") {
     return record.title ? (
       <span>{record.title}</span>
@@ -158,6 +202,22 @@ export function CellDisplay({
               <span key={id} className="text-[var(--text-muted)]">—</span>
             );
           })}
+        </div>
+      );
+    }
+
+    case "user": {
+      const ids = Array.isArray(raw) ? (raw as string[]) : [];
+      if (ids.length === 0) return null;
+      return (
+        <div className="flex flex-wrap gap-1">
+          {ids.map((id) => (
+            <UserBadge
+              key={id}
+              userId={id}
+              displayName={members.find((m) => m.userId === id)?.displayName}
+            />
+          ))}
         </div>
       );
     }
@@ -403,11 +463,100 @@ function MultiSelectDropdown({
   );
 }
 
+/**
+ * Sélecteur d'assignés : même mécanique que MultiSelectDropdown (ref pour une
+ * closure fraîche, fermeture par Échap / clic extérieur), plus une recherche —
+ * une liste de membres peut être longue là où les options select sont rares.
+ * On affiche le displayName SEUL : la route des membres renvoie aussi l'email à
+ * tout membre, l'exposer sur chaque board diffuserait les emails de l'espace.
+ */
+function UserDropdown({
+  triggerRef,
+  members,
+  initialValues,
+  onClose,
+}: {
+  triggerRef: React.RefObject<HTMLElement | null>;
+  members: WorkspaceMember[];
+  initialValues: string[];
+  onClose: (values: string[]) => void;
+}) {
+  const selectedRef = useRef<string[]>(initialValues);
+  const [selected, setSelected] = useState<string[]>(initialValues);
+  const [query, setQuery] = useState("");
+
+  const toggle = (id: string) => {
+    const next = selected.includes(id) ? selected.filter((i) => i !== id) : [...selected, id];
+    setSelected(next);
+    selectedRef.current = next;
+  };
+
+  const close = useCallback(() => onClose(selectedRef.current), [onClose]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [close]);
+
+  const q = query.trim().toLowerCase();
+  const visible = q
+    ? members.filter((m) => m.displayName.toLowerCase().includes(q))
+    : members;
+
+  return (
+    <Portal anchor={triggerRef} onClose={close} minWidth={220}>
+      <div className="px-2 pt-1 pb-1.5">
+        <input
+          autoFocus
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Rechercher un membre…"
+          className="w-full text-sm bg-[var(--surface)] border border-[var(--border)] rounded-md px-2 py-1 text-[var(--text)] outline-none focus:border-[var(--accent)]"
+          onMouseDown={(e) => e.stopPropagation()}
+        />
+      </div>
+      {visible.length === 0 && (
+        <p className="px-3 py-2 text-xs text-[var(--text-muted)]">Aucun membre trouvé.</p>
+      )}
+      {visible.map((m) => (
+        <button
+          key={m.userId}
+          className="w-full text-left px-3 py-1.5 text-sm hover:bg-[var(--surface-hover)] flex items-center gap-2"
+          onMouseDown={(e) => { e.preventDefault(); toggle(m.userId); }}
+        >
+          <span
+            className={[
+              "w-4 h-4 rounded border flex items-center justify-center shrink-0",
+              selected.includes(m.userId)
+                ? "bg-[var(--accent)] border-[var(--accent)]"
+                : "border-[var(--border)]",
+            ].join(" ")}
+          >
+            {selected.includes(m.userId) && <Check size={10} className="text-white" />}
+          </span>
+          <UserBadge userId={m.userId} displayName={m.displayName} />
+        </button>
+      ))}
+    </Portal>
+  );
+}
+
 // ─── Main Cell component ──────────────────────────────────────────────────────
 
-export default function Cell({ property, record, onSave, autoEdit, onEditingChange }: CellProps) {
+export default function Cell({
+  property,
+  record,
+  onSave,
+  autoEdit,
+  onEditingChange,
+  workspaceId,
+}: CellProps) {
   const [isEditing, setIsEditing] = useState(false);
   const triggerRef = useRef<HTMLDivElement>(null);
+  const { members } = useWorkspaceMembers(property.type === "user" ? workspaceId : null);
 
   // Auto-enter edit mode on mount for newly created rows
   useEffect(() => {
@@ -494,6 +643,24 @@ export default function Cell({ property, record, onSave, autoEdit, onEditingChan
     );
   }
 
+  // ── Assignés (utilisateur) ────────────────────────────────────────────────
+  // Branche EXPLICITE avant le repli texte : sans elle, le type tomberait dans
+  // TextInput qui écrirait une string dans un champ string[].
+  if (isEditing && property.type === "user") {
+    const values = (record.properties[property.id] as string[] | undefined) ?? [];
+    return (
+      <div ref={triggerRef} className="min-h-[22px]">
+        <CellDisplay property={property} record={record} workspaceId={workspaceId} />
+        <UserDropdown
+          triggerRef={triggerRef}
+          members={members}
+          initialValues={values}
+          onClose={(next) => commit(next.length > 0 ? next : null)}
+        />
+      </div>
+    );
+  }
+
   // ── Text / number / date editors ──────────────────────────────────────────
   if (isEditing) {
     const type = property.type;
@@ -547,7 +714,7 @@ export default function Cell({ property, record, onSave, autoEdit, onEditingChan
           Vide
         </span>
       ) : (
-        <CellDisplay property={property} record={record} />
+        <CellDisplay property={property} record={record} workspaceId={workspaceId} />
       )}
     </div>
   );

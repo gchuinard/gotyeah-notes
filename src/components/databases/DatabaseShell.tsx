@@ -36,6 +36,9 @@ import Portal from "@/components/databases/portal";
 type DatabaseData = {
   id: string;
   pageId: string;
+  /** Espace de CETTE database (renvoyé par l'API) — source des membres pour les
+   *  propriétés « utilisateur ». Ne pas le confondre avec l'espace de session. */
+  workspaceId: string;
   properties: ParsedDatabaseProperty[];
   views: ParsedView[];
 };
@@ -579,7 +582,7 @@ export default function DatabaseShell({
         {!readOnly && (
           <>
             <SortControls view={activeView} properties={data.properties} databaseId={databaseId} />
-            <FilterControls view={activeView} properties={data.properties} databaseId={databaseId} />
+            <FilterControls view={activeView} properties={data.properties} databaseId={databaseId} workspaceId={data.workspaceId} />
           </>
         )}
         <span className="ml-auto text-xs text-[var(--text-muted)] tabular-nums">
@@ -594,6 +597,7 @@ export default function DatabaseShell({
             databaseId={databaseId}
             view={activeView}
             properties={data.properties}
+            workspaceId={data.workspaceId}
             readOnly={readOnly}
             isAdmin={isAdmin}
           />
@@ -602,6 +606,7 @@ export default function DatabaseShell({
             databaseId={databaseId}
             view={activeView}
             properties={data.properties}
+            workspaceId={data.workspaceId}
             readOnly={readOnly}
           />
         ) : activeView.type === "calendar" ? (
@@ -609,6 +614,7 @@ export default function DatabaseShell({
             databaseId={databaseId}
             view={activeView}
             properties={data.properties}
+            workspaceId={data.workspaceId}
             readOnly={readOnly}
           />
         ) : activeView.type === "gallery" ? (
@@ -616,6 +622,7 @@ export default function DatabaseShell({
             databaseId={databaseId}
             view={activeView}
             properties={data.properties}
+            workspaceId={data.workspaceId}
             readOnly={readOnly}
           />
         ) : activeView.type === "backlog" ? (
@@ -623,6 +630,7 @@ export default function DatabaseShell({
             databaseId={databaseId}
             view={activeView}
             properties={data.properties}
+            workspaceId={data.workspaceId}
             readOnly={readOnly}
             isAdmin={isAdmin}
           />

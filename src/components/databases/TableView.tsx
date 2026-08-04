@@ -52,6 +52,8 @@ type Props = {
   readOnly?: boolean;
   /** Suppressions DÉFINITIVES (colonne) : réservées aux admins. */
   isAdmin?: boolean;
+  /** Espace de la database — source des membres pour les propriétés « utilisateur ». */
+  workspaceId?: string;
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -138,6 +140,7 @@ function SortableRow({
   onDelete,
   onTitleClick,
   readOnly,
+  workspaceId,
 }: {
   record: ParsedRecord;
   index: number;
@@ -149,6 +152,7 @@ function SortableRow({
   onDelete: () => void;
   onTitleClick: () => void;
   readOnly: boolean;
+  workspaceId?: string;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useSortable({
     id: record.id,
@@ -211,7 +215,7 @@ function SortableRow({
               onClick={onTitleClick}
             >
               <div className="truncate">
-                <CellDisplay property={property} record={record} />
+                <CellDisplay property={property} record={record} workspaceId={workspaceId} />
               </div>
             </td>
           );
@@ -223,12 +227,13 @@ function SortableRow({
             className="px-3 py-1.5 text-[var(--text)] overflow-hidden"
           >
             {readOnly ? (
-              <CellDisplay property={property} record={record} />
+              <CellDisplay property={property} record={record} workspaceId={workspaceId} />
             ) : (
               <Cell
                 property={property}
                 record={record}
                 onSave={(value) => onSave(property, value)}
+                workspaceId={workspaceId}
               />
             )}
           </td>
@@ -278,6 +283,7 @@ export default function TableView({
   properties: initialProperties,
   readOnly = false,
   isAdmin = false,
+  workspaceId,
 }: Props) {
   const { confirm } = useDialog();
   const { data: records, error, isLoading, mutate } = useSWR<ParsedRecord[]>(
@@ -727,6 +733,7 @@ export default function TableView({
                       onDelete={() => handleDeleteRecord(record)}
                       onTitleClick={() => setSelectedRecordId(record.id)}
                       readOnly={readOnly}
+                      workspaceId={workspaceId}
                     />
                   ))}
                 </SortableContext>
@@ -785,6 +792,7 @@ export default function TableView({
           record={selectedRecord}
           properties={properties}
           databaseId={databaseId}
+          workspaceId={workspaceId}
           onClose={() => setSelectedRecordId(null)}
           readOnly={readOnly}
         />
@@ -798,6 +806,7 @@ export default function TableView({
           selectedIds={selectedIds}
           mutate={mutate}
           onClear={clearSelection}
+          workspaceId={workspaceId}
         />
       )}
     </>

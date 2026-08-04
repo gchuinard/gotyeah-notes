@@ -36,10 +36,12 @@ function GalleryCard({
   record,
   previewProps,
   onClick,
+  workspaceId,
 }: {
   record: ParsedRecord;
   previewProps: ParsedDatabaseProperty[];
   onClick: () => void;
+  workspaceId?: string;
 }) {
   const filledProps = previewProps.filter((p) => {
     const v = record.properties[p.id];
@@ -77,7 +79,7 @@ function GalleryCard({
                   {p.name}
                 </span>
                 <span className="text-xs min-w-0 truncate">
-                  <CellDisplay property={p} record={record} />
+                  <CellDisplay property={p} record={record} workspaceId={workspaceId} />
                 </span>
               </div>
             ))}
@@ -109,9 +111,10 @@ type Props = {
   view: ParsedView;
   properties: ParsedDatabaseProperty[];
   readOnly?: boolean;
+  workspaceId?: string;
 };
 
-export default function GalleryView({ databaseId, view, properties, readOnly = false }: Props) {
+export default function GalleryView({ databaseId, view, properties, readOnly = false, workspaceId }: Props) {
   const { data: records, isLoading, error, mutate } = useSWR<ParsedRecord[]>(
     `/api/databases/${databaseId}/records`,
     fetcher
@@ -221,6 +224,7 @@ export default function GalleryView({ databaseId, view, properties, readOnly = f
               key={record.id}
               record={record}
               previewProps={previewProps}
+              workspaceId={workspaceId}
               onClick={() => setSelectedRecordId(record.id)}
             />
           ))}
@@ -234,6 +238,7 @@ export default function GalleryView({ databaseId, view, properties, readOnly = f
           record={selectedRecord}
           properties={properties}
           databaseId={databaseId}
+          workspaceId={workspaceId}
           onClose={() => setSelectedRecordId(null)}
           readOnly={readOnly}
         />

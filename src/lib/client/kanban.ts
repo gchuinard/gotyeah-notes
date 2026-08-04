@@ -1,3 +1,4 @@
+import { isMultiValueType } from "@/lib/db";
 import type { PropertyValue, RecordProperties } from "@/lib/db";
 
 /**
@@ -40,7 +41,10 @@ export function groupValueOnDrop(
   sourceOptionId: string | null,
   targetOptionId: string | null
 ): PropertyValue | null {
-  if (propertyType !== "multiselect") return targetOptionId;
+  // ⚠️ Tout type MULTI-VALEURS passe par la branche tableau. Renvoyer une string
+  // pour un champ string[] corromprait le record en silence (l'optimiste passe,
+  // le serveur refuse, la carte cesse d'être filtrée).
+  if (!isMultiValueType(propertyType)) return targetOptionId;
 
   // « Sans valeur » = aucune valeur résiduelle.
   if (targetOptionId === null) return null;

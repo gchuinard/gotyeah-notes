@@ -36,11 +36,21 @@ export function deriveSeedFromFilters(
 ): RecordProperties {
   const seed: RecordProperties = {};
   for (const filter of filters) {
-    if (filter.operator !== "eq") continue;
     const property = properties.find((p) => p.id === filter.propertyId);
     if (!property) continue;
-    if (property.type !== "select" && property.type !== "text") continue;
     if (typeof filter.value !== "string") continue;
+
+    // `user` filtre par `contains` (valeur = tableau) : sans cette branche, une
+    // carte créée dans un board filtré par assigné naîtrait SANS assigné et
+    // disparaîtrait à la revalidation — le bug que ce helper existe pour éviter.
+    if (property.type === "user") {
+      if (filter.operator !== "contains") continue;
+      seed[filter.propertyId] = [filter.value];
+      continue;
+    }
+
+    if (filter.operator !== "eq") continue;
+    if (property.type !== "select" && property.type !== "text") continue;
     seed[filter.propertyId] = filter.value;
   }
   return seed;
@@ -111,9 +121,13 @@ export function applyFilters(
           return true;
         }
 
-        // relation = tableau d'ids de records cibles → mêmes opérateurs que multiselect.
+        // relation = ids de records cibles, user = ids de membres → même forme
+        // (string[]) et donc mêmes opérateurs que multiselect. ⚠️ Ce bloc IGNORE
+        // eq/neq : l'UI doit mapper « est / n'est pas » sur contains/notContains,
+        // sinon le filtre s'affiche actif tout en ne filtrant rien.
         case "multiselect":
-        case "relation": {
+        case "relation":
+        case "user": {
           const arr = Array.isArray(raw) ? (raw as string[]) : [];
           if (op === "isEmpty")     return arr.length === 0;
           if (op === "isNotEmpty")  return arr.length > 0;
@@ -192,9 +206,10 @@ export function applySorts(
           cmp = an.localeCompare(bn, "fr");
           break;
         }
-        // relation : tri par nombre de liens, comme un multiselect.
+        // relation / user : tri par nombre d'éléments, comme un multiselect.
         case "multiselect":
-        case "relation": {
+        case "relation":
+        case "user": {
           const al = Array.isArray(av) ? (av as string[]).length : 0;
           const bl = Array.isArray(bv) ? (bv as string[]).length : 0;
           cmp = al - bl;

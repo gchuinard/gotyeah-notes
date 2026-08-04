@@ -50,6 +50,7 @@ type Props = {
   readOnly?: boolean;
   /** Suppression DÉFINITIVE d'un sprint : réservée aux admins. */
   isAdmin?: boolean;
+  workspaceId?: string;
 };
 
 /** Une « lane » = un sprint (avec ses issues) ou le backlog (sprint = null). */
@@ -99,13 +100,14 @@ function laneOf(lanes: Lane[], id: string): Lane | null {
 // ─── RowMeta (épic / statut / points) ─────────────────────────────────────────
 
 function RowMeta({
-  record, previewProps, statusProp, epicProp, pointsProp,
+  record, previewProps, statusProp, epicProp, pointsProp, workspaceId,
 }: {
   record: ParsedRecord;
   previewProps?: ParsedDatabaseProperty[];
   statusProp?: ParsedDatabaseProperty;
   epicProp?: ParsedDatabaseProperty;
   pointsProp?: ParsedDatabaseProperty;
+  workspaceId?: string;
 }) {
   const pts = pointsProp ? record.properties[pointsProp.id] : undefined;
   return (
@@ -115,15 +117,15 @@ function RowMeta({
         if (v === undefined || v === null || (Array.isArray(v) && v.length === 0)) return null;
         return (
           <span key={p.id} className="shrink-0 max-w-[160px] truncate text-xs text-[var(--text-muted)]">
-            <CellDisplay property={p} record={record} />
+            <CellDisplay property={p} record={record} workspaceId={workspaceId} />
           </span>
         );
       })}
       {epicProp && record.properties[epicProp.id] != null && (
-        <span className="shrink-0"><CellDisplay property={epicProp} record={record} /></span>
+        <span className="shrink-0"><CellDisplay property={epicProp} record={record} workspaceId={workspaceId} /></span>
       )}
       {statusProp && record.properties[statusProp.id] != null && (
-        <span className="shrink-0"><CellDisplay property={statusProp} record={record} /></span>
+        <span className="shrink-0"><CellDisplay property={statusProp} record={record} workspaceId={workspaceId} /></span>
       )}
       {pointsProp && typeof pts === "number" && (
         <span
@@ -141,7 +143,7 @@ function RowMeta({
 
 function BacklogRow({
   record, previewProps, statusProp, epicProp, pointsProp, autoEdit,
-  onTitleSave, onRowClick, onDelete, onDuplicate, readOnly = false,
+  onTitleSave, onRowClick, onDelete, onDuplicate, readOnly = false, workspaceId,
 }: {
   record: ParsedRecord;
   previewProps?: ParsedDatabaseProperty[];
@@ -154,6 +156,7 @@ function BacklogRow({
   onDelete: () => void;
   onDuplicate: () => void;
   readOnly?: boolean;
+  workspaceId?: string;
 }) {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleValue, setTitleValue] = useState(record.title);
@@ -226,7 +229,7 @@ function BacklogRow({
       )}
 
       <div className="flex items-center gap-1.5 shrink-0">
-        <RowMeta record={record} previewProps={previewProps} statusProp={statusProp} epicProp={epicProp} pointsProp={pointsProp} />
+        <RowMeta record={record} previewProps={previewProps} statusProp={statusProp} epicProp={epicProp} pointsProp={pointsProp} workspaceId={workspaceId} />
       </div>
 
       {/* Actions directes (dupliquer / supprimer), visibles au survol. */}
@@ -238,13 +241,14 @@ function BacklogRow({
 }
 
 function BacklogRowOverlay({
-  record, previewProps, statusProp, epicProp, pointsProp,
+  record, previewProps, statusProp, epicProp, pointsProp, workspaceId,
 }: {
   record: ParsedRecord;
   previewProps?: ParsedDatabaseProperty[];
   statusProp?: ParsedDatabaseProperty;
   epicProp?: ParsedDatabaseProperty;
   pointsProp?: ParsedDatabaseProperty;
+  workspaceId?: string;
 }) {
   return (
     <div className="flex items-center gap-2 pl-1.5 pr-2 py-1.5 rounded-md border border-[var(--border)] bg-[var(--bg)] shadow-xl cursor-grabbing">
@@ -253,7 +257,7 @@ function BacklogRowOverlay({
         {record.title || "Sans titre"}
       </span>
       <div className="flex items-center gap-1.5 shrink-0">
-        <RowMeta record={record} previewProps={previewProps} statusProp={statusProp} epicProp={epicProp} pointsProp={pointsProp} />
+        <RowMeta record={record} previewProps={previewProps} statusProp={statusProp} epicProp={epicProp} pointsProp={pointsProp} workspaceId={workspaceId} />
       </div>
     </div>
   );
@@ -323,7 +327,7 @@ export function SprintLane({
   lane, collapsed, onToggleCollapse,
   statusProp, epicProp, pointsProp, previewProps, doneOptionId, newRecordId,
   onAddRecord, onTitleSave, onRowClick, onDeleteRecord, onDuplicateRecord,
-  onRenameSprint, onSprintAction, onEditSprint, onDeleteSprint, readOnly = false, isAdmin = false,
+  onRenameSprint, onSprintAction, onEditSprint, onDeleteSprint, readOnly = false, isAdmin = false, workspaceId,
 }: {
   lane: Lane;
   collapsed: boolean;
@@ -345,6 +349,7 @@ export function SprintLane({
   onDeleteSprint: (id: string) => void;
   readOnly?: boolean;
   isAdmin?: boolean;
+  workspaceId?: string;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: lane.id });
   const sprint = lane.sprint;
@@ -527,6 +532,7 @@ export function SprintLane({
                 onDelete={() => onDeleteRecord(record)}
                 onDuplicate={() => onDuplicateRecord(record)}
                 readOnly={readOnly}
+                workspaceId={workspaceId}
               />
             ))}
           </SortableContext>
@@ -657,7 +663,7 @@ function SprintEditModal({
 
 // ─── BacklogView (main) ───────────────────────────────────────────────────────
 
-export default function BacklogView({ databaseId, view, properties, readOnly = false, isAdmin = false }: Props) {
+export default function BacklogView({ databaseId, view, properties, readOnly = false, isAdmin = false, workspaceId }: Props) {
   const { confirm, alert } = useDialog();
   const {
     data: records,
@@ -1200,6 +1206,7 @@ export default function BacklogView({ databaseId, view, properties, readOnly = f
                 onDeleteSprint={deleteSprint}
                 readOnly={readOnly}
                 isAdmin={isAdmin}
+                workspaceId={workspaceId}
               />
             ))}
           </div>
@@ -1212,6 +1219,7 @@ export default function BacklogView({ databaseId, view, properties, readOnly = f
                 statusProp={statusProp}
                 epicProp={epicProp}
                 pointsProp={pointsProp}
+                workspaceId={workspaceId}
               />
             ) : null}
           </DragOverlay>
@@ -1224,6 +1232,7 @@ export default function BacklogView({ databaseId, view, properties, readOnly = f
           record={selectedRecord}
           properties={properties}
           databaseId={databaseId}
+          workspaceId={workspaceId}
           onClose={() => setSelectedRecordId(null)}
           readOnly={readOnly}
         />

@@ -217,9 +217,10 @@ type Props = {
   view: ParsedView;
   properties: ParsedDatabaseProperty[];
   readOnly?: boolean;
+  workspaceId?: string;
 };
 
-export default function CalendarView({ databaseId, view, properties, readOnly = false }: Props) {
+export default function CalendarView({ databaseId, view, properties, readOnly = false, workspaceId }: Props) {
   const { data: records, isLoading, error, mutate } = useSWR<ParsedRecord[]>(
     `/api/databases/${databaseId}/records`,
     fetcher
@@ -452,6 +453,7 @@ export default function CalendarView({ databaseId, view, properties, readOnly = 
           record={selectedRecord}
           properties={properties}
           databaseId={databaseId}
+          workspaceId={workspaceId}
           onClose={() => setSelectedRecordId(null)}
           readOnly={readOnly}
         />

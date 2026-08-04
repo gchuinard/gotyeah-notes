@@ -17,6 +17,7 @@ import {
 import { applyFilters } from "@/lib/client/viewFilters";
 import { emptySectionsBody } from "@/lib/templates";
 import { validateRelationValues } from "@/lib/relations";
+import { validateUserValues } from "@/lib/assignees";
 
 // Params de requête OPTIONNELS (consommateurs sans applyViewConfig, ex. MCP).
 // Aucun param → réponse historique intégrale (le front n'est pas impacté).
@@ -147,6 +148,12 @@ export async function POST(
   const relationCheck = await validateRelationValues(databaseId, properties);
   if (!relationCheck.ok) {
     return NextResponse.json({ error: relationCheck.error }, { status: 400 });
+  }
+
+  // Garde-fou jumeau pour les assignés : un userId doit être membre de l'espace.
+  const assigneeCheck = await validateUserValues(access.workspaceId, databaseId, properties);
+  if (!assigneeCheck.ok) {
+    return NextResponse.json({ error: assigneeCheck.error }, { status: 400 });
   }
 
   // Garde-fou : un sprint fourni doit appartenir à cette database.

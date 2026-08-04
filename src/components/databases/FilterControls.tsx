@@ -12,6 +12,7 @@ import type {
   PropertyValue,
 } from "@/lib/db";
 import Portal from "@/components/databases/portal";
+import { useWorkspaceMembers } from "@/lib/client/useWorkspaceMembers";
 
 // ─── Operator config per type ─────────────────────────────────────────────────
 
@@ -60,6 +61,16 @@ const OPS_DATE: OpDef[] = [
   { value: "isNotEmpty",  label: "n'est pas vide" },
 ];
 
+// ⚠️ « est / n'est pas » sont volontairement mappés sur contains/notContains :
+// une valeur `user` est un TABLEAU d'ids, et applyFilters ignore eq/neq sur ce
+// type. Proposer « est » afficherait un filtre actif qui ne filtre rien.
+const OPS_USER: OpDef[] = [
+  { value: "contains",    label: "est" },
+  { value: "notContains", label: "n'est pas" },
+  { value: "isEmpty",     label: "est vide" },
+  { value: "isNotEmpty",  label: "n'est pas vide" },
+];
+
 const NO_VALUE_OPS = new Set<FilterOperator>(["isEmpty", "isNotEmpty"]);
 
 function opsForType(type: PropertyType): OpDef[] {
@@ -67,6 +78,7 @@ function opsForType(type: PropertyType): OpDef[] {
     case "number":      return OPS_NUMBER;
     case "select":      return OPS_SELECT;
     case "multiselect": return OPS_MULTISELECT;
+    case "user":        return OPS_USER;
     case "checkbox":    return OPS_CHECKBOX;
     case "date":        return OPS_DATE;
     default:            return OPS_TEXT; // title, text, url, email
@@ -78,6 +90,7 @@ function defaultOpForType(type: PropertyType): FilterOperator {
     case "number":      return "eq";
     case "select":      return "eq";
     case "multiselect": return "contains";
+    case "user":        return "contains";
     case "checkbox":    return "eq";
     case "date":        return "eq";
     default:            return "contains";
@@ -91,11 +104,13 @@ function FilterValueInput({
   operator,
   value,
   onChange,
+  workspaceId,
 }: {
   property: ParsedDatabaseProperty;
   operator: FilterOperator;
   value: PropertyValue | undefined;
   onChange: (v: PropertyValue | undefined) => void;
+  workspaceId?: string;
 }) {
   // Local state for text/number inputs so we don't PATCH on every keystroke
   const [localText, setLocalText] = useState<string>(
@@ -106,6 +121,10 @@ function FilterValueInput({
   useEffect(() => {
     setLocalText(value != null ? String(value) : "");
   }, [value]);
+
+  // Hook appelé inconditionnellement (avant tout return) — la clé SWR est nulle
+  // hors propriété `user`, donc aucun fetch inutile.
+  const { members } = useWorkspaceMembers(property.type === "user" ? workspaceId : null);
 
   if (NO_VALUE_OPS.has(operator)) return null;
 
@@ -153,6 +172,20 @@ function FilterValueInput({
         </select>
       );
     }
+
+    case "user":
+      return (
+        <select
+          value={value != null ? String(value) : ""}
+          onChange={(e) => onChange(e.target.value || undefined)}
+          className="flex-1 min-w-0 text-sm bg-[var(--surface)] border border-[var(--border)] rounded px-2 py-1 text-[var(--text)] outline-none focus:border-[var(--accent)]"
+        >
+          <option value="">— choisir —</option>
+          {members.map((m) => (
+            <option key={m.userId} value={m.userId}>{m.displayName}</option>
+          ))}
+        </select>
+      );
 
     case "date":
       return (
@@ -205,9 +238,10 @@ type Props = {
   view: ParsedView;
   properties: ParsedDatabaseProperty[];
   databaseId: string;
+  workspaceId?: string;
 };
 
-export default function FilterControls({ view, properties, databaseId }: Props) {
+export default function FilterControls({ view, properties, databaseId, workspaceId }: Props) {
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
 
@@ -334,6 +368,7 @@ export default function FilterControls({ view, properties, databaseId }: Props) 
                   operator={filter.operator}
                   value={filter.value}
                   onChange={(v) => handleChangeValue(i, v)}
+                  workspaceId={workspaceId}
                 />
 
                 <button
