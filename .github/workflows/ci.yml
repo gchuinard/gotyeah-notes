@@ -36,6 +36,55 @@ jobs:
       - name: Build
         run: npm run build
 
+  migrations:
+    name: Migrations en phase avec le schéma
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: "npm"
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+      # Garde-fou : un schema.prisma modifié sans migration correspondante fait
+      # échouer la CI (exit 2). Empêche le drift schéma ⇄ migrations en prod.
+      - name: Aucune migration manquante (schéma == migrations)
+        run: npx prisma migrate diff --from-migrations prisma/migrations --to-schema prisma/schema.prisma --exit-code
+
+  baseline-figee:
+    name: Baseline figée (0_init immuable)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      # ⚠️ Une migration DÉJÀ APPLIQUÉE en production n'est jamais rejouée par
+      # `migrate deploy`, qui ne revérifie pas non plus son checksum. Modifier
+      # 0_init après la baseline produirait donc un déploiement VERT sur un
+      # schéma incomplet : l'erreur n'apparaîtrait qu'à la première requête
+      # touchant la colonne absente. Toute évolution passe par une NOUVELLE
+      # migration (`prisma migrate dev --name …`).
+      - name: 0_init ne doit plus changer une fois en production
+        env:
+          BASE_REF: ${{ github.base_ref || github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          git fetch origin "$BASE_REF" --depth=1 --quiet
+          # Avant la bascule, 0_init n'existe pas encore sur la branche de base :
+          # c'est la PR qui l'introduit, le contrôle ne s'applique pas.
+          if ! git cat-file -e "origin/$BASE_REF:prisma/migrations/0_init/migration.sql" 2>/dev/null; then
+            echo "0_init absent de origin/$BASE_REF — bascule initiale, contrôle non applicable."
+            exit 0
+          fi
+          if ! git diff --quiet "origin/$BASE_REF" -- prisma/migrations/0_init/migration.sql; then
+            echo "prisma/migrations/0_init/migration.sql a été modifié."
+            echo "Cette migration est marquée appliquée en production : elle ne sera JAMAIS rejouée."
+            echo "Créer une nouvelle migration au lieu de modifier celle-ci."
+            exit 1
+          fi
+          echo "0_init inchangé."
+
   test:
     name: Tests unitaires + API (Vitest)
     runs-on: ubuntu-latest

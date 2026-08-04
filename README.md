@@ -62,7 +62,55 @@ Conteneurisé (Docker Compose) derrière Nginx Proxy Manager. Déploiement conti
 le serveur (`git reset --hard` + `docker compose up -d --build`) avec attente du healthcheck.
 Seule exception : `paths-ignore: ["**.md"]` — un push ne touchant que des `.md` ne déploie
 pas (un commit mêlant doc et code, si).
-Le schéma Prisma est appliqué automatiquement par le service one-shot `migrate`.
+Le schéma Prisma est appliqué par le service one-shot `migrate` via **`prisma migrate deploy`**
+(migrations versionnées, jamais de `db push` en prod).
+
+### Migrations
+
+Le schéma est géré par des **migrations versionnées** (`prisma/migrations/`). Le service
+`migrate` applique `prisma migrate deploy` à chaque déploiement : il ne joue que les
+migrations non encore appliquées, et **ne fait jamais de `db push`** (qui pourrait inférer
+des `DROP` destructifs).
+
+- **Créer une migration** (dev) : modifier `prisma/schema.prisma`, puis
+  `npx prisma migrate dev --name <intitulé>`. La CI (job *Migrations*) échoue si un
+  `schema.prisma` est modifié sans migration correspondante.
+- **Baseline** — ✅ **FAITE en production le 2026-08-05** (`Migration 0_init marked as
+  applied.`, puis `No pending migrations to apply.`). Ne pas rejouer : la procédure
+  ci-dessous n'est conservée que pour un futur environnement repartant d'un `db push`.
+  La base de prod avait été créée
+  historiquement par `db push`, sans historique de migration. Avant le tout premier
+  `migrate deploy`, il faut la « baseliner » **une seule fois** (marque `0_init` comme
+  déjà appliqué, sans le rejouer). Le plus sûr est de passer par le workflow dédié
+  `.github/workflows/baseline-prisma.yml` (`workflow_dispatch`, saisie de confirmation
+  obligatoire) : il prend un snapshot SQLite, joue le `resolve`, puis vérifie qu'il ne
+  reste aucune migration en attente. Équivalent manuel en SSH :
+  ```bash
+  cd /home/pi/sites/gotyeah-notes
+  git fetch && git checkout feat/prisma-migrations   # amène les fichiers de migration
+  docker compose build migrate
+
+  # 1. Snapshot de sécurité — la commande n'est pas ailleurs dans ce README,
+  #    elle est reprise telle quelle de .github/workflows/deploy.yml.
+  BACKUP_DIR=/home/pi/backups/gotyeah-notes; STAMP=$(date +%Y%m%d-%H%M%S); mkdir -p "$BACKUP_DIR"
+  DB_VOL=$(docker volume ls -q | grep -E '(^|_)gotyeah-db$' | head -1)
+  docker run --rm --user 0:0 -v "$DB_VOL":/data:ro -v "$BACKUP_DIR":/backup     keinos/sqlite3:latest sqlite3 /data/dev.db ".backup '/backup/pre-baseline-$STAMP.db'"
+
+  # 2. La base correspond-elle VRAIMENT à 0_init ? (0 = oui, 2 = elle a dérivé)
+  docker compose run --rm --entrypoint sh migrate -c     'npx prisma migrate diff --from-config-datasource --to-migrations prisma/migrations --exit-code'
+
+  # 3. Seulement si l'étape 2 sort en 0 :
+  docker compose run --rm --entrypoint sh migrate -c "npx prisma migrate resolve --applied 0_init"
+  docker compose run --rm migrate                    # migrate deploy → « No pending migrations »
+  ```
+  Une fois cette baseline faite, la branche peut être mergée sur `main` : les
+  déploiements suivants appliquent seulement les **nouvelles** migrations.
+- ⚠️ **`0_init` est FIGÉE après la baseline.** Une migration marquée appliquée
+  n'est jamais rejouée par `migrate deploy`, qui ne revérifie pas son checksum :
+  la modifier produirait un déploiement vert sur un schéma incomplet, et l'erreur
+  n'apparaîtrait qu'à la première requête touchant la colonne absente. Toute
+  évolution du schéma passe par une **nouvelle** migration. Le job CI
+  *Baseline figée* refuse toute modification de ce fichier.
 
 ### Sauvegardes
 
