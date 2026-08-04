@@ -24,3 +24,29 @@ export async function seedUserWithWorkspace(email = `test-${Date.now()}@example.
   });
   return { user, workspace };
 }
+
+/**
+ * Ajoute un membre (user + membership) à un workspace existant, avec un rôle
+ * explicite — pour les tests par rôle (admin/editor/viewer du MÊME espace).
+ * L'email par défaut inclut le rôle : deux Date.now() dans la même milliseconde
+ * collisionneraient sinon (User.email est @unique).
+ */
+export async function seedMember(
+  workspaceId: string,
+  role: "admin" | "editor" | "viewer",
+  email = `member-${role}-${Date.now()}@example.com`
+) {
+  const user = await prisma.user.create({
+    data: {
+      email,
+      firstName: "Test",
+      lastName: role,
+      displayName: `Test ${role}`,
+      passwordHash: "not-a-real-hash",
+    },
+  });
+  const membership = await prisma.membership.create({
+    data: { userId: user.id, workspaceId, role },
+  });
+  return { user, membership };
+}
