@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
-import { getMembership } from "@/lib/workspace";
+import { getMembership, pageVisibilityFilter } from "@/lib/workspace";
 import { purgeExpiredTrash } from "@/lib/trash";
 
 /**
@@ -21,10 +21,12 @@ export async function GET(req: Request) {
 
   await purgeExpiredTrash();
 
-  const visibility = [{ visibility: "team" }, { visibility: "private", ownerId: user.id }];
+  // `undefined` pour un compte de service : le spread ci-dessous n'ajoute alors
+  // aucune restriction (un `OR: undefined` serait, lui, refusé par Prisma).
+  const visibility = pageVisibilityFilter(user.id, user.isService);
   const [pages, records] = await Promise.all([
     prisma.page.findMany({
-      where: { workspaceId, trashedAt: { not: null }, OR: visibility },
+      where: { workspaceId, trashedAt: { not: null }, ...(visibility ?? {}) },
       orderBy: { trashedAt: "desc" },
       select: { id: true, title: true, icon: true, parentId: true, trashedAt: true },
     }),
@@ -32,7 +34,7 @@ export async function GET(req: Request) {
       // Record trashé isolément, sous une page NON trashée (sinon il revient avec la page).
       where: {
         trashedAt: { not: null },
-        database: { page: { workspaceId, trashedAt: null, OR: visibility } },
+        database: { page: { workspaceId, trashedAt: null, ...(visibility ?? {}) } },
       },
       orderBy: { trashedAt: "desc" },
       take: 200,

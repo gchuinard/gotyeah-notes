@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { getSession } from "@/lib/session";
-import { getMembership } from "@/lib/workspace";
+import { getMembership, isPageAccessible } from "@/lib/workspace";
 import { prisma } from "@/lib/prisma";
 import EditorClient from "@/components/EditorClient";
 import VisitRecorder from "@/components/VisitRecorder";
@@ -32,7 +32,7 @@ export default async function PageView({
 
   const membership = await getMembership(user.id, page.workspaceId);
   if (!membership) notFound();
-  if (page.visibility === "private" && page.ownerId !== user.id) notFound();
+  if (!isPageAccessible(page, user.id, user.isService)) notFound();
 
   const database = await prisma.database.findUnique({
     where: { pageId: id },

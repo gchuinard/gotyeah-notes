@@ -42,7 +42,7 @@ describe("GET /api/search — scope workspace", () => {
   });
 
   it("sans workspaceId : ne remonte QUE les pages des workspaces de l'user", async () => {
-    mockGetSession.mockResolvedValue({ id: userId, email: "x", displayName: "x", currentWorkspaceId: myWorkspaceId });
+    mockGetSession.mockResolvedValue({ id: userId, email: "x", displayName: "x", currentWorkspaceId: myWorkspaceId , isService: false});
     const res = await GET(new Request(`http://localhost/api/search?q=${TERM}`));
     expect(res.status).toBe(200);
     const body = (await res.json()) as Array<{ title: string }>;
@@ -51,12 +51,12 @@ describe("GET /api/search — scope workspace", () => {
   });
 
   it("avec workspaceId membre : renvoie ses pages ; avec workspaceId non-membre : 404", async () => {
-    mockGetSession.mockResolvedValue({ id: userId, email: "x", displayName: "x", currentWorkspaceId: myWorkspaceId });
+    mockGetSession.mockResolvedValue({ id: userId, email: "x", displayName: "x", currentWorkspaceId: myWorkspaceId , isService: false});
     const ok = await GET(new Request(`http://localhost/api/search?q=${TERM}&workspaceId=${myWorkspaceId}`));
     expect(ok.status).toBe(200);
     expect(((await ok.json()) as unknown[]).length).toBeGreaterThan(0);
 
-    mockGetSession.mockResolvedValue({ id: userId, email: "x", displayName: "x", currentWorkspaceId: myWorkspaceId });
+    mockGetSession.mockResolvedValue({ id: userId, email: "x", displayName: "x", currentWorkspaceId: myWorkspaceId , isService: false});
     const denied = await GET(new Request(`http://localhost/api/search?q=${TERM}&workspaceId=${otherWorkspaceId}`));
     expect(denied.status).toBe(404);
   });

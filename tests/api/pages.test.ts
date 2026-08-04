@@ -47,6 +47,7 @@ describe("GET /api/pages", () => {
       email: "test@example.com",
       displayName: "Test User",
       currentWorkspaceId: workspaceId,
+      isService: false,
     });
     const res = await GET(new Request(`http://localhost/api/pages?workspaceId=${workspaceId}`));
     expect(res.status).toBe(200);

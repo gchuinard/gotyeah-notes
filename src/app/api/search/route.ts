@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
-import { getMembership } from "@/lib/workspace";
+import { getMembership, pageVisibilityFilter } from "@/lib/workspace";
 
 const LIMIT = 12;
 
@@ -41,10 +41,7 @@ export async function GET(req: Request) {
   const pageVisibility = {
     workspaceId: { in: workspaceIds },
     trashedAt: null, // exclut la corbeille (pages, et pages hôtes des records)
-    OR: [
-      { visibility: "team" },
-      { visibility: "private", ownerId: user.id },
-    ],
+    ...(pageVisibilityFilter(user.id, user.isService) ?? {}),
   };
 
   const [pages, records] = await Promise.all([

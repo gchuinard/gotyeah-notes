@@ -45,7 +45,7 @@ describe("POST /api/databases — garde page privée", () => {
   });
 
   it("B (membre non-propriétaire) → 404 sur la page privée de A", async () => {
-    mockGetSession.mockResolvedValue({ id: B, email: "b", displayName: "B", currentWorkspaceId: workspaceId });
+    mockGetSession.mockResolvedValue({ id: B, email: "b", displayName: "B", currentWorkspaceId: workspaceId , isService: false});
     const res = await postDatabase(privatePageOfA);
     expect(res.status).toBe(404);
     const still = await prisma.database.findUnique({ where: { pageId: privatePageOfA } });
@@ -53,7 +53,7 @@ describe("POST /api/databases — garde page privée", () => {
   });
 
   it("A (propriétaire) → 201 sur sa propre page privée", async () => {
-    mockGetSession.mockResolvedValue({ id: A, email: "a", displayName: "A", currentWorkspaceId: workspaceId });
+    mockGetSession.mockResolvedValue({ id: A, email: "a", displayName: "A", currentWorkspaceId: workspaceId , isService: false});
     const res = await postDatabase(privatePageOfA);
     expect(res.status).toBe(201);
   });

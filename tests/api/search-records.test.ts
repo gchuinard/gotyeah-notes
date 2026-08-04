@@ -14,7 +14,7 @@ let workspaceId: string;
 const uniq = String(Date.now());
 
 function asMe() {
-  mockGetSession.mockResolvedValue({ id: userId, email: "u", displayName: "U", currentWorkspaceId: workspaceId });
+  mockGetSession.mockResolvedValue({ id: userId, email: "u", displayName: "U", currentWorkspaceId: workspaceId , isService: false});
 }
 
 function searchReq(params: Record<string, string>) {

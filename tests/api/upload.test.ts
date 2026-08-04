@@ -19,7 +19,7 @@ let workspaceId: string;
 let tmpDir: string;
 
 function asMe() {
-  mockGetSession.mockResolvedValue({ id: userId, email: "u", displayName: "U", currentWorkspaceId: workspaceId });
+  mockGetSession.mockResolvedValue({ id: userId, email: "u", displayName: "U", currentWorkspaceId: workspaceId , isService: false});
 }
 
 function uploadReq(file: File) {

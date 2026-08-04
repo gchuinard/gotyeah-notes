@@ -14,7 +14,7 @@ let userId: string;
 let workspaceId: string;
 
 function asUser(id: string) {
-  mockGetSession.mockResolvedValue({ id, email: "u", displayName: "U", currentWorkspaceId: workspaceId });
+  mockGetSession.mockResolvedValue({ id, email: "u", displayName: "U", currentWorkspaceId: workspaceId , isService: false});
 }
 const asMe = () => asUser(userId);
 

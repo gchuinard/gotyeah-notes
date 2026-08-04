@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
-import { getMembership } from "@/lib/workspace";
+import { getMembership, isPageAccessible } from "@/lib/workspace";
 
 export async function POST(
   _: Request,
@@ -19,7 +19,7 @@ export async function POST(
 
   const membership = await getMembership(user.id, page.workspaceId);
   if (!membership) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  if (page.visibility === "private" && page.ownerId !== user.id) {
+  if (!isPageAccessible(page, user.id, user.isService)) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 

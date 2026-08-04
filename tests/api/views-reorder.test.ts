@@ -15,7 +15,7 @@ let userId: string;
 let workspaceId: string;
 
 function asMe() {
-  mockGetSession.mockResolvedValue({ id: userId, email: "u", displayName: "U", currentWorkspaceId: workspaceId });
+  mockGetSession.mockResolvedValue({ id: userId, email: "u", displayName: "U", currentWorkspaceId: workspaceId , isService: false});
 }
 
 function patchReq(body: unknown) {

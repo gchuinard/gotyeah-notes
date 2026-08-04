@@ -33,7 +33,7 @@ function delParams(id: string) {
 const delReq = () => new Request("http://localhost/api/sections/x", { method: "DELETE" });
 
 function asMe() {
-  mockGetSession.mockResolvedValue({ id: userId, email: "u", displayName: "U", currentWorkspaceId: workspaceId });
+  mockGetSession.mockResolvedValue({ id: userId, email: "u", displayName: "U", currentWorkspaceId: workspaceId , isService: false});
 }
 
 beforeAll(async () => {
@@ -84,6 +84,7 @@ describe("DELETE /api/sections/[id] — réaffectation des racines", () => {
       email: "solo",
       displayName: "Solo",
       currentWorkspaceId: solo.workspace.id,
+      isService: false,
     });
     const lone = await prisma.section.create({
       data: { name: "team", type: "team", position: 0, workspaceId: solo.workspace.id },
@@ -112,6 +113,7 @@ describe("DELETE /api/sections/[id] — réaffectation des racines", () => {
       email: "s",
       displayName: "S",
       currentWorkspaceId: stranger.workspace.id,
+      isService: false,
     });
 
     const res = await DELETE(delReq(), delParams(t1.id));

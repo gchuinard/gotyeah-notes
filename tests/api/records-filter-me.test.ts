@@ -20,6 +20,7 @@ function asUser(id: string) {
     email: "u",
     displayName: "U",
     currentWorkspaceId: workspaceId,
+    isService: false,
   });
 }
 

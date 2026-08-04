@@ -9,9 +9,26 @@ import { prisma } from "./prisma";
  */
 export function isPageAccessible(
   page: { visibility: string; ownerId: string | null },
-  userId: string
+  userId: string,
+  isService = false
 ): boolean {
+  if (isService) return true;
   return !(page.visibility === "private" && page.ownerId !== userId);
+}
+
+/**
+ * Clause Prisma de confidentialité pour les LISTES (arbre, recherche, corbeille).
+ *
+ * ⚠️ Le pendant obligatoire d'isPageAccessible : un compte de service exempté au
+ * test unitaire mais filtré dans les listes verrait une arborescence amputée —
+ * une automatisation à moitié aveugle, sans le moindre message d'erreur.
+ *
+ * `undefined` = aucune restriction (compte de service). L'appelant doit donc
+ * l'étaler dans son `where` (`...(filter ?? {})`) et JAMAIS le poser tel quel.
+ */
+export function pageVisibilityFilter(userId: string, isService = false) {
+  if (isService) return undefined;
+  return { OR: [{ visibility: "team" }, { visibility: "private", ownerId: userId }] };
 }
 
 /**
@@ -38,7 +55,7 @@ export async function checkDatabaseAccess(
   if (!includeTrashed && db.page.trashedAt) return null;
   const membership = await getMembership(userId, db.page.workspaceId);
   if (!membership) return null;
-  if (!isPageAccessible(db.page, userId)) return null;
+  if (!isPageAccessible(db.page, userId, membership.user.isService)) return null;
   return { workspaceId: db.page.workspaceId, membership };
 }
 
@@ -65,7 +82,7 @@ export async function checkPropertyAccess(propertyId: string, userId: string) {
   if (row.database.page.trashedAt) return null;
   const membership = await getMembership(userId, row.database.page.workspaceId);
   if (!membership) return null;
-  if (!isPageAccessible(row.database.page, userId)) return null;
+  if (!isPageAccessible(row.database.page, userId, membership.user.isService)) return null;
   const { database: _db, ...property } = row;
   return {
     workspaceId: row.database.page.workspaceId,
@@ -99,7 +116,7 @@ export async function checkRecordAccess(
   if (!includeTrashed && (row.trashedAt || row.database.page.trashedAt)) return null;
   const membership = await getMembership(userId, row.database.page.workspaceId);
   if (!membership) return null;
-  if (!isPageAccessible(row.database.page, userId)) return null;
+  if (!isPageAccessible(row.database.page, userId, membership.user.isService)) return null;
   // Strip the nested relation so routes can pass `record` straight to parseRecord.
   const { database: _db, ...record } = row;
   return {
@@ -129,7 +146,7 @@ export async function checkViewAccess(viewId: string, userId: string) {
   if (row.database.page.trashedAt) return null;
   const membership = await getMembership(userId, row.database.page.workspaceId);
   if (!membership) return null;
-  if (!isPageAccessible(row.database.page, userId)) return null;
+  if (!isPageAccessible(row.database.page, userId, membership.user.isService)) return null;
   const { database: _db, ...view } = row;
   return {
     workspaceId: row.database.page.workspaceId,
@@ -158,7 +175,7 @@ export async function checkSprintAccess(sprintId: string, userId: string) {
   if (row.database.page.trashedAt) return null;
   const membership = await getMembership(userId, row.database.page.workspaceId);
   if (!membership) return null;
-  if (!isPageAccessible(row.database.page, userId)) return null;
+  if (!isPageAccessible(row.database.page, userId, membership.user.isService)) return null;
   const { database: _db, ...sprint } = row;
   return {
     workspaceId: row.database.page.workspaceId,
@@ -169,9 +186,12 @@ export async function checkSprintAccess(sprintId: string, userId: string) {
 }
 
 export async function getMembership(userId: string, workspaceId: string) {
+  // `user.isService` est remonté ICI plutôt que par une requête séparée : les
+  // check*Access appellent déjà getMembership, l'exemption arrive donc sans
+  // aucun aller-retour supplémentaire — et ne peut pas diverger de la base.
   return prisma.membership.findUnique({
     where: { userId_workspaceId: { userId, workspaceId } },
-    select: { role: true },
+    select: { role: true, user: { select: { isService: true } } },
   });
 }
 
