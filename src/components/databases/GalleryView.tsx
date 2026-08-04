@@ -112,9 +112,13 @@ type Props = {
   properties: ParsedDatabaseProperty[];
   readOnly?: boolean;
   workspaceId?: string;
+  /** Utilisateur qui regarde — résout le jeton « Moi » des filtres. */
+  currentUserId?: string;
 };
 
-export default function GalleryView({ databaseId, view, properties, readOnly = false, workspaceId }: Props) {
+export default function GalleryView({
+  databaseId, view, properties, readOnly = false, workspaceId, currentUserId,
+}: Props) {
   const { data: records, isLoading, error, mutate } = useSWR<ParsedRecord[]>(
     `/api/databases/${databaseId}/records`,
     fetcher
@@ -131,7 +135,7 @@ export default function GalleryView({ databaseId, view, properties, readOnly = f
   const displayedRecords = useMemo(() => {
     if (!records) return [];
     const byPosition = [...records].sort((a, b) => a.position - b.position);
-    return applyViewConfig(byPosition, view.config, properties);
+    return applyViewConfig(byPosition, view.config, properties, currentUserId);
   }, [records, view.config, properties]);
 
   // ── Add record (optimistic) ─────────────────────────────────────────────────
@@ -143,7 +147,7 @@ export default function GalleryView({ databaseId, view, properties, readOnly = f
 
     // Pré-remplissage dérivé des filtres eq (select/text) de la vue : la carte
     // satisfait le filtre par construction et reste visible après revalidation.
-    const seed = deriveSeedFromFilters(view.config.filters ?? [], properties);
+    const seed = deriveSeedFromFilters(view.config.filters ?? [], properties, currentUserId);
 
     const tempRecord: ParsedRecord = {
       id: tempId,

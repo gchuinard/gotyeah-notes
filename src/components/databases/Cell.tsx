@@ -7,6 +7,7 @@ import type {
   PropertyValue,
   SelectOption,
 } from "@/lib/db";
+import { withoutUnknownIds } from "@/lib/db";
 import type { SelectColor } from "@/lib/propertyColors";
 import { getAvatarColor, getInitials } from "@/lib/avatar";
 import { useWorkspaceMembers, type WorkspaceMember } from "@/lib/client/useWorkspaceMembers";
@@ -655,7 +656,15 @@ export default function Cell({
           triggerRef={triggerRef}
           members={members}
           initialValues={values}
-          onClose={(next) => commit(next.length > 0 ? next : null)}
+          onClose={(next) => {
+            const value = next.length > 0 ? next : null;
+            // Inchangé → commit() sort de lui-même et le lien mort est préservé.
+            // Dès qu'on TOUCHE la valeur, on lâche les ids qui ne sont plus
+            // membres : le serveur refuse (400) tout tableau en contenant un, et
+            // la cellule deviendrait autrement définitivement inéditable.
+            const unchanged = JSON.stringify(value) === JSON.stringify(storedValue());
+            commit(unchanged ? value : withoutUnknownIds(value, members.map((m) => m.userId)));
+          }}
         />
       </div>
     );

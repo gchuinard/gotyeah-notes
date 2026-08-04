@@ -9,7 +9,7 @@ import type {
   PropertyValue,
   SelectOption,
 } from "@/lib/db";
-import { isMultiValueType } from "@/lib/db";
+import { isMultiValueType, withoutUnknownIds } from "@/lib/db";
 import { SelectBadge } from "@/components/databases/Cell";
 import { useDialog } from "@/contexts/DialogContext";
 import { useWorkspaceMembers } from "@/lib/client/useWorkspaceMembers";
@@ -229,6 +229,9 @@ export default function BulkActionBar({
   workspaceId,
 }: Props) {
   const { alert } = useDialog();
+  // Chargé au niveau de la barre (et pas seulement dans le menu « utilisateur »)
+  // : l'union d'assignés doit pouvoir écarter les ids qui ne sont plus membres.
+  const { members } = useWorkspaceMembers(workspaceId);
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
@@ -258,7 +261,13 @@ export default function BulkActionBar({
         const cur = Array.isArray(r.properties[property.id])
           ? (r.properties[property.id] as string[])
           : [];
-        return cur.includes(optionId) ? cur : [...cur, optionId];
+        const union = cur.includes(optionId) ? cur : [...cur, optionId];
+        // Une carte portant l'id d'un membre parti ferait refuser tout le
+        // tableau (400) : l'assignation groupée échouerait sur ces cartes-là,
+        // précisément celles qu'on cherche à réattribuer.
+        return property.type === "user"
+          ? withoutUnknownIds(union, members.map((m) => m.userId))
+          : union;
       }
       return optionId;
     };
