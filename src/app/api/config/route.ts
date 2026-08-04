@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/session";
+import { hasRoleInAnyWorkspace } from "@/lib/workspace";
 import { getAppConfig, setAppConfig } from "@/lib/appConfig";
 import { purgeOrphanUploads } from "@/lib/uploads";
 
@@ -24,6 +25,12 @@ const patchSchema = z.object({
 export async function PATCH(req: Request) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+
+  // Réglage d'INSTANCE sans notion d'admin d'instance : approximation v1 assumée,
+  // réservé aux users admin d'au moins un workspace.
+  if (!(await hasRoleInAnyWorkspace(user.id, "admin"))) {
+    return NextResponse.json({ error: "Rôle insuffisant" }, { status: 403 });
+  }
 
   const body = await req.json().catch(() => null);
   const parsed = patchSchema.safeParse(body);

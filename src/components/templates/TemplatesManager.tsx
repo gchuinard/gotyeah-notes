@@ -58,7 +58,7 @@ function configToCsv(config: Record<string, unknown>): string {
 // ─── Manager ──────────────────────────────────────────────────────────────────
 
 export default function TemplatesManager() {
-  const { activeWorkspace } = useWorkspace();
+  const { activeWorkspace, isViewer, isAdmin } = useWorkspace();
   const { confirm } = useDialog();
   const wsId = activeWorkspace?.id ?? null;
   const key = wsId ? `/api/templates?workspaceId=${wsId}` : null;
@@ -66,6 +66,9 @@ export default function TemplatesManager() {
 
   const [form, setForm] = useState<Form | null>(null);
   const [saving, setSaving] = useState(false);
+  // Les refus serveur (403 rôle insuffisant, 400 builtin…) étaient avalés : le
+  // formulaire restait ouvert sans un mot. On les affiche.
+  const [error, setError] = useState<string | null>(null);
 
   const startNew = () =>
     setForm({ name: "", sections: [{ label: "" }], columns: [], kanbanGroupProperty: "" });
@@ -84,6 +87,7 @@ export default function TemplatesManager() {
   const save = async () => {
     if (!form || !wsId || saving) return;
     setSaving(true);
+    setError(null);
     try {
       const columns = form.columns
         .filter((c) => c.name.trim())
@@ -107,7 +111,10 @@ export default function TemplatesManager() {
       if (res.ok) {
         mutate();
         setForm(null);
+        return;
       }
+      const b = await res.json().catch(() => ({}));
+      setError((b as { error?: string }).error ?? `Erreur ${res.status}`);
     } finally {
       setSaving(false);
     }
@@ -121,8 +128,14 @@ export default function TemplatesManager() {
       tone: "danger",
     });
     if (!ok) return;
+    setError(null);
     const res = await fetch(`/api/templates/${id}`, { method: "DELETE" });
-    if (res.ok) mutate();
+    if (res.ok) {
+      mutate();
+      return;
+    }
+    const b = await res.json().catch(() => ({}));
+    setError((b as { error?: string }).error ?? `Erreur ${res.status}`);
   };
 
   // ── Éditeur ────────────────────────────────────────────────────────────────
@@ -266,13 +279,18 @@ export default function TemplatesManager() {
     <div className="max-w-2xl mx-auto px-8 py-8 text-[var(--text)]">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">Modèles</h1>
-        <button
-          onClick={startNew}
-          className="flex items-center gap-1 px-3 py-1.5 rounded bg-[var(--accent)] text-white text-sm"
-        >
-          <Plus size={15} /> Nouveau modèle
-        </button>
+        {/* Créer / modifier un modèle = éditeur ; supprimer = admin (définitif). */}
+        {!isViewer && (
+          <button
+            onClick={startNew}
+            className="flex items-center gap-1 px-3 py-1.5 rounded bg-[var(--accent)] text-white text-sm"
+          >
+            <Plus size={15} /> Nouveau modèle
+          </button>
+        )}
       </div>
+
+      {error && <p className="mb-3 text-sm text-red-500">{error}</p>}
 
       <div className="flex flex-col gap-1.5">
         {templates.map((t) => (
@@ -289,23 +307,24 @@ export default function TemplatesManager() {
                 {t.columns.length} colonne(s) · {t.sections.length} section(s)
               </div>
             </div>
-            {!t.builtin && (
-              <>
-                <button
-                  onClick={() => startEdit(t)}
-                  className="text-sm text-[var(--text-muted)] hover:text-[var(--text)]"
-                >
-                  Éditer
-                </button>
-                <button
-                  onClick={() => remove(t.id)}
-                  className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text)]"
-                >
-                  <Trash2 size={15} />
-                </button>
-              </>
+            {!t.builtin && !isViewer && (
+              <button
+                onClick={() => startEdit(t)}
+                className="text-sm text-[var(--text-muted)] hover:text-[var(--text)]"
+              >
+                Éditer
+              </button>
             )}
-            {t.builtin && (
+            {!t.builtin && isAdmin && (
+              <button
+                onClick={() => remove(t.id)}
+                className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text)]"
+                title="Supprimer le modèle (définitif)"
+              >
+                <Trash2 size={15} />
+              </button>
+            )}
+            {t.builtin && !isViewer && (
               <button
                 onClick={() => startEdit(t)}
                 className="text-sm text-[var(--text-muted)] hover:text-[var(--text)]"

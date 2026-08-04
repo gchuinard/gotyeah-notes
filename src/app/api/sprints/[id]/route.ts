@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
-import { checkSprintAccess } from "@/lib/workspace";
+import { checkSprintAccess, hasRole } from "@/lib/workspace";
 import {
   parseManyRecords,
   reconcileDelivered,
@@ -56,6 +56,10 @@ export async function PATCH(
 
   const access = await checkSprintAccess(id, user.id);
   if (!access) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  // Clôture incluse : le cycle sprint entier (démarrer/terminer) est un geste éditeur.
+  if (!hasRole(access.membership, "editor")) {
+    return NextResponse.json({ error: "Rôle insuffisant" }, { status: 403 });
+  }
 
   const {
     name, goal, startDate, endDate, state, position,
@@ -239,6 +243,10 @@ export async function DELETE(
   const { id } = await params;
   const access = await checkSprintAccess(id, user.id);
   if (!access) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  // Suppression DÉFINITIVE du sprint (name/goal/releaseNotes perdus) : admin.
+  if (!hasRole(access.membership, "admin")) {
+    return NextResponse.json({ error: "Rôle insuffisant" }, { status: 403 });
+  }
 
   // Record.sprintId est en onDelete: SetNull → les issues retombent au backlog.
   await prisma.sprint.delete({ where: { id } });

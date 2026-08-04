@@ -29,7 +29,8 @@ User            → email @unique, firstName/lastName/displayName, passwordHash.
 Session         → id = sha256(token) (le token ne vit qu'en cookie), currentWorkspaceId
                   pour le workspace actif, @@index([expiresAt]) pour la purge des expirées
 Workspace       → conteneur partageable, l'autorité c'est Membership
-Membership      → (userId, workspaceId, role: admin|editor|viewer), unique sur (userId, workspaceId)
+Membership      → (userId, workspaceId, role: admin|editor|viewer), unique sur (userId, workspaceId).
+                  Rôles APPLIQUÉS par toutes les routes (hasRole) — cf. « Rôles » ci-dessous.
 Section         → conteneur dans la sidebar, type = "private"|"team", icon, appartient à un Workspace
 Page            → arborescence (parentId), visibility dénormalisé depuis la section racine,
                   ownerId = créateur (autorité des pages privées), trashedAt = corbeille
@@ -63,6 +64,7 @@ AppConfig       → réglages globaux de l'instance. Ligne UNIQUE id="app", uplo
 - **Page.sectionId** : renseigné UNIQUEMENT sur les pages racines (parentId IS NULL). Pour les enfants, la section est héritée via la racine. Toujours passer par `lib/pages.ts > setPageSection()`.
 - **Page.visibility** : dénormalisé depuis la section racine ("private" | "team"), synchronisé récursivement via `setPageSection()`.
 - **Page.ownerId = autorité des pages privées** : une page `visibility="private"` n'est accessible QU'À son `ownerId`, même pour les autres membres du workspace. Règle centralisée dans `lib/workspace.ts > isPageAccessible()` et appliquée **en cascade** par TOUS les `check*Access` — sinon un membre lirait la database posée sur la page privée d'un autre. Ne réimplémente jamais ce test : appelle le helper.
+- **Rôles (APPLIQUÉS partout via `hasRole`, hiérarchiques : admin ⊇ editor ⊇ viewer)** : **lecteur** = lecture seule TOTALE (aucune mutation, pas même ses pages privées) · **éditeur** = tout le contenu + mise à la corbeille/restore + organiser sections et templates (create/update) + clôture de sprint · **admin** = tout l'IRRÉVERSIBLE (DELETE database/property/view/sprint/section/template, `?permanent=1`, DELETE workspace) + gestion des membres + `PATCH /api/config`. **Écritures exemptées** (sinon un lecteur est cassé) : `POST pages/[id]/visit` (Récents), `POST workspaces/[id]/switch` (préférence de session), `POST /api/workspaces` (créer SON espace → il en devient admin), et `DELETE members/[userId]` **sur sa PROPRE membership** (quitter un espace — sinon un invité y est prisonnier ; le garde « dernier admin » s'applique quand même). Routes SANS contexte workspace : `POST /api/upload` = éditeur+ d'au moins un espace, `PATCH /api/config` = admin d'au moins un espace (`hasRoleInAnyWorkspace` — approximation v1 assumée, pas d'admin d'instance). ⚠️ Les gates vivent dans les handlers, JAMAIS dans le proxy (Vitest importe les handlers directement, le pont MCP passe le proxy sans cookie) — le méta-test de `tests/api/role-gates.test.ts` refuse tout handler mutant non déclaré. Côté client, le rôle arrive via `GET /api/workspaces` (champ `role`) → `useWorkspace().isViewer/isAdmin` ; un rôle inconnu (chargement) est traité lecteur, jamais éditeur ; le 403 serveur reste l'autorité, l'UI n'est que du confort.
 - **Corbeille (soft delete)** : **seuls `Page` et `Record` ont un `trashedAt`** ; les 13 autres modèles n'en ont pas (supprimer une View / un Sprint / une Property / une Section est **définitif**). Trasher une page estampe **tout son sous-arbre** en transaction (`lib/trash.ts > trashPageSubtree`, restauration symétrique) : le soft delete ne cascade pas via les FK, il faut le propager à la main. Les `check*Access` renvoient **null** pour un élément trashé — l'option `includeTrashed` n'est là que pour le lifecycle corbeille (restaurer / purger). **Toute nouvelle lecture doit filtrer `trashedAt: null`.** Purge définitive après 30 j (`TRASH_PURGE_DAYS`), déclenchée **paresseusement** à l'ouverture de la corbeille — pas de cron en self-host.
 - **Record.properties** : JSON indexé par `DatabaseProperty.id` (stable), JAMAIS par le nom de la propriété. Le nom est un label affichable qui peut changer.
 - **Record.title** vs property "title" : la property de type `"title"` (créée automatiquement avec la database) correspond au champ SQL `Record.title`, PAS à une entrée dans `Record.properties`. Le composant Cell bifurque sur ce cas.
@@ -92,7 +94,9 @@ src/
 │   │                                #   DialogProvider > WorkspaceProvider > AppShell
 │   ├── page.tsx                     # "/" → redirect /login si pas de session, sinon écran d'accueil
 │   ├── login/ · register/           # page.tsx (Server) + LoginForm/RegisterForm (Client)
-│   ├── settings/                    # SettingsPage.tsx — Profil · Utilisateurs · Stockage · Apparence
+│   ├── settings/                    # SettingsPage.tsx — Profil · Membres (espace actif : liste,
+│   │                                #   ajout par email, rôles — gestion admin) · Stockage (masqué
+│   │                                #   aux non-admins) · Apparence
 │   ├── templates/page.tsx           # Gestion des modèles (TemplatesManager)
 │   ├── pages/[id]/page.tsx          # Server Component : charge Page, enregistre la visite,
 │   │                                #   branche DatabaseShell (si database) OU EditorClient
@@ -100,6 +104,10 @@ src/
 │   └── api/                         # 35 route handlers → voir « Conventions des routes API »
 │       ├── auth/                    # PUBLIC : login/logout/register + oidc/login|callback
 │       ├── workspaces/              # GET/POST, [id] DELETE (admin), [id]/switch POST
+│       │   └── [id]/members/        # GET liste (tout membre), POST ajout par email (admin,
+│       │       │                    #   lecteur par défaut, compte EXISTANT — pas d'email envoyé)
+│       │       └── [userId]/        # PATCH rôle, DELETE retrait (admin ; quitter l'espace = soi-même)
+│       │                            #   garde-fou transactionnel « dernier admin » → 409
 │       ├── sections/                # GET/POST, [id] PATCH/DELETE (409 si dernière du type)
 │       ├── pages/
 │       │   ├── route.ts             # GET arbre (hors corbeille), POST create
@@ -168,7 +176,9 @@ src/
     │                                #   normalizeEmail (trim+lowercase, utilisé aussi par le pont MCP)
     ├── rateLimit.ts                 # Rate-limit mémoire du login (IP+email) → 429
     ├── workspace.ts                 # getMembership, createWorkspaceWithDefaults, isPageAccessible,
-    │                                #   check{Database,Property,Record,View,Sprint}Access
+    │                                #   check{Database,Property,Record,View,Sprint}Access,
+    │                                #   hasRole/hasRoleInAnyWorkspace (gates de rôle),
+    │                                #   updateMemberRole/removeMember (garde « dernier admin »)
     ├── positions.ts                 # nextPosition(model, where, client?) → MAX(position) + 1000
     ├── pages.ts                     # createPage, setPageSection (synchro récursive visibility),
     │                                #   appendReleaseNotesToPage, deleteSectionReassigningRoots
@@ -195,7 +205,7 @@ src/
         ├── debouncedSaver.ts        # createDebouncedSaver — le debounce d'autosave, testable
         ├── dialogController.ts      # Machine à états des dialogues (logique pure de DialogContext)
         ├── useThemeMode.ts          # light/dark déduit de la luminance de --bg (prop theme de BlockNote)
-        └── useRecordDeepLink.ts     # Lien profond vers un record (?record=<id>)
+        └── useRecordDeepLink.ts     # Lien profond vers un record (?r=<id>)
 ```
 
 **Conventions de lecture de cet arbre**
@@ -221,6 +231,14 @@ checkPropertyAccess(propertyId: string, userId: string)
 checkViewAccess(viewId: string, userId: string)
 checkSprintAccess(sprintId: string, userId: string)
 
+// lib/workspace.ts — gates de rôle. hasRole est PUR (renvoie false, ne lève pas) ;
+// il s'applique au membership renvoyé par les check*Access ou getMembership.
+hasRole(membership: { role: string } | null | undefined, required: WorkspaceRole): boolean
+hasRoleInAnyWorkspace(userId: string, required: WorkspaceRole): Promise<boolean>
+// Unions non-levantes façon setPageSection, transactionnelles (count + write atomiques) :
+updateMemberRole(workspaceId, targetUserId, role): Promise<{ ok: true; membership } | { ok: false; code: "not_found" | "last_admin" }>
+removeMember(workspaceId, targetUserId): Promise<{ ok: true } | { ok: false; code: "not_found" | "last_admin" }>
+
 // lib/pages.ts — setPageSection NE LÈVE PAS : elle renvoie une union à narrower.
 createPage(input: CreatePageInput)   // objet : { title?, parentId?, workspaceId, ownerId, sectionId? }
 setPageSection(pageId: string, input: SetPageSectionInput):
@@ -234,14 +252,15 @@ applyViewConfig(records: ParsedRecord[], config: ViewConfig, properties: ParsedD
 
 - **Auth** : `getSession()` → 401 si null. **Exception : `/api/auth/*` est public** (`src/proxy.ts > PUBLIC_PATHS`) — ces routes *créent* la session, elles ne peuvent pas la lire. Leur garde est un flag d'env (`LEGACY_LOGIN`, `REGISTRATION`, OIDC) → **403** si la fonctionnalité est désactivée, **429** sur rate-limit login.
 - **Accès** : helpers `check*Access` de `lib/workspace.ts` → **404** si pas d'accès. Ils ne couvrent que les entités de database (`checkDatabaseAccess`, `checkPropertyAccess`, `checkRecordAccess`, `checkViewAccess`, `checkSprintAccess`). Pour **page / section / workspace / trash / search : pas de helper** (ne cherche pas un `checkPageAccess`, il n'existe pas) → `getMembership()` + contrôle de confidentialité (`isPageAccessible`, ou `visibility === "private" && ownerId !== user.id`), 404 également.
-- **404, jamais 403 pour une ressource** (ne pas leaker l'existence). Les seuls 403 du projet sont fonctionnels : fonctionnalité désactivée (`/api/auth/login|register`) et refus anti-CSRF du proxy (`Origin` cross-site sur une mutation).
+- **404, jamais 403 pour l'ACCÈS à une ressource** (ne pas leaker l'existence : non-membre ou page privée d'autrui → 404). Les 403 du projet sont fonctionnels : **rôle insuffisant** (`{ error: "Rôle insuffisant" }` — le membre voit déjà la ressource en lecture, l'action est refusée ; **ordre obligatoire : check d'accès → 404 PUIS check de rôle → 403**), fonctionnalité désactivée (`/api/auth/login|register`) et refus anti-CSRF du proxy (`Origin` cross-site sur une mutation).
 - **Corbeille (soft delete)** : `DELETE /api/pages/[id]` et `DELETE /api/records/[id]` estampent `trashedAt` — ils ne suppriment PAS. `?permanent=1` = suppression définitive depuis la corbeille. Les `check*Access` masquent le trashé par défaut → passer `includeTrashed = true` (3e arg) pour le cycle de vie corbeille. Toutes les lectures (arbre, search, records, recent) filtrent `trashedAt: null`.
+- **Rattachement inter-workspace** : une route qui reçoit un id de rattachement (`parentId`/`sectionId` de `POST /api/pages`) doit vérifier qu'il appartient bien au `workspaceId` contrôlé — le rôle est vérifié sur CE workspace, sinon on écrirait dans l'arborescence d'un espace où l'on n'est que lecteur. Même réflexe que `patchNotesPageId` et les propriétés `relation`.
 - **Validation** : zod, schema en haut du fichier. Exceptions : `POST /api/upload` lit un `FormData` (pas de JSON), `/api/auth/*` et `POST /api/pages` valident à la main.
 - **JSON fields** : JAMAIS de `JSON.parse/stringify` direct dans les routes → toujours les helpers `parse*/serialize*` de `lib/db.ts`. (Seul `templates/*` sérialise `columns`/`sections` à la main — pas de helper dédié pour `Template`.)
 - **Réponse succès** : objet parsé direct (pas wrappé dans `{ data: ... }`). **201** sur les créations d'entités database (database, record, duplicate, property, view, sprint, template) ; les routes historiques (pages, sections, workspaces) répondent 200. Deux sorties non-JSON : `GET /api/files/[name]` renvoie des **octets bruts**, `/api/auth/oidc/*` renvoie des **redirections** (erreur → `/login?sso_error=<code>`).
 - **Réponse erreur** : `{ error: "message" }` ou `{ error: "Validation failed", details: zodFlattenedErrors }`. Codes métier en usage : **409** (page déjà database, sprint déjà actif, email pris, dernière section, restore sous page trashée), **422** (clôture de sprint : réconciliation des issues, page « Patch notes » illisible), **413/415** (upload), **429** (login).
 - **Position** : `nextPosition(model, where, tx)` — models `databaseProperty | record | view | sprint`. **Appeler DANS le `prisma.$transaction` de la création, avec le client `tx` en 3e argument** : hors transaction, deux créations concurrentes lisent le même `MAX(position)` et collisionnent.
-- **Effets de bord sur GET** (self-host, pas de cron) : `GET /api/config` purge les uploads orphelins > 30 j, `GET /api/trash` purge la corbeille expirée > 30 j.
+- **Effets de bord sur GET** (self-host, pas de cron) : `GET /api/config` purge les uploads orphelins > 30 j, `GET /api/trash` purge la corbeille expirée > 30 j. **Acte SYSTÈME assumé** (décision 03/08) : la purge TTL se déclenche quel que soit le rôle de l'appelant, lecteur inclus — les 30 j sont consommés, le GET n'est que le déclencheur opportuniste.
 - **Pas de filtres/tris côté serveur** : tous les records sont retournés (hors corbeille : `trashedAt: null`), le client filtre en JS via `applyViewConfig()`. **Exception assumée** — `GET /api/databases/[id]/records` accepte des params **optionnels** pour les consommateurs sans `applyViewConfig` : `filter` (JSON `ViewFilter[]`, appliqué via `applyFilters` — pas de réimplémentation), `limit` (1-200) / `offset` (total pré-pagination dans l'en-tête `X-Total-Count` ; le corps reste un **tableau nu**), `includeContent=false` (omet `content`/`sectionsBody` via `stripRecordBody`). **Sans aucun param, la réponse est identique à l'historique** → le front n'est pas impacté. ⚠️ Ces params ont été faits « pour le MCP » mais le MCP ne les utilise pas encore (`notes_tools.py > list_records` appelle la route nue).
 
 ## Conventions UI

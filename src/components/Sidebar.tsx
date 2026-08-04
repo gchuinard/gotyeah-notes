@@ -39,7 +39,7 @@ const SIDEBAR_MAX_WIDTH = 520;
 const SIDEBAR_WIDTH_KEY = "sidebar:width";
 
 export default function Sidebar({ user }: { user: SessionUser }) {
-  const { activeWorkspace } = useWorkspace();
+  const { activeWorkspace, isViewer } = useWorkspace();
   const workspaceId = activeWorkspace?.id ?? null;
 
   const pagesKey = workspaceId ? `/api/pages?workspaceId=${workspaceId}` : null;
@@ -215,6 +215,7 @@ export default function Sidebar({ user }: { user: SessionUser }) {
           <Home size={14} />
           Accueil
         </Link>
+        {!isViewer && (
         <div className="relative">
           <button
             onClick={() => setDbMenuOpen((o) => !o)}
@@ -252,6 +253,7 @@ export default function Sidebar({ user }: { user: SessionUser }) {
             </>
           )}
         </div>
+        )}
       </div>
 
       {/* Récents */}
@@ -293,6 +295,7 @@ export default function Sidebar({ user }: { user: SessionUser }) {
             params={params}
             onCreate={createPage}
             onDragEnd={handleDragEnd(privateSection.id)}
+            readOnly={isViewer}
           />
         )}
 
@@ -308,6 +311,7 @@ export default function Sidebar({ user }: { user: SessionUser }) {
             params={params}
             onCreate={createPage}
             onDragEnd={handleDragEnd(section.id)}
+            readOnly={isViewer}
           />
         ))}
       </div>
@@ -365,6 +369,7 @@ function SectionBlock({
   params,
   onCreate,
   onDragEnd,
+  readOnly = false,
 }: {
   section: Section;
   icon: React.ReactNode;
@@ -374,6 +379,7 @@ function SectionBlock({
   params: { id?: string } | null;
   onCreate: (parentId: string | null, sectionId: string | null) => void;
   onDragEnd: (event: DragEndEvent) => void;
+  readOnly?: boolean;
 }) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
@@ -399,13 +405,15 @@ function SectionBlock({
       <div className="flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-[var(--text-muted)] uppercase tracking-wide group">
         {icon}
         <span className="flex-1 truncate">{section.name}</span>
-        <button
-          onClick={() => onCreate(null, section.id)}
-          className="opacity-0 group-hover:opacity-100 p-0.5 rounded cursor-pointer text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] transition-colors"
-          title="Nouvelle page"
-        >
-          <Plus size={11} />
-        </button>
+        {!readOnly && (
+          <button
+            onClick={() => onCreate(null, section.id)}
+            className="opacity-0 group-hover:opacity-100 p-0.5 rounded cursor-pointer text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] transition-colors"
+            title="Nouvelle page"
+          >
+            <Plus size={11} />
+          </button>
+        )}
       </div>
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
         <SortableContext items={rootIds} strategy={verticalListSortingStrategy}>
@@ -419,11 +427,12 @@ function SectionBlock({
               currentId={params?.id}
               collapsed={collapsed}
               onToggle={handleToggle}
+              readOnly={readOnly}
             />
           ))}
         </SortableContext>
       </DndContext>
-      {tree.length === 0 && (
+      {tree.length === 0 && !readOnly && (
         <button
           onClick={() => onCreate(null, section.id)}
           className="w-full flex items-center gap-2 px-3 py-1 rounded cursor-pointer hover:bg-[var(--surface-hover)] text-[var(--text-muted)] hover:text-[var(--text)] text-xs transition-colors"
@@ -445,6 +454,7 @@ function TreeItem({
   currentId,
   collapsed,
   onToggle,
+  readOnly = false,
 }: {
   node: TreeNode;
   depth: number;
@@ -453,6 +463,7 @@ function TreeItem({
   currentId: string | undefined;
   collapsed: Set<string>;
   onToggle: (node: TreeNode, recursive: boolean) => void;
+  readOnly?: boolean;
 }) {
   const open = !collapsed.has(node.id);
   const [editing, setEditing] = useState(false);
@@ -463,7 +474,7 @@ function TreeItem({
   const hasChildren = node.children.length > 0;
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id: node.id });
+    useSortable({ id: node.id, disabled: readOnly });
 
   const style = {
     transform: CSS.Translate.toString(transform),
@@ -555,7 +566,7 @@ function TreeItem({
           <Link
             href={`/pages/${node.id}`}
             className="flex-1 flex items-center gap-1 truncate text-[var(--text)]"
-            onDoubleClick={startEditing}
+            onDoubleClick={readOnly ? undefined : startEditing}
           >
             {node.icon ? (
               <span className="shrink-0 text-sm leading-none">{node.icon}</span>
@@ -566,24 +577,28 @@ function TreeItem({
           </Link>
         )}
 
-        <button
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            onCreate(node.id, null);
-          }}
-          className="opacity-0 group-hover:opacity-100 p-0.5 rounded cursor-pointer text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] transition-colors"
-          title="Ajouter une sous-page"
-        >
-          <Plus size={12} />
-        </button>
-        <button
-          onClick={onDelete}
-          className="opacity-0 group-hover:opacity-100 p-0.5 rounded cursor-pointer text-[var(--text-muted)] hover:bg-red-500/15 hover:text-red-500 transition-colors"
-          title="Supprimer"
-        >
-          <Trash2 size={12} />
-        </button>
+        {!readOnly && (
+          <>
+            <button
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onCreate(node.id, null);
+              }}
+              className="opacity-0 group-hover:opacity-100 p-0.5 rounded cursor-pointer text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] transition-colors"
+              title="Ajouter une sous-page"
+            >
+              <Plus size={12} />
+            </button>
+            <button
+              onClick={onDelete}
+              className="opacity-0 group-hover:opacity-100 p-0.5 rounded cursor-pointer text-[var(--text-muted)] hover:bg-red-500/15 hover:text-red-500 transition-colors"
+              title="Supprimer"
+            >
+              <Trash2 size={12} />
+            </button>
+          </>
+        )}
       </div>
 
       {open && hasChildren && (
@@ -598,6 +613,7 @@ function TreeItem({
               currentId={currentId}
               collapsed={collapsed}
               onToggle={onToggle}
+              readOnly={readOnly}
             />
           ))}
         </SortableContext>

@@ -2,13 +2,19 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import useSWR from "swr";
 
-export type Workspace = { id: string; name: string };
+export type WorkspaceRole = "admin" | "editor" | "viewer";
+export type Workspace = { id: string; name: string; role: WorkspaceRole };
 
 type WorkspaceContextType = {
   workspaces: Workspace[];
   activeWorkspace: Workspace | null;
   switchWorkspace: (id: string) => Promise<void>;
   isLoading: boolean;
+  /** Rôle sur l'espace actif. undefined tant que la liste n'est pas chargée. */
+  role: WorkspaceRole | undefined;
+  /** Prudence pendant le chargement : rôle inconnu = traité lecteur, jamais éditeur. */
+  isViewer: boolean;
+  isAdmin: boolean;
 };
 
 const WorkspaceContext = createContext<WorkspaceContextType>({
@@ -16,6 +22,9 @@ const WorkspaceContext = createContext<WorkspaceContextType>({
   activeWorkspace: null,
   switchWorkspace: async () => {},
   isLoading: true,
+  role: undefined,
+  isViewer: true,
+  isAdmin: false,
 });
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
@@ -46,9 +55,20 @@ export function WorkspaceProvider({
   };
 
   const activeWorkspace = workspaces.find((w) => w.id === activeId) ?? null;
+  const role = activeWorkspace?.role;
 
   return (
-    <WorkspaceContext.Provider value={{ workspaces, activeWorkspace, switchWorkspace, isLoading }}>
+    <WorkspaceContext.Provider
+      value={{
+        workspaces,
+        activeWorkspace,
+        switchWorkspace,
+        isLoading,
+        role,
+        isViewer: role === undefined || role === "viewer",
+        isAdmin: role === "admin",
+      }}
+    >
       {children}
     </WorkspaceContext.Provider>
   );

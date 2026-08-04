@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
-import { checkDatabaseAccess, isPageAccessible } from "@/lib/workspace";
+import { checkDatabaseAccess, hasRole, isPageAccessible } from "@/lib/workspace";
 import { parseManyDatabaseProperties, parseManyViews } from "@/lib/db";
 
 const patchDatabaseSchema = z.object({
@@ -51,6 +51,9 @@ export async function PATCH(
   const { id } = await params;
   const access = await checkDatabaseAccess(id, user.id);
   if (!access) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!hasRole(access.membership, "editor")) {
+    return NextResponse.json({ error: "Rôle insuffisant" }, { status: 403 });
+  }
 
   const body = await req.json().catch(() => null);
   const result = patchDatabaseSchema.safeParse(body);
@@ -107,6 +110,10 @@ export async function DELETE(
   const { id } = await params;
   const access = await checkDatabaseAccess(id, user.id);
   if (!access) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  // Suppression DÉFINITIVE (cascade properties/records/views/sprints) : admin.
+  if (!hasRole(access.membership, "admin")) {
+    return NextResponse.json({ error: "Rôle insuffisant" }, { status: 403 });
+  }
 
   await prisma.database.delete({ where: { id } });
 

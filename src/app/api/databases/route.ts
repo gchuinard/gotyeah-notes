@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
-import { getMembership, isPageAccessible } from "@/lib/workspace";
+import { getMembership, hasRole, isPageAccessible } from "@/lib/workspace";
 import {
   serializeDatabaseProperty,
   serializeView,
@@ -50,6 +50,9 @@ export async function POST(req: Request) {
   // Une database posée sur une page privée d'autrui reste inaccessible (404 anti-leak).
   if (!isPageAccessible(page, user.id)) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+  if (!hasRole(membership, "editor")) {
+    return NextResponse.json({ error: "Rôle insuffisant" }, { status: 403 });
   }
 
   const existing = await prisma.database.findUnique({ where: { pageId } });

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
-import { checkPropertyAccess } from "@/lib/workspace";
+import { checkPropertyAccess, hasRole } from "@/lib/workspace";
 import {
   serializeDatabaseProperty,
   parseDatabaseProperty,
@@ -50,6 +50,9 @@ export async function PATCH(
 
   const access = await checkPropertyAccess(id, user.id);
   if (!access) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!hasRole(access.membership, "editor")) {
+    return NextResponse.json({ error: "Rôle insuffisant" }, { status: 403 });
+  }
 
   const { name, config: rawConfig, position } = result.data;
 
@@ -130,6 +133,10 @@ export async function DELETE(
 
   const access = await checkPropertyAccess(id, user.id);
   if (!access) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  // Suppression DÉFINITIVE + purge de la clé dans tous les records : admin.
+  if (!hasRole(access.membership, "admin")) {
+    return NextResponse.json({ error: "Rôle insuffisant" }, { status: 403 });
+  }
 
   const property = await prisma.databaseProperty.findUnique({
     where: { id },

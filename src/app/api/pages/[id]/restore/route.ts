@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
-import { getMembership } from "@/lib/workspace";
+import { getMembership, hasRole } from "@/lib/workspace";
 import { restorePageSubtree } from "@/lib/trash";
 
 /** Restaure une page en corbeille ET tout son sous-arbre (trashedAt = null). */
@@ -21,6 +21,10 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
   if (!membership) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (page.visibility === "private" && page.ownerId !== user.id) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+  // Restaurer = inverse de la mise à la corbeille, même niveau : editor.
+  if (!hasRole(membership, "editor")) {
+    return NextResponse.json({ error: "Rôle insuffisant" }, { status: 403 });
   }
 
   await restorePageSubtree(id);

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
-import { checkDatabaseAccess } from "@/lib/workspace";
+import { checkDatabaseAccess, hasRole } from "@/lib/workspace";
 import { nextPosition } from "@/lib/positions";
 
 export async function GET(
@@ -42,6 +42,9 @@ export async function POST(
   const { id: databaseId } = await params;
   const access = await checkDatabaseAccess(databaseId, user.id);
   if (!access) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!hasRole(access.membership, "editor")) {
+    return NextResponse.json({ error: "Rôle insuffisant" }, { status: 403 });
+  }
 
   const body = await req.json().catch(() => null);
   const result = createSprintSchema.safeParse(body);

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
-import { getMembership } from "@/lib/workspace";
+import { getMembership, hasRole } from "@/lib/workspace";
 import {
   parseTemplateRow,
   resolveBuiltinTemplate,
@@ -15,7 +15,7 @@ async function loadOwned(id: string, userId: string) {
   if (!row) return null;
   const membership = await getMembership(userId, row.workspaceId);
   if (!membership) return null;
-  return row;
+  return { row, membership };
 }
 
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -30,9 +30,9 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
       : NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const row = await loadOwned(id, user.id);
-  if (!row) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  return NextResponse.json(parseTemplateRow(row));
+  const owned = await loadOwned(id, user.id);
+  if (!owned) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  return NextResponse.json(parseTemplateRow(owned.row));
 }
 
 const sectionSchema = z.object({ id: z.string().optional(), label: z.string().min(1).max(100) });
@@ -70,8 +70,11 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     );
   }
 
-  const row = await loadOwned(id, user.id);
-  if (!row) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const owned = await loadOwned(id, user.id);
+  if (!owned) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!hasRole(owned.membership, "editor")) {
+    return NextResponse.json({ error: "Rôle insuffisant" }, { status: 403 });
+  }
 
   const { name, icon, columns, kanbanGroupProperty, sections } = result.data;
   const updated = await prisma.template.update({
@@ -101,8 +104,12 @@ export async function DELETE(_: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ error: "Les templates fournis ne sont pas supprimables" }, { status: 400 });
   }
 
-  const row = await loadOwned(id, user.id);
-  if (!row) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const owned = await loadOwned(id, user.id);
+  if (!owned) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  // Suppression DÉFINITIVE (Template sans corbeille) : admin.
+  if (!hasRole(owned.membership, "admin")) {
+    return NextResponse.json({ error: "Rôle insuffisant" }, { status: 403 });
+  }
 
   await prisma.template.delete({ where: { id } });
   return NextResponse.json({ ok: true });

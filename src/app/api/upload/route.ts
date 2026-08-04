@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { getSession } from "@/lib/session";
+import { hasRoleInAnyWorkspace } from "@/lib/workspace";
 import { getAppConfig } from "@/lib/appConfig";
 import { uploadsDir, extForType } from "@/lib/uploads";
 
@@ -10,6 +11,12 @@ import { uploadsDir, extForType } from "@/lib/uploads";
 export async function POST(req: Request) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+
+  // La requête n'a pas de contexte workspace : un user lecteur-partout ne peut pas
+  // écrire sur le disque — uploader ne sert qu'à éditer, quelque part.
+  if (!(await hasRoleInAnyWorkspace(user.id, "editor"))) {
+    return NextResponse.json({ error: "Rôle insuffisant" }, { status: 403 });
+  }
 
   const form = await req.formData().catch(() => null);
   const file = form?.get("file");

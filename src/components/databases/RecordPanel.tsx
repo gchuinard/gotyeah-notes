@@ -10,7 +10,7 @@ import { fr } from "@blocknote/core/locales";
 import { BlockNoteView } from "@blocknote/mantine";
 import "@blocknote/mantine/style.css";
 import type { ParsedDatabaseProperty, ParsedRecord, PropertyValue, RecordSection } from "@/lib/db";
-import Cell from "@/components/databases/Cell";
+import Cell, { CellDisplay } from "@/components/databases/Cell";
 import { useThemeMode } from "@/lib/client/useThemeMode";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { createDebouncedSaver, type DebouncedSaver } from "@/lib/client/debouncedSaver";
@@ -57,11 +57,13 @@ function SectionEditor({
   themeMode,
   workspaceId,
   onChange,
+  readOnly,
 }: {
   section: RecordSection;
   themeMode: "light" | "dark";
   workspaceId: string | null;
   onChange: (content: unknown[]) => void;
+  readOnly: boolean;
 }) {
   const initial =
     Array.isArray(section.content) && section.content.length > 0 ? section.content : undefined;
@@ -74,6 +76,7 @@ function SectionEditor({
       </h3>
       <BlockNoteView
         editor={editor}
+        editable={!readOnly}
         theme={themeMode}
         onChange={() => onChange(editor.document)}
       >
@@ -177,11 +180,18 @@ type Props = {
   properties: ParsedDatabaseProperty[];
   databaseId: string;
   onClose: () => void;
+  readOnly?: boolean;
 };
 
 // ─── RecordPanel ──────────────────────────────────────────────────────────────
 
-export default function RecordPanel({ record, properties, databaseId, onClose }: Props) {
+export default function RecordPanel({
+  record,
+  properties,
+  databaseId,
+  onClose,
+  readOnly = false,
+}: Props) {
   const recordsKey = `/api/databases/${databaseId}/records`;
   const themeMode = useThemeMode();
   const { activeWorkspace } = useWorkspace();
@@ -316,6 +326,8 @@ export default function RecordPanel({ record, properties, databaseId, onClose }:
   sectionsRef.current = sections;
 
   const onSectionChange = (id: string, content: unknown[]) => {
+    // Ceinture + bretelles avec editable={!readOnly} : aucun PATCH en lecture seule.
+    if (readOnly) return;
     const next = sectionsRef.current.map((s) => (s.id === id ? { ...s, content } : s));
     setSections(next);
     sectionsSaverRef.current?.schedule(next);
@@ -460,8 +472,11 @@ export default function RecordPanel({ record, properties, databaseId, onClose }:
               />
             ) : (
               <h2
-                onClick={() => setIsEditingTitle(true)}
-                className="text-2xl font-bold text-[var(--text)] cursor-text hover:opacity-70 transition-opacity"
+                onClick={readOnly ? undefined : () => setIsEditingTitle(true)}
+                className={[
+                  "text-2xl font-bold text-[var(--text)]",
+                  readOnly ? "" : "cursor-text hover:opacity-70 transition-opacity",
+                ].join(" ")}
               >
                 {record.title || (
                   <span className="text-[var(--text-muted)] font-normal">Sans titre</span>
@@ -470,6 +485,7 @@ export default function RecordPanel({ record, properties, databaseId, onClose }:
             )}
           </div>
           <div className="flex items-center gap-1 shrink-0">
+            {!readOnly && (
             <div className="relative">
               <button
                 onClick={() => setTplMenuOpen((o) => !o)}
@@ -507,6 +523,7 @@ export default function RecordPanel({ record, properties, databaseId, onClose }:
                 </>
               )}
             </div>
+            )}
             <button
               onClick={handleClose}
               className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] rounded transition-colors"
@@ -551,11 +568,15 @@ export default function RecordPanel({ record, properties, databaseId, onClose }:
                     <span className="truncate">{property.name}</span>
                   </div>
                   <div className="flex items-center min-w-0 py-1.5 min-h-[36px] text-sm">
-                    <Cell
-                      property={property}
-                      record={record}
-                      onSave={(value) => saveProperty(property, value)}
-                    />
+                    {readOnly ? (
+                      <CellDisplay property={property} record={record} />
+                    ) : (
+                      <Cell
+                        property={property}
+                        record={record}
+                        onSave={(value) => saveProperty(property, value)}
+                      />
+                    )}
                   </div>
                 </Fragment>
               ))}
@@ -574,13 +595,18 @@ export default function RecordPanel({ record, properties, databaseId, onClose }:
                   themeMode={themeMode}
                   workspaceId={wsId}
                   onChange={(content) => onSectionChange(section.id, content)}
+                  readOnly={readOnly}
                 />
               ))
             ) : (
               <BlockNoteView
                 editor={editor}
+                editable={!readOnly}
                 theme={themeMode}
-                onChange={() => contentSaverRef.current?.schedule(JSON.stringify(editor.document))}
+                onChange={() => {
+                  if (readOnly) return;
+                  contentSaverRef.current?.schedule(JSON.stringify(editor.document));
+                }}
               >
                 <PageLinkMenu editor={editor} workspaceId={wsId} />
               </BlockNoteView>
