@@ -102,6 +102,7 @@ CREATE TABLE "Database" (
     "recordTemplate" TEXT,
     "templateId" TEXT,
     "recordSections" TEXT,
+    "patchNotesPageId" TEXT,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
     CONSTRAINT "Database_pageId_fkey" FOREIGN KEY ("pageId") REFERENCES "Page" ("id") ON DELETE CASCADE ON UPDATE CASCADE
@@ -141,6 +142,19 @@ CREATE TABLE "Record" (
 );
 
 -- CreateTable
+CREATE TABLE "RecordRevision" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "recordId" TEXT NOT NULL,
+    "actorId" TEXT,
+    "field" TEXT NOT NULL,
+    "before" TEXT NOT NULL,
+    "after" TEXT NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "RecordRevision_recordId_fkey" FOREIGN KEY ("recordId") REFERENCES "Record" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "RecordRevision_actorId_fkey" FOREIGN KEY ("actorId") REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+);
+
+-- CreateTable
 CREATE TABLE "Sprint" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "databaseId" TEXT NOT NULL,
@@ -149,6 +163,7 @@ CREATE TABLE "Sprint" (
     "startDate" DATETIME,
     "endDate" DATETIME,
     "state" TEXT NOT NULL DEFAULT 'future',
+    "releaseNotes" TEXT,
     "position" REAL NOT NULL DEFAULT 0,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
@@ -179,6 +194,9 @@ CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
 
 -- CreateIndex
 CREATE INDEX "Session_userId_idx" ON "Session"("userId");
+
+-- CreateIndex
+CREATE INDEX "Session_expiresAt_idx" ON "Session"("expiresAt");
 
 -- CreateIndex
 CREATE INDEX "Membership_userId_idx" ON "Membership"("userId");
@@ -239,6 +257,12 @@ CREATE INDEX "Record_sprintId_idx" ON "Record"("sprintId");
 
 -- CreateIndex
 CREATE INDEX "Record_trashedAt_idx" ON "Record"("trashedAt");
+
+-- CreateIndex
+CREATE INDEX "RecordRevision_recordId_createdAt_idx" ON "RecordRevision"("recordId", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "RecordRevision_recordId_field_idx" ON "RecordRevision"("recordId", "field");
 
 -- CreateIndex
 CREATE INDEX "Sprint_databaseId_position_idx" ON "Sprint"("databaseId", "position");

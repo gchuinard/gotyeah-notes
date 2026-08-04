@@ -1,0 +1,95 @@
+name: Baseline Prisma (one-shot)
+
+# Opération UNIQUE, à jouer AVANT de merger le passage à `prisma migrate deploy`.
+#
+# La base de prod a été créée par `db push` : elle a les tables mais AUCUN
+# historique de migration. Un `migrate deploy` brut essaierait donc de rejouer
+# `0_init` et échouerait sur « table already exists ». Ce workflow marque
+# `0_init` comme DÉJÀ APPLIQUÉ sans en exécuter le SQL.
+#
+# Déclenchement manuel uniquement, avec saisie de confirmation. Aucun schéma
+# n'est modifié : seule la table `_prisma_migrations` est renseignée.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Taper BASELINE pour confirmer (opération sur la base de PRODUCTION)'
+        required: true
+        default: ''
+      ref:
+        description: 'Branche portant prisma/migrations/0_init'
+        required: true
+        default: 'feat/prisma-migrations'
+
+# Partage le verrou du déploiement : jamais de baseline pendant une MEP.
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  baseline:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Vérifier la confirmation
+        if: ${{ github.event.inputs.confirm != 'BASELINE' }}
+        run: |
+          echo "Confirmation absente ou incorrecte — rien n'a été exécuté."
+          exit 1
+
+      - name: Baseline via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          TARGET_REF: ${{ github.event.inputs.ref }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script_stop: true
+          command_timeout: 20m
+          envs: TARGET_REF
+          script: |
+            set -euo pipefail
+            cd /home/pi/sites/gotyeah-notes
+            git fetch --prune origin
+            git reset --hard "origin/$TARGET_REF"
+
+            # ── Snapshot AVANT toute écriture, même non destructive ────────────
+            # Même procédure que le déploiement : sqlite3 .backup (cohérent sous
+            # WAL) + integrity_check. Un échec arrête tout (set -e).
+            BACKUP_DIR=/home/pi/backups/gotyeah-notes
+            STAMP=$(date +%Y%m%d-%H%M%S)
+            mkdir -p "$BACKUP_DIR"
+            DB_VOL=$(docker volume ls -q | grep -E '(^|_)gotyeah-db$' | head -1)
+            [ -n "$DB_VOL" ] || { echo "Volume gotyeah-db introuvable — abandon."; exit 1; }
+            docker run --rm --user 0:0 \
+              -v "$DB_VOL":/data:ro \
+              -v "$BACKUP_DIR":/backup \
+              keinos/sqlite3:latest \
+              sqlite3 /data/dev.db ".backup '/backup/pre-baseline-$STAMP.db'"
+            docker run --rm --user 0:0 -v "$BACKUP_DIR":/backup keinos/sqlite3:latest \
+              sh -c "sqlite3 /backup/pre-baseline-$STAMP.db 'PRAGMA integrity_check' | grep -q '^ok$'"
+            echo "Snapshot OK: $BACKUP_DIR/pre-baseline-$STAMP.db"
+
+            docker compose build migrate
+
+            # Marque 0_init comme appliqué SANS jouer son SQL.
+            docker compose run --rm --entrypoint sh migrate \
+              -c "npx prisma migrate resolve --applied 0_init"
+
+            # Contrôle : plus aucune migration en attente. Si cette commande
+            # tentait d'appliquer quoi que ce soit, la baseline serait fausse.
+            OUT=$(docker compose run --rm migrate 2>&1)
+            echo "$OUT"
+            echo "$OUT" | grep -qiE "no pending migrations|aucune migration" || {
+              echo "migrate deploy n'a pas confirmé « no pending migrations » — vérifier avant de merger."
+              exit 1
+            }
+
+            # Remet le dépôt du Pi sur main : le prochain déploiement partirait
+            # sinon d'une branche de travail.
+            git reset --hard origin/main
+            echo "Baseline terminée. La PR peut être mergée."
