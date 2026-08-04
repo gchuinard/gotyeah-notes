@@ -48,6 +48,8 @@ type Props = {
   view: ParsedView;
   properties: ParsedDatabaseProperty[];
   readOnly?: boolean;
+  /** Suppression DÉFINITIVE d'un sprint : réservée aux admins. */
+  isAdmin?: boolean;
 };
 
 /** Une « lane » = un sprint (avec ses issues) ou le backlog (sprint = null). */
@@ -260,7 +262,7 @@ function BacklogRowOverlay({
 // ─── SprintMenu (⋯) ───────────────────────────────────────────────────────────
 
 function SprintMenu({
-  anchor, sprint, onClose, onAction, onEdit, onDelete,
+  anchor, sprint, onClose, onAction, onEdit, onDelete, canDelete = false,
 }: {
   anchor: React.RefObject<HTMLElement | null>;
   sprint: ParsedSprint;
@@ -268,6 +270,7 @@ function SprintMenu({
   onAction: (state: SprintState) => void;
   onEdit: () => void;
   onDelete: () => void;
+  canDelete?: boolean;
 }) {
   return (
     <Portal anchor={anchor} onClose={onClose} minWidth={200}>
@@ -301,12 +304,15 @@ function SprintMenu({
       >
         <CalendarDays size={13} /> Dates & objectif
       </button>
-      <button
-        className="w-full text-left px-3 py-1.5 text-sm hover:bg-[var(--surface-hover)] text-red-500 flex items-center gap-2"
-        onMouseDown={(e) => { e.preventDefault(); onClose(); onDelete(); }}
-      >
-        <Trash2 size={13} /> Supprimer
-      </button>
+      {/* Suppression DÉFINITIVE du sprint : admin (masquée aux éditeurs). */}
+      {canDelete && (
+        <button
+          className="w-full text-left px-3 py-1.5 text-sm hover:bg-[var(--surface-hover)] text-red-500 flex items-center gap-2"
+          onMouseDown={(e) => { e.preventDefault(); onClose(); onDelete(); }}
+        >
+          <Trash2 size={13} /> Supprimer
+        </button>
+      )}
     </Portal>
   );
 }
@@ -317,7 +323,7 @@ export function SprintLane({
   lane, collapsed, onToggleCollapse,
   statusProp, epicProp, pointsProp, previewProps, doneOptionId, newRecordId,
   onAddRecord, onTitleSave, onRowClick, onDeleteRecord, onDuplicateRecord,
-  onRenameSprint, onSprintAction, onEditSprint, onDeleteSprint, readOnly = false,
+  onRenameSprint, onSprintAction, onEditSprint, onDeleteSprint, readOnly = false, isAdmin = false,
 }: {
   lane: Lane;
   collapsed: boolean;
@@ -338,6 +344,7 @@ export function SprintLane({
   onEditSprint: (sprint: ParsedSprint) => void;
   onDeleteSprint: (id: string) => void;
   readOnly?: boolean;
+  isAdmin?: boolean;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: lane.id });
   const sprint = lane.sprint;
@@ -467,6 +474,7 @@ export function SprintLane({
             onAction={(state) => onSprintAction(sprint.id, state)}
             onEdit={() => onEditSprint(sprint)}
             onDelete={() => onDeleteSprint(sprint.id)}
+            canDelete={isAdmin}
           />
         )}
       </div>
@@ -649,7 +657,7 @@ function SprintEditModal({
 
 // ─── BacklogView (main) ───────────────────────────────────────────────────────
 
-export default function BacklogView({ databaseId, view, properties, readOnly = false }: Props) {
+export default function BacklogView({ databaseId, view, properties, readOnly = false, isAdmin = false }: Props) {
   const { confirm, alert } = useDialog();
   const {
     data: records,
@@ -1191,6 +1199,7 @@ export default function BacklogView({ databaseId, view, properties, readOnly = f
                 onEditSprint={(s) => setEditingSprintId(s.id)}
                 onDeleteSprint={deleteSprint}
                 readOnly={readOnly}
+                isAdmin={isAdmin}
               />
             ))}
           </div>

@@ -50,6 +50,8 @@ type Props = {
   view: ParsedView;
   properties: ParsedDatabaseProperty[];
   readOnly?: boolean;
+  /** Suppressions DÉFINITIVES (colonne) : réservées aux admins. */
+  isAdmin?: boolean;
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -275,6 +277,7 @@ export default function TableView({
   view: _view,
   properties: initialProperties,
   readOnly = false,
+  isAdmin = false,
 }: Props) {
   const { confirm } = useDialog();
   const { data: records, error, isLoading, mutate } = useSWR<ParsedRecord[]>(
@@ -761,6 +764,7 @@ export default function TableView({
             onPropertyUpdated={handlePropertyUpdated}
             onPropertyDeleted={handlePropertyDeleted}
             onClose={() => setOpenPopoverId(null)}
+            canDelete={isAdmin}
           />
         );
       })()}

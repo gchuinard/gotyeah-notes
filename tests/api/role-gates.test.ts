@@ -63,7 +63,9 @@ const as = (userId: string) =>
     currentWorkspaceId: workspaceId,
   });
 
-const P = (params: Record<string, string>) => ({ params: Promise.resolve(params) });
+// Générique : le type des params est INFÉRÉ à l'appel ({ id } ou { id, userId }),
+// sinon Record<string, string> n'est pas assignable aux params des handlers (tsc).
+const P = <T extends Record<string, string>>(params: T) => ({ params: Promise.resolve(params) });
 const req = (url: string, method = "GET") => new Request(`http://localhost${url}`, { method });
 const jsonReq = (url: string, method: string, body: unknown) =>
   new Request(`http://localhost${url}`, {
@@ -191,6 +193,26 @@ describe("Exemptions lecteur et précédence 404/403", () => {
     as(viewerId);
     const res = await pagePATCH(jsonReq(`/api/pages/${own.id}`, "PATCH", { title: "x" }), P({ id: own.id }));
     expect(res.status).toBe(403);
+  });
+
+  it("POST /api/pages refuse un parent / une section d'un AUTRE espace → 404", async () => {
+    const other = await seedUserWithWorkspace(`roles-cross-${Date.now()}@x.tld`);
+    const foreignSection = await prisma.section.create({
+      data: { name: "F", type: "team", position: 0, workspaceId: other.workspace.id },
+    });
+    const foreignPage = await prisma.page.create({
+      data: { title: "F", workspaceId: other.workspace.id, ownerId: other.user.id, visibility: "team" },
+    });
+    // L'appelant est bien éditeur du workspaceId envoyé : seul le rattachement triche.
+    as(editorId);
+    const byParent = await pagesPOST(
+      jsonReq("/api/pages", "POST", { workspaceId, title: "x", parentId: foreignPage.id })
+    );
+    expect(byParent.status).toBe(404);
+    const bySection = await pagesPOST(
+      jsonReq("/api/pages", "POST", { workspaceId, title: "x", sectionId: foreignSection.id })
+    );
+    expect(bySection.status).toBe(404);
   });
 
   it("membre de W1 visant W2 → 404 (jamais 403 : pas de leak d'existence)", async () => {

@@ -331,9 +331,12 @@ function AddViewPopover({
 export default function DatabaseShell({
   databaseId,
   readOnly = false,
+  isAdmin = false,
 }: {
   databaseId: string;
   readOnly?: boolean;
+  /** Suppressions DÉFINITIVES (vue, colonne, sprint) : réservées aux admins. */
+  isAdmin?: boolean;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -539,7 +542,7 @@ export default function DatabaseShell({
                 editInputRef={editInputRef}
                 menuBtnRefs={menuBtnRefs}
                 menuOpen={tabMenuOpenId === view.id}
-                canDelete={views.length > 1}
+                canDelete={views.length > 1 && isAdmin}
                 onEditingNameChange={setEditingName}
                 onSwitchView={() => switchView(view.id)}
                 onCommitRename={commitRename}
@@ -592,6 +595,7 @@ export default function DatabaseShell({
             view={activeView}
             properties={data.properties}
             readOnly={readOnly}
+            isAdmin={isAdmin}
           />
         ) : activeView.type === "kanban" ? (
           <KanbanView
@@ -620,6 +624,7 @@ export default function DatabaseShell({
             view={activeView}
             properties={data.properties}
             readOnly={readOnly}
+            isAdmin={isAdmin}
           />
         ) : (
           <div className="flex items-center justify-center h-48 text-[var(--text-muted)] text-sm">

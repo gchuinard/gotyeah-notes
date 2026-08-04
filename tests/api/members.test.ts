@@ -25,7 +25,8 @@ const as = (userId: string) =>
     currentWorkspaceId: workspaceId,
   });
 
-const P = (params: Record<string, string>) => ({ params: Promise.resolve(params) });
+// Générique : le type des params est INFÉRÉ à l'appel (cf. role-gates.test.ts).
+const P = <T extends Record<string, string>>(params: T) => ({ params: Promise.resolve(params) });
 const jsonReq = (url: string, method: string, body: unknown) =>
   new Request(`http://localhost${url}`, {
     method,

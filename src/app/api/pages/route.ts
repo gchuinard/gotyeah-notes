@@ -55,6 +55,28 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Rôle insuffisant" }, { status: 403 });
   }
 
+  // Le rôle est vérifié sur le workspaceId du BODY : sans ce garde-fou, un membre
+  // pourrait rattacher la page à un parent / une section d'un AUTRE espace (où il
+  // n'est que lecteur, voire non membre) et écrire dans son arborescence.
+  if (parentId) {
+    const parent = await prisma.page.findUnique({
+      where: { id: parentId },
+      select: { workspaceId: true, trashedAt: true },
+    });
+    if (!parent || parent.trashedAt || parent.workspaceId !== workspaceId) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+  }
+  if (sectionId) {
+    const section = await prisma.section.findUnique({
+      where: { id: sectionId },
+      select: { workspaceId: true },
+    });
+    if (!section || section.workspaceId !== workspaceId) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+  }
+
   const page = await createPage({ title, parentId, workspaceId, ownerId: user.id, sectionId });
   return NextResponse.json(page);
 }

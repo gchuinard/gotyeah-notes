@@ -31,6 +31,8 @@ type Props = {
   onPropertyUpdated: (updated: ParsedDatabaseProperty) => void;
   onPropertyDeleted: (propertyId: string) => void;
   onClose: () => void;
+  /** Suppression DÉFINITIVE d'une colonne (purge la clé de tous les records) : admin. */
+  canDelete?: boolean;
 };
 
 // ─── SelectOption editor row ──────────────────────────────────────────────────
@@ -130,6 +132,7 @@ export default function PropertyPopover({
   onPropertyUpdated,
   onPropertyDeleted,
   onClose,
+  canDelete = false,
 }: Props) {
   const [name, setName] = useState(property.name);
   const [options, setOptions] = useState<SelectOption[]>(
@@ -250,7 +253,9 @@ export default function PropertyPopover({
   };
 
   // ── DELETE property ───────────────────────────────────────────────────────
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const handleDelete = async () => {
+    setDeleteError(null);
     try {
       const res = await fetch(`/api/properties/${property.id}`, {
         method: "DELETE",
@@ -258,9 +263,14 @@ export default function PropertyPopover({
       if (res.ok) {
         onPropertyDeleted(property.id);
         onClose();
+        return;
       }
+      // Un refus (403 rôle insuffisant, 400 colonne titre…) doit se VOIR :
+      // le bouton était muet, le clic semblait mort.
+      const body = await res.json().catch(() => ({}));
+      setDeleteError((body as { error?: string }).error ?? `Erreur ${res.status}`);
     } catch {
-      // silent
+      setDeleteError("Suppression impossible.");
     }
   };
 
@@ -337,8 +347,12 @@ export default function PropertyPopover({
         </div>
       )}
 
-      {/* Delete property */}
+      {/* Delete property — DÉFINITIF (admin) : masqué aux éditeurs et lecteurs. */}
+      {canDelete && (
       <div className="border-t border-[var(--border)] mt-1 pt-1 px-2">
+        {deleteError && (
+          <p className="px-1 pb-1 text-xs text-red-500">{deleteError}</p>
+        )}
         {confirmDelete ? (
           <div className="flex items-center gap-2 px-1 py-1">
             <span className="text-xs text-[var(--text-muted)] flex-1">Supprimer la colonne ?</span>
@@ -368,6 +382,7 @@ export default function PropertyPopover({
           </button>
         )}
       </div>
+      )}
     </Portal>
   );
 }

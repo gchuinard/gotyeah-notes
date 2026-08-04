@@ -41,12 +41,13 @@ export default async function PageView({
 
   // Rôle résolu au SSR (membership déjà en main) → pas de flash d'UI éditable.
   const readOnly = membership.role === "viewer";
+  const isAdmin = membership.role === "admin";
 
   return (
     <>
       <VisitRecorder pageId={page.id} />
       {database ? (
-        <DatabaseShell databaseId={database.id} readOnly={readOnly} />
+        <DatabaseShell databaseId={database.id} readOnly={readOnly} isAdmin={isAdmin} />
       ) : (
         <EditorClient
           key={page.id}
