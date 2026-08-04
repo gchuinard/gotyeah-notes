@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
-import { getMembership, hasRole } from "@/lib/workspace";
+import { getMembership, hasRole, pageVisibilityFilter } from "@/lib/workspace";
 import { createPage } from "@/lib/pages";
 import { prisma } from "@/lib/prisma";
 
@@ -19,10 +19,7 @@ export async function GET(req: Request) {
     where: {
       workspaceId,
       trashedAt: null, // exclut la corbeille
-      OR: [
-        { visibility: "team" },
-        { visibility: "private", ownerId: user.id },
-      ],
+      ...(pageVisibilityFilter(user.id, user.isService) ?? {}),
     },
     orderBy: [{ position: "asc" }],
     select: {

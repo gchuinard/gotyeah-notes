@@ -21,6 +21,9 @@ export type SessionUser = {
   email: string;
   displayName: string;
   currentWorkspaceId: string | null;
+  /** Compte de SERVICE (pont MCP). Voit les pages privées des espaces où il est
+   *  membre — cf. isPageAccessible. Toujours false pour un humain. */
+  isService: boolean;
 };
 
 async function firstWorkspaceId(userId: string): Promise<string | null> {
@@ -39,7 +42,7 @@ async function userFromSessionToken(token: string): Promise<SessionUser | null> 
     select: {
       expiresAt: true,
       currentWorkspaceId: true,
-      user: { select: { id: true, email: true, displayName: true } },
+      user: { select: { id: true, email: true, displayName: true, isService: true } },
     },
   });
   if (!session) return null;
@@ -89,7 +92,7 @@ async function getServiceUser(): Promise<SessionUser | null> {
 
   const user = await prisma.user.findUnique({
     where: { email: target },
-    select: { id: true, email: true, displayName: true },
+    select: { id: true, email: true, displayName: true, isService: true },
   });
   if (!user) {
     console.warn(`[mcp-act-as] email inconnu : ${target}`);

@@ -14,6 +14,12 @@ model User {
   lastName     String
   displayName  String
   passwordHash String
+  /// Compte de SERVICE (le pont MCP incarne « IA »), pas un humain.
+  /// Un compte de service voit les pages privées des espaces où il est MEMBRE :
+  /// sans ça, un board posé sur une page privée lui répond 404 et l'automatisation
+  /// est muette. L'exemption s'arrête là — elle ne franchit aucune frontière
+  /// d'espace, et aucune route de l'API n'expose ce champ en écriture.
+  isService    Boolean      @default(false)
   createdAt    DateTime     @default(now())
   sessions     Session[]
   memberships  Membership[]

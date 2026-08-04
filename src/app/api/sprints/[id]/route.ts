@@ -156,6 +156,7 @@ export async function PATCH(
         pageId: db?.patchNotesPageId ?? null,
         workspaceId: access.workspaceId,
         userId: user.id,
+        isService: user.isService,
         sprintId: id,
         blocks,
       });

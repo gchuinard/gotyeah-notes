@@ -24,6 +24,7 @@ const as = (userId: string) =>
     email: "x@x.tld",
     displayName: "X",
     currentWorkspaceId: workspaceId,
+    isService: false,
   });
 
 // Générique : le type des params est INFÉRÉ à l'appel (cf. role-gates.test.ts).

@@ -20,6 +20,7 @@ function asMe() {
     email: "u",
     displayName: "U",
     currentWorkspaceId: workspaceId,
+    isService: false,
   });
 }
 

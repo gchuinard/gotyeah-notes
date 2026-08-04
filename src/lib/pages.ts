@@ -1,4 +1,5 @@
 import { prisma } from "./prisma";
+import { isPageAccessible } from "./workspace";
 import type { Prisma } from "../../generated/prisma/client";
 import { appendReleaseNotesToContent, type BlockNoteBlock } from "./db";
 
@@ -258,6 +259,8 @@ export async function appendReleaseNotesToPage(
     pageId: string | null;
     workspaceId: string;
     userId: string;
+    /** Compte de service : voit les pages privées de son espace (cf. isPageAccessible). */
+    isService?: boolean;
     sprintId: string;
     blocks: BlockNoteBlock[];
   }
@@ -272,7 +275,7 @@ export async function appendReleaseNotesToPage(
     !page ||
     page.workspaceId !== opts.workspaceId ||
     page.trashedAt ||
-    (page.visibility === "private" && page.ownerId !== opts.userId)
+    !isPageAccessible(page, opts.userId, opts.isService ?? false)
   ) {
     return { status: "no_page" };
   }

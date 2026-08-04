@@ -50,7 +50,7 @@ beforeAll(async () => {
   const ts = await prisma.section.create({ data: { name: "Équipe", type: "team", position: 1, workspaceId } });
   privateSectionId = ps.id;
   teamSectionId = ts.id;
-  mockGetSession.mockResolvedValue({ id: userId, email: "u", displayName: "U", currentWorkspaceId: workspaceId });
+  mockGetSession.mockResolvedValue({ id: userId, email: "u", displayName: "U", currentWorkspaceId: workspaceId , isService: false});
 });
 
 afterAll(async () => {

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
-import { getMembership, hasRole } from "@/lib/workspace";
+import { getMembership, hasRole, isPageAccessible } from "@/lib/workspace";
 import { setPageSection, type SetPageSectionInput } from "@/lib/pages";
 import { trashPageSubtree } from "@/lib/trash";
 
@@ -25,8 +25,8 @@ async function getPageWithMembership(pageId: string, userId: string, includeTras
   const membership = await getMembership(userId, page.workspaceId);
   if (!membership) return null;
 
-  // Private pages are only accessible to their owner
-  if (page.visibility === "private" && page.ownerId !== userId) return null;
+  // Page privée : réservée à son propriétaire — sauf compte de service.
+  if (!isPageAccessible(page, userId, membership.user.isService)) return null;
 
   return { page, membership };
 }

@@ -47,7 +47,7 @@ describe("sections — zod (plus de 500 sur body malformé)", () => {
     const s = await seedUserWithWorkspace(`apihard-${Date.now()}@x.tld`);
     userId = s.user.id;
     workspaceId = s.workspace.id;
-    mockGetSession.mockResolvedValue({ id: userId, email: "u", displayName: "U", currentWorkspaceId: workspaceId });
+    mockGetSession.mockResolvedValue({ id: userId, email: "u", displayName: "U", currentWorkspaceId: workspaceId , isService: false});
   });
   afterAll(async () => { await prisma.$disconnect(); });
 
