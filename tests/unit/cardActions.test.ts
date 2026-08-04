@@ -86,3 +86,22 @@ describe("withStopPropagation", () => {
     expect(onDelete).not.toHaveBeenCalled();
   });
 });
+
+describe("CardActions — suppression optionnelle", () => {
+  it("sans onDelete, seul le bouton Dupliquer est rendu", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(CardActions, { onDuplicate: noop })
+    );
+    expect((html.match(/<button/g) ?? []).length).toBe(1);
+    expect(html).toContain('aria-label="Dupliquer"');
+    expect(html).not.toContain('aria-label="Supprimer"');
+  });
+
+  it("avec onDelete, les deux boutons reviennent (kanban, backlog, table)", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(CardActions, { onDuplicate: noop, onDelete: noop })
+    );
+    expect((html.match(/<button/g) ?? []).length).toBe(2);
+    expect(html).toContain('aria-label="Supprimer"');
+  });
+});

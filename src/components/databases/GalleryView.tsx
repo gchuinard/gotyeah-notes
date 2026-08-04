@@ -5,6 +5,7 @@ import { Plus } from "lucide-react";
 import type { ParsedDatabaseProperty, ParsedRecord, ParsedView } from "@/lib/db";
 import { applyViewConfig, deriveSeedFromFilters } from "@/lib/client/viewFilters";
 import { CellDisplay } from "@/components/databases/Cell";
+import CardActions from "@/components/databases/CardActions";
 import RecordPanel from "@/components/databases/RecordPanel";
 import { useRecordDeepLink } from "@/lib/client/useRecordDeepLink";
 
@@ -36,11 +37,14 @@ function GalleryCard({
   record,
   previewProps,
   onClick,
+  onDuplicate,
   workspaceId,
 }: {
   record: ParsedRecord;
   previewProps: ParsedDatabaseProperty[];
   onClick: () => void;
+  /** Omis en lecture seule : la carte n'expose alors aucune action. */
+  onDuplicate?: () => void;
   workspaceId?: string;
 }) {
   const filledProps = previewProps.filter((p) => {
@@ -51,8 +55,15 @@ function GalleryCard({
   return (
     <div
       onClick={onClick}
-      className="bg-[var(--bg)] border border-[var(--border)] rounded-lg cursor-pointer hover:shadow-md transition-shadow overflow-hidden"
+      className="group relative bg-[var(--bg)] border border-[var(--border)] rounded-lg cursor-pointer hover:shadow-md transition-shadow overflow-hidden"
     >
+      {onDuplicate && (
+        <CardActions
+          className="absolute top-2 right-2 z-10 rounded-md bg-[var(--bg)]/90 backdrop-blur-sm"
+          onDuplicate={onDuplicate}
+        />
+      )}
+
       {/* Cover */}
       {record.coverUrl ? (
         <img
@@ -192,6 +203,22 @@ export default function GalleryView({
     }
   }, [databaseId, records, mutate, view.config.filters, properties]);
 
+  // ── Duplicate record ────────────────────────────────────────────────────────
+  // Copie SERVEUR atomique (titre « (copie) », propriétés, corps, sprint).
+
+  const handleDuplicateRecord = useCallback(
+    async (record: ParsedRecord) => {
+      try {
+        const res = await fetch(`/api/records/${record.id}/duplicate`, { method: "POST" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        mutate();
+      } catch (err) {
+        console.error("Échec de la duplication", err);
+      }
+    },
+    [mutate]
+  );
+
   // ─── Render ─────────────────────────────────────────────────────────────────
 
   if (isLoading) {
@@ -230,6 +257,7 @@ export default function GalleryView({
               previewProps={previewProps}
               workspaceId={workspaceId}
               onClick={() => setSelectedRecordId(record.id)}
+              onDuplicate={readOnly ? undefined : () => handleDuplicateRecord(record)}
             />
           ))}
           {!readOnly && <NewRecordCard onClick={handleAddRecord} />}

@@ -2,7 +2,7 @@
 import useSWR from "swr";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useRef, useState, useEffect, useMemo } from "react";
-import { Plus, MoreHorizontal, Trash2, Pencil, Table2, Kanban, Calendar, LayoutGrid, ListChecks } from "lucide-react";
+import { Plus, MoreHorizontal, Trash2, Pencil, Check, Table2, Kanban, Calendar, LayoutGrid, ListChecks } from "lucide-react";
 import {
   DndContext,
   type DragEndEvent,
@@ -74,18 +74,28 @@ const fetcher = (url: string) =>
 function TabMenu({
   anchor,
   canDelete,
+  isKanban,
+  createInUnassignedOnly,
   onRename,
+  onToggleCreateInUnassignedOnly,
   onDelete,
   onClose,
 }: {
   anchor: React.RefObject<HTMLElement | null>;
   canDelete: boolean;
+  /** Le réglage de création n'a de sens que sur un board à colonnes. */
+  isKanban: boolean;
+  createInUnassignedOnly: boolean;
   onRename: () => void;
+  onToggleCreateInUnassignedOnly: () => void;
   onDelete: () => void;
   onClose: () => void;
 }) {
   return (
-    <Portal anchor={anchor} onClose={onClose} minWidth={150}>
+    // minWidth suit le libellé le PLUS LARGE du menu : Portal s'en sert pour
+    // clamper la position près du bord droit, un minWidth sous-évalué peint le
+    // menu hors du viewport (il est en position:fixed, donc sans scroll).
+    <Portal anchor={anchor} onClose={onClose} minWidth={isKanban ? 290 : 150}>
       <button
         className="w-full text-left px-3 py-1.5 text-sm hover:bg-[var(--surface-hover)] text-[var(--text)] flex items-center gap-2"
         onMouseDown={(e) => { e.preventDefault(); onRename(); onClose(); }}
@@ -93,6 +103,18 @@ function TabMenu({
         <Pencil size={13} />
         Renommer
       </button>
+      {isKanban && (
+        <button
+          className="w-full text-left px-3 py-1.5 text-sm hover:bg-[var(--surface-hover)] text-[var(--text)] flex items-start gap-2"
+          onMouseDown={(e) => { e.preventDefault(); onToggleCreateInUnassignedOnly(); onClose(); }}
+          title="Toute nouvelle carte naît sans valeur d'axe, à classer ensuite"
+        >
+          <span className="w-[13px] shrink-0 pt-0.5">
+            {createInUnassignedOnly && <Check size={13} className="text-[var(--accent)]" />}
+          </span>
+          <span className="whitespace-nowrap">Créer seulement dans « Sans valeur »</span>
+        </button>
+      )}
       {canDelete && (
         <button
           className="w-full text-left px-3 py-1.5 text-sm hover:bg-[var(--surface-hover)] text-red-500 flex items-center gap-2"
@@ -124,6 +146,7 @@ function SortableViewTab({
   onStartRename,
   onToggleMenu,
   onCloseMenu,
+  onToggleCreateInUnassignedOnly,
   onDelete,
   readOnly,
 }: {
@@ -142,6 +165,7 @@ function SortableViewTab({
   onStartRename: () => void;
   onToggleMenu: () => void;
   onCloseMenu: () => void;
+  onToggleCreateInUnassignedOnly: () => void;
   onDelete: () => void;
   readOnly: boolean;
 }) {
@@ -209,7 +233,10 @@ function SortableViewTab({
         <TabMenu
           anchor={{ current: menuBtnRefs.current.get(view.id) ?? null }}
           canDelete={canDelete}
+          isKanban={view.type === "kanban"}
+          createInUnassignedOnly={view.config.createInUnassignedOnly ?? false}
           onRename={onStartRename}
+          onToggleCreateInUnassignedOnly={onToggleCreateInUnassignedOnly}
           onDelete={onDelete}
           onClose={onCloseMenu}
         />
@@ -506,6 +533,30 @@ export default function DatabaseShell({
     mutate();
   };
 
+  // ── Réglages de vue (config) ───────────────────────────────────────────────
+
+  // Bascule du flag kanban « créer seulement dans Sans valeur ». Le PATCH d'un
+  // View.config est un remplacement TOTAL : on réémet donc le config complet.
+  const handleToggleCreateInUnassignedOnly = async (view: ParsedView) => {
+    setTabMenuOpenId(null);
+    const next = !(view.config.createInUnassignedOnly ?? false);
+    const res = await fetch(`/api/views/${view.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ config: { ...view.config, createInUnassignedOnly: next } }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      await alert({
+        title: "Modification impossible",
+        message: (body as { error?: string }).error ?? `Erreur ${res.status}`,
+        tone: "danger",
+      });
+      return;
+    }
+    mutate();
+  };
+
   // ── View delete handler ────────────────────────────────────────────────────
 
   const handleDeleteView = async (view: ParsedView) => {
@@ -561,6 +612,7 @@ export default function DatabaseShell({
                 }}
                 onToggleMenu={() => setTabMenuOpenId((prev) => (prev === view.id ? null : view.id))}
                 onCloseMenu={() => setTabMenuOpenId(null)}
+                onToggleCreateInUnassignedOnly={() => handleToggleCreateInUnassignedOnly(view)}
                 onDelete={() => handleDeleteView(view)}
                 readOnly={readOnly}
               />
