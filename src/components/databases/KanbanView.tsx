@@ -1324,6 +1324,7 @@ export default function KanbanView({
           properties={properties}
           databaseId={databaseId}
           workspaceId={workspaceId}
+          actor={actor}
           onClose={() => setSelectedRecordId(null)}
           readOnly={readOnly}
         />

@@ -10,6 +10,7 @@ import { fr } from "@blocknote/core/locales";
 import { BlockNoteView } from "@blocknote/mantine";
 import "@blocknote/mantine/style.css";
 import type { ParsedDatabaseProperty, ParsedRecord, PropertyValue, RecordSection } from "@/lib/db";
+import type { TransitionActor } from "@/lib/permissionRules";
 import Cell, { CellDisplay } from "@/components/databases/Cell";
 import { useThemeMode } from "@/lib/client/useThemeMode";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
@@ -184,6 +185,8 @@ type Props = {
   workspaceId?: string;
   onClose: () => void;
   readOnly?: boolean;
+  /** Identité + rôle, pour les règles de transition par colonne. */
+  actor?: TransitionActor;
 };
 
 // ─── RecordPanel ──────────────────────────────────────────────────────────────
@@ -195,6 +198,7 @@ export default function RecordPanel({
   workspaceId,
   onClose,
   readOnly = false,
+  actor,
 }: Props) {
   const recordsKey = `/api/databases/${databaseId}/records`;
   const themeMode = useThemeMode();
@@ -580,6 +584,7 @@ export default function RecordPanel({
                         record={record}
                         onSave={(value) => saveProperty(property, value)}
                         workspaceId={workspaceId}
+                        actor={actor}
                       />
                     )}
                   </div>

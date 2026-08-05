@@ -3,6 +3,7 @@ import { useState, useMemo, useRef, useCallback } from "react";
 import useSWR, { mutate as globalMutate } from "swr";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { ParsedDatabaseProperty, ParsedRecord, ParsedView, SelectOption } from "@/lib/db";
+import type { TransitionActor } from "@/lib/permissionRules";
 import { applyViewConfig } from "@/lib/client/viewFilters";
 import { colorClass } from "@/components/databases/Cell";
 import CardActions from "@/components/databases/CardActions";
@@ -242,10 +243,12 @@ type Props = {
   workspaceId?: string;
   /** Utilisateur qui regarde — résout le jeton « Moi » des filtres. */
   currentUserId?: string;
+  /** Identité + rôle, pour les règles de transition par colonne. */
+  actor?: TransitionActor;
 };
 
 export default function CalendarView({
-  databaseId, view, properties, readOnly = false, workspaceId, currentUserId,
+  databaseId, view, properties, readOnly = false, workspaceId, currentUserId, actor,
 }: Props) {
   const { data: records, isLoading, error, mutate } = useSWR<ParsedRecord[]>(
     `/api/databases/${databaseId}/records`,
@@ -497,6 +500,7 @@ export default function CalendarView({
           properties={properties}
           databaseId={databaseId}
           workspaceId={workspaceId}
+          actor={actor}
           onClose={() => setSelectedRecordId(null)}
           readOnly={readOnly}
         />

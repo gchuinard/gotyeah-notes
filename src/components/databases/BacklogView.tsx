@@ -31,6 +31,7 @@ import type {
   SprintState,
 } from "@/lib/db";
 import { SelectBadge, CellDisplay } from "@/components/databases/Cell";
+import type { TransitionActor } from "@/lib/permissionRules";
 import { applyViewConfig } from "@/lib/client/viewFilters";
 import { useDialog } from "@/contexts/DialogContext";
 import Portal from "@/components/databases/portal";
@@ -53,6 +54,8 @@ type Props = {
   workspaceId?: string;
   /** Utilisateur qui regarde — résout le jeton « Moi » des filtres. */
   currentUserId?: string;
+  /** Identité + rôle, pour les règles de transition par colonne. */
+  actor?: TransitionActor;
 };
 
 /** Une « lane » = un sprint (avec ses issues) ou le backlog (sprint = null). */
@@ -666,7 +669,7 @@ function SprintEditModal({
 // ─── BacklogView (main) ───────────────────────────────────────────────────────
 
 export default function BacklogView({
-  databaseId, view, properties, readOnly = false, isAdmin = false, workspaceId, currentUserId,
+  databaseId, view, properties, readOnly = false, isAdmin = false, workspaceId, currentUserId, actor,
 }: Props) {
   const { confirm, alert } = useDialog();
   const {
@@ -1237,6 +1240,7 @@ export default function BacklogView({
           properties={properties}
           databaseId={databaseId}
           workspaceId={workspaceId}
+          actor={actor}
           onClose={() => setSelectedRecordId(null)}
           readOnly={readOnly}
         />
