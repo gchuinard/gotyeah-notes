@@ -5,10 +5,12 @@ import { getSession } from "@/lib/session";
 import { checkRecordAccess, hasRole } from "@/lib/workspace";
 import { validateRelationValues } from "@/lib/relations";
 import { validateUserValues } from "@/lib/assignees";
+import { deniedTransitions, type TransitionRule } from "@/lib/permissionRules";
 import {
   serializeRecord,
   parseRecord,
   parseSectionsBody,
+  parseManyDatabaseProperties,
   mergeRecordProperties,
   serializeSectionsBody,
   diffRecordRevisions,
@@ -143,6 +145,43 @@ export async function PATCH(
       ...(sectionsBody !== undefined && { sectionsBody: sectionsBody as RecordSection[] | null }),
     }
   );
+  // ─── Permissions fines par colonne ───────────────────────────────────────────
+  // Placé APRÈS le diff (on ne compte que les transitions RÉELLES : une valeur
+  // réémise à l'identique n'est pas dans `changes`) et AVANT toute écriture — un
+  // refus ne doit laisser ni record modifié ni RecordRevision.
+  const changedPropIds = Object.keys(rawProperties ?? {}).filter((k) =>
+    changes.some((c) => c.field === k)
+  );
+  if (changedPropIds.length > 0) {
+    // Scopé databaseId : la route accepte n'importe quelle clé de propriété sans
+    // la valider contre le schéma, ce filtre est donc aussi un garde-fou.
+    const props = await prisma.databaseProperty.findMany({
+      where: { id: { in: changedPropIds }, databaseId: access.databaseId },
+    });
+    const actor = { userId: user.id, role: access.membership.role };
+    const before = parseRecord(access.record).properties;
+    const denied: { propertyId: string; optionIds: string[] }[] = [];
+
+    for (const prop of parseManyDatabaseProperties(props)) {
+      const rules = (prop.config as { rules?: TransitionRule[] }).rules;
+      if (!rules?.length) continue;
+      const optionIds = deniedTransitions(
+        rules,
+        before[prop.id],
+        (rawProperties as RecordProperties)[prop.id],
+        actor
+      );
+      if (optionIds.length > 0) denied.push({ propertyId: prop.id, optionIds });
+    }
+
+    if (denied.length > 0) {
+      return NextResponse.json(
+        { error: "Transition non autorisée", details: { denied } },
+        { status: 403 }
+      );
+    }
+  }
+
   const now = new Date();
 
   const updated = await prisma.$transaction(async (tx) => {

@@ -18,6 +18,7 @@ import { applyFilters, resolveFilterTokens } from "@/lib/client/viewFilters";
 import { emptySectionsBody } from "@/lib/templates";
 import { validateRelationValues } from "@/lib/relations";
 import { validateUserValues } from "@/lib/assignees";
+import { checkCreationTransitions } from "@/lib/transitionGuard";
 
 // Params de requête OPTIONNELS (consommateurs sans applyViewConfig, ex. MCP).
 // Aucun param → réponse historique intégrale (le front n'est pas impacté).
@@ -158,6 +159,16 @@ export async function POST(
   if (!assigneeCheck.ok) {
     return NextResponse.json({ error: assigneeCheck.error }, { status: 400 });
   }
+
+  // Permissions fines : sans ce gate, créer la carte DIRECTEMENT dans la colonne
+  // verrouillée contournerait tout le lot. `before = null` — une création fait
+  // entrer chaque valeur posée.
+  const transitionCheck = await checkCreationTransitions(
+    databaseId,
+    properties,
+    { userId: user.id, role: access.membership.role }
+  );
+  if (transitionCheck) return transitionCheck;
 
   // Garde-fou : un sprint fourni doit appartenir à cette database.
   if (sprintId) {
