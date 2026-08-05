@@ -48,7 +48,7 @@ export async function POST(req: Request) {
   if (!membership) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   // Une database posée sur une page privée d'autrui reste inaccessible (404 anti-leak).
-  if (!isPageAccessible(page, user.id)) {
+  if (!isPageAccessible(page, user.id, membership.user.isService)) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
   if (!hasRole(membership, "editor")) {

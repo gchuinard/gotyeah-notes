@@ -7,7 +7,8 @@ vi.mock("@/lib/session", () => ({ getSession: vi.fn() }));
 import { getSession } from "@/lib/session";
 import { GET as getPage } from "@/app/api/pages/[id]/route";
 import { GET as listPages } from "@/app/api/pages/route";
-import { GET as getDatabase } from "@/app/api/databases/[id]/route";
+import { GET as getDatabase, PATCH as patchDatabase } from "@/app/api/databases/[id]/route";
+import { POST as createDatabase } from "@/app/api/databases/route";
 import { GET as search } from "@/app/api/search/route";
 import { prisma } from "@/lib/prisma";
 import { isPageAccessible, pageVisibilityFilter } from "@/lib/workspace";
@@ -44,6 +45,12 @@ const asOutsider = () =>
 
 const withId = (id: string) => ({ params: Promise.resolve({ id }) });
 const req = (url: string) => new Request(url, { method: "GET" });
+const jsonReq = (body: unknown, method = "POST") =>
+  new Request("http://x/", {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
 
 beforeAll(async () => {
   const seeded = await seedUserWithWorkspace(`svc-owner-${Date.now()}@x.tld`);
@@ -173,7 +180,82 @@ describe("Compte de service — accès réel aux routes", () => {
   });
 });
 
+describe("POST /api/databases — conversion d'une page privée", () => {
+  async function pagePrivee(title: string) {
+    return prisma.page.create({
+      data: { title, workspaceId, ownerId: owner.id, visibility: "private", position: 1000 },
+    });
+  }
+
+  it("un membre non-propriétaire reçoit 404, le compte de service convertit", async () => {
+    const refusee = await pagePrivee("À convertir (refus)");
+    asOutsider();
+    expect(
+      (await createDatabase(jsonReq({ pageId: refusee.id }))).status
+    ).toBe(404);
+
+    const acceptee = await pagePrivee("À convertir (service)");
+    asService();
+    expect((await createDatabase(jsonReq({ pageId: acceptee.id }))).status).toBe(201);
+  });
+});
+
+describe("PATCH /api/databases/[id] — mapping « Patch notes » vers une page privée", () => {
+  it("un membre non-propriétaire reçoit 400, le compte de service mappe", async () => {
+    // La database vit sur une page d'ÉQUIPE : sans ça le 404 d'accès masquerait
+    // le contrôle qu'on veut tester.
+    const hote = await prisma.page.create({
+      data: { title: "Board équipe", workspaceId, ownerId: owner.id, visibility: "team", position: 2000 },
+    });
+    const db = await prisma.database.create({ data: { pageId: hote.id } });
+    const cible = await prisma.page.create({
+      data: { title: "📓 Patch notes", workspaceId, ownerId: owner.id, visibility: "private", position: 3000 },
+    });
+
+    asOutsider();
+    const refus = await patchDatabase(
+      jsonReq({ patchNotesPageId: cible.id }, "PATCH"),
+      withId(db.id)
+    );
+    expect(refus.status).toBe(400);
+
+    asService();
+    const ok = await patchDatabase(
+      jsonReq({ patchNotesPageId: cible.id }, "PATCH"),
+      withId(db.id)
+    );
+    expect(ok.status).toBe(200);
+    expect((await ok.json()).patchNotesPageId).toBe(cible.id);
+  });
+});
+
 describe("Garde anti-dérive : aucun test de confidentialité en dur", () => {
+  it("tout appel aux helpers de confidentialité passe son argument isService", () => {
+    // Le garde ci-dessous n'attrape que les tests RÉÉCRITS à la main. Il est aveugle
+    // à l'omission la plus facile : appeler le bon helper en oubliant son dernier
+    // argument, qui vaut `false` par défaut — le compte de service redevient alors
+    // un membre ordinaire, en silence. C'est ce qui est arrivé aux deux routes de
+    // app/api/databases/ au lot C.
+    const ARITE_MINIMALE = { isPageAccessible: 3, pageVisibilityFilter: 2 };
+    const files = globSync("src/**/*.{ts,tsx}", { cwd: process.cwd() });
+    const fautifs: string[] = [];
+
+    for (const f of files) {
+      if (f.replace(/\\/g, "/").endsWith("src/lib/workspace.ts")) continue;
+      const src = readFileSync(f, "utf8");
+      for (const [, nom, args] of src.matchAll(
+        /\b(isPageAccessible|pageVisibilityFilter)\(((?:[^()]|\([^()]*\))*)\)/g
+      )) {
+        // Neutralise les parenthèses internes pour ne compter que les virgules
+        // de premier niveau (`opts.isService ?? false` en contient parfois).
+        const arite = args.replace(/\([^()]*\)/g, "").split(",").length;
+        const attendue = ARITE_MINIMALE[nom as keyof typeof ARITE_MINIMALE];
+        if (arite < attendue) fautifs.push(`${f} → ${nom}(${args.trim()})`);
+      }
+    }
+    expect(fautifs).toEqual([]);
+  });
+
   it("seul lib/workspace.ts compare visibility/ownerId à la main", () => {
     const files = globSync("src/**/*.{ts,tsx}", { cwd: process.cwd() });
     const coupables = files.filter((f) => {
