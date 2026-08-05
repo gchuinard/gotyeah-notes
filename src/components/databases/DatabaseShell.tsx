@@ -363,6 +363,7 @@ export default function DatabaseShell({
   readOnly = false,
   isAdmin = false,
   currentUserId,
+  role,
 }: {
   databaseId: string;
   readOnly?: boolean;
@@ -371,10 +372,23 @@ export default function DatabaseShell({
   /** Utilisateur qui regarde — résout le jeton « Moi » des filtres (résolu au
    *  SSR : pas de flash, pas de route /api/me à créer). */
   currentUserId?: string;
+  /** Rôle BRUT dans l'espace. `readOnly`/`isAdmin` ne suffisent pas aux règles
+   *  de transition : ils rendent « editor » et « viewer » indistinguables. */
+  role?: string;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { confirm, alert } = useDialog();
+
+  // Identité + rôle en un seul objet : Cell, KanbanView et BulkActionBar n'ont
+  // ainsi qu'une entrée à recevoir. `undefined` si l'un des deux manque — les
+  // règles traitent alors la colonne comme verrouillée (une colonne inerte se
+  // remarque, une colonne ouverte qui 403 au drop est un clic mort). En pratique
+  // le SSR fournit toujours les deux.
+  const actor = useMemo(
+    () => (currentUserId && role ? { userId: currentUserId, role } : undefined),
+    [currentUserId, role]
+  );
 
   const { data, error, isLoading, mutate } = useSWR<DatabaseData>(
     `/api/databases/${databaseId}`,
@@ -666,6 +680,7 @@ export default function DatabaseShell({
             properties={data.properties}
             workspaceId={data.workspaceId}
             currentUserId={currentUserId}
+            actor={actor}
             readOnly={readOnly}
           />
         ) : activeView.type === "calendar" ? (

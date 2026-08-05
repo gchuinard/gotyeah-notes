@@ -798,6 +798,8 @@ export default function TableView({
             onPropertyDeleted={handlePropertyDeleted}
             onClose={() => setOpenPopoverId(null)}
             canDelete={isAdmin}
+            canManageRules={isAdmin}
+            workspaceId={workspaceId}
           />
         );
       })()}
