@@ -92,6 +92,27 @@ export function enteredOptionIds(before: unknown, after: unknown): (string | nul
 }
 
 /**
+ * Options réellement proposables dans un sélecteur.
+ *
+ * ⚠️ On garde TOUJOURS celles déjà posées sur la carte : les masquer ferait
+ * disparaître la valeur courante du menu — la cellule paraîtrait vide — et on ne
+ * pourrait plus la retirer.
+ *
+ * Générique sur `{ id: string }` plutôt que typée `SelectOption` : importer
+ * lib/db ici casserait le zéro-import qui protège le bundle navigateur.
+ */
+export function selectableOptions<T extends { id: string }>(
+  options: T[],
+  current: string[],
+  rules: TransitionRule[] | undefined,
+  actor: TransitionActor | undefined
+): T[] {
+  if (!rules?.length) return options;
+  const held = new Set(current);
+  return options.filter((o) => held.has(o.id) || canTransition(rules, null, o.id, actor));
+}
+
+/**
  * Options que `actor` n'a pas le droit de poser dans cette transition.
  * Vide = la transition passe. C'est la fonction que les routes appellent.
  */

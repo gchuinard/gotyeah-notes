@@ -216,6 +216,7 @@ function KanbanCard({
   onDuplicate,
   readOnly,
   workspaceId,
+  actor,
 }: {
   record: ParsedRecord;
   /** Colonne de rendu : un record multiselect apparaît dans plusieurs colonnes. */
@@ -230,6 +231,7 @@ function KanbanCard({
   onDelete: () => void;
   onDuplicate: () => void;
   readOnly: boolean;
+  actor?: TransitionActor;
   workspaceId?: string;
 }) {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -377,6 +379,7 @@ function KanbanCard({
                       property={p}
                       record={record}
                       workspaceId={workspaceId}
+                      actor={actor}
                       onSave={(value) => onPropSave?.(record.id, p, value)}
                       onEditingChange={(editing) =>
                         setEditingPropId((prev) => (editing ? p.id : prev === p.id ? null : prev))
@@ -411,6 +414,7 @@ export function KanbanColView({
   createOnlyInUnassigned,
   readOnly = false,
   workspaceId,
+  actor,
 }: {
   col: KanbanCol;
   previewProps: ParsedDatabaseProperty[];
@@ -427,6 +431,7 @@ export function KanbanColView({
   createOnlyInUnassigned: boolean;
   readOnly?: boolean;
   workspaceId?: string;
+  actor?: TransitionActor;
 }) {
   // La colonne « Membre retiré » n'est PAS une cible de dépôt : son optionId est
   // null, y déposer une carte appliquerait la sémantique « Sans valeur » et
@@ -550,6 +555,7 @@ export function KanbanColView({
               onDuplicate={() => onDuplicateRecord(record)}
               readOnly={readOnly}
               workspaceId={workspaceId}
+              actor={actor}
             />
           ))}
           {col.records.length === 0 && (
@@ -1296,6 +1302,7 @@ export default function KanbanView({
                 createOnlyInUnassigned={view.config.createInUnassignedOnly ?? false}
                 readOnly={readOnly}
                 workspaceId={workspaceId}
+                actor={actor}
               />
             ))}
           </div>
@@ -1331,6 +1338,7 @@ export default function KanbanView({
           mutate={mutate}
           onClear={clearSelection}
           workspaceId={workspaceId}
+          actor={actor}
         />
       )}
     </div>

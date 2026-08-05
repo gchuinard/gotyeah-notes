@@ -11,6 +11,8 @@ import { withoutUnknownIds } from "@/lib/db";
 import type { SelectColor } from "@/lib/propertyColors";
 import { getAvatarColor, getInitials } from "@/lib/avatar";
 import { useWorkspaceMembers, type WorkspaceMember } from "@/lib/client/useWorkspaceMembers";
+import { selectableOptions } from "@/lib/permissionRules";
+import type { TransitionActor, TransitionRule } from "@/lib/permissionRules";
 import Portal from "@/components/databases/portal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -33,6 +35,12 @@ type CellProps = {
    * appartenir à un autre espace, et on proposerait les mauvaises personnes.
    */
   workspaceId?: string | null;
+  /**
+   * Identité + rôle, pour les règles de transition par colonne. Absent = les
+   * options gouvernées sont masquées (une option proposée qui 403 au clic est
+   * un cul-de-sac ; une option absente se remarque).
+   */
+  actor?: TransitionActor;
 };
 
 // ─── Badge ────────────────────────────────────────────────────────────────────
@@ -554,6 +562,7 @@ export default function Cell({
   autoEdit,
   onEditingChange,
   workspaceId,
+  actor,
 }: CellProps) {
   const [isEditing, setIsEditing] = useState(false);
   const triggerRef = useRef<HTMLDivElement>(null);
@@ -611,8 +620,14 @@ export default function Cell({
 
   // ── Select dropdown ───────────────────────────────────────────────────────
   if (isEditing && property.type === "select") {
-    const options = (property.config as { options?: SelectOption[] }).options ?? [];
+    const cfg = property.config as { options?: SelectOption[]; rules?: TransitionRule[] };
     const value = (record.properties[property.id] as string | undefined) ?? null;
+    const options = selectableOptions(
+      cfg.options ?? [],
+      value ? [value] : [],
+      cfg.rules,
+      actor
+    );
     return (
       <div ref={triggerRef} className="min-h-[22px]">
         <CellDisplay property={property} record={record} />
@@ -629,8 +644,9 @@ export default function Cell({
 
   // ── Multiselect dropdown ──────────────────────────────────────────────────
   if (isEditing && property.type === "multiselect") {
-    const options = (property.config as { options?: SelectOption[] }).options ?? [];
+    const cfg = property.config as { options?: SelectOption[]; rules?: TransitionRule[] };
     const values = (record.properties[property.id] as string[] | undefined) ?? [];
+    const options = selectableOptions(cfg.options ?? [], values, cfg.rules, actor);
     return (
       <div ref={triggerRef} className="min-h-[22px]">
         <CellDisplay property={property} record={record} />

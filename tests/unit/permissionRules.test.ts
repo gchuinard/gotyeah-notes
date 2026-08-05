@@ -4,6 +4,7 @@ import {
   canTransition,
   enteredOptionIds,
   deniedTransitions,
+  selectableOptions,
   TRANSITION_ROLES,
   type TransitionRule,
 } from "@/lib/permissionRules";
@@ -138,5 +139,30 @@ describe("Garde-fou de la duplication assumée", () => {
     // donc un addon natif, et casserait le build navigateur.
     const src = readFileSync("src/lib/permissionRules.ts", "utf8");
     expect(src).not.toMatch(/^\s*import\s/m);
+  });
+});
+
+describe("Options proposées dans une cellule", () => {
+  const OPTS = [{ id: "opt-todo" }, { id: DONE }];
+
+  it("sans règles, toutes les options restent proposées", () => {
+    expect(selectableOptions(OPTS, [], undefined, viewer)).toHaveLength(2);
+  });
+
+  it("une option verrouillée disparaît du menu", () => {
+    expect(selectableOptions(OPTS, [], onlyEditors, viewer).map((o) => o.id)).toEqual(["opt-todo"]);
+  });
+
+  it("…SAUF si la carte la porte déjà : sinon la valeur courante devient invisible", () => {
+    // Le piège : masquer l'option posée ferait paraître la cellule vide et
+    // empêcherait de la retirer.
+    expect(selectableOptions(OPTS, [DONE], onlyEditors, viewer).map((o) => o.id)).toEqual([
+      "opt-todo",
+      DONE,
+    ]);
+  });
+
+  it("un utilisateur autorisé voit tout", () => {
+    expect(selectableOptions(OPTS, [], onlyEditors, editor)).toHaveLength(2);
   });
 });

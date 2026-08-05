@@ -13,6 +13,8 @@ import { isMultiValueType, withoutUnknownIds } from "@/lib/db";
 import { SelectBadge } from "@/components/databases/Cell";
 import { useDialog } from "@/contexts/DialogContext";
 import { useWorkspaceMembers } from "@/lib/client/useWorkspaceMembers";
+import { deniedTransitions } from "@/lib/permissionRules";
+import type { TransitionActor, TransitionRule } from "@/lib/permissionRules";
 
 // Barre d'action flottante affichée dès qu'au moins un record est sélectionné.
 // Sélection éphémère, propre à la vue (Set<string> d'ids détenu par la vue).
@@ -29,6 +31,8 @@ type Props = {
   onClear: () => void;
   /** Espace de la database — source des membres pour les propriétés « utilisateur ». */
   workspaceId?: string;
+  /** Identité + rôle, pour les règles de transition par colonne. */
+  actor?: TransitionActor;
 };
 
 // ─── Menu ouvert VERS LE HAUT (la barre est ancrée en bas de l'écran) ─────────
@@ -227,6 +231,7 @@ export default function BulkActionBar({
   mutate,
   onClear,
   workspaceId,
+  actor,
 }: Props) {
   const { alert } = useDialog();
   // Chargé au niveau de la barre (et pas seulement dans le menu « utilisateur »)
@@ -251,9 +256,8 @@ export default function BulkActionBar({
     property: ParsedDatabaseProperty,
     optionId: string | null
   ) => {
-    const batch = records.filter((r) => selectedIds.has(r.id));
-    if (batch.length === 0) return;
-    const snapshot = records;
+    const all = records.filter((r) => selectedIds.has(r.id));
+    if (all.length === 0) return;
 
     const computeValue = (r: ParsedRecord): PropertyValue | null => {
       if (optionId === null) return null;
@@ -272,8 +276,41 @@ export default function BulkActionBar({
       return optionId;
     };
 
+    // Règles de transition : on écarte AVANT d'écrire les cartes que cet
+    // utilisateur n'a pas le droit de faire entrer dans l'option. Sans ce tri,
+    // N PATCH partent et N 403 reviennent — le rollback partiel les traiterait
+    // comme des pannes réseau, avec le message trompeur « n'a pas pu être mis à
+    // jour » au lieu d'un refus explicite. Le filtrage porte AUSSI sur
+    // l'optimiste, sinon les cartes bloquées clignotent avant de revenir.
+    const rules = (property.config as { rules?: TransitionRule[] }).rules;
+    const blockedIds = new Set(
+      rules?.length
+        ? all
+            .filter(
+              (r) =>
+                deniedTransitions(rules, r.properties[property.id], computeValue(r), actor).length >
+                0
+            )
+            .map((r) => r.id)
+        : []
+    );
+    const batch = all.filter((r) => !blockedIds.has(r.id));
+
+    if (batch.length === 0) {
+      await alert({
+        title: "Transition non autorisée",
+        message:
+          all.length === 1
+            ? "Tu n'as pas le droit de mettre cette carte dans cette colonne."
+            : `Aucune des ${all.length} cartes sélectionnées ne peut aller dans cette colonne.`,
+      });
+      return;
+    }
+
+    const snapshot = records;
+
     const optimistic = records.map((r) => {
-      if (!selectedIds.has(r.id)) return r;
+      if (!selectedIds.has(r.id) || blockedIds.has(r.id)) return r;
       const value = computeValue(r);
       const props = { ...r.properties };
       if (value === null) delete props[property.id];
@@ -301,6 +338,18 @@ export default function BulkActionBar({
 
     if (failedIds.length === 0) {
       mutate();
+      // Les cartes écartées par une règle ne sont pas un échec : on le dit à
+      // part, avec le bon motif, plutôt que de les mélanger aux pannes.
+      if (blockedIds.size > 0) {
+        await alert({
+          title: "Certaines cartes ont été ignorées",
+          message: `${blockedIds.size} carte${blockedIds.size > 1 ? "s" : ""} sur ${
+            all.length
+          } n'${blockedIds.size > 1 ? "ont" : "a"} pas été déplacée${
+            blockedIds.size > 1 ? "s" : ""
+          } : tu n'as pas le droit de les mettre dans cette colonne. Les autres ont bien été enregistrées.`,
+        });
+      }
       return;
     }
 

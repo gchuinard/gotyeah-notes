@@ -29,6 +29,7 @@ import BulkActionBar from "@/components/databases/BulkActionBar";
 import CardActions from "@/components/databases/CardActions";
 import { SelectCheckbox } from "@/components/databases/SelectCheckbox";
 import { useRecordDeepLink } from "@/lib/client/useRecordDeepLink";
+import type { TransitionActor } from "@/lib/permissionRules";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -62,6 +63,8 @@ type Props = {
   workspaceId?: string;
   /** Utilisateur qui regarde — résout le jeton « Moi » des filtres. */
   currentUserId?: string;
+  /** Identité + rôle, pour les règles de transition par colonne. */
+  actor?: TransitionActor;
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -150,6 +153,7 @@ function SortableRow({
   onTitleClick,
   readOnly,
   workspaceId,
+  actor,
 }: {
   record: ParsedRecord;
   index: number;
@@ -163,6 +167,7 @@ function SortableRow({
   onTitleClick: () => void;
   readOnly: boolean;
   workspaceId?: string;
+  actor?: TransitionActor;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useSortable({
     id: record.id,
@@ -244,6 +249,7 @@ function SortableRow({
                 record={record}
                 onSave={(value) => onSave(property, value)}
                 workspaceId={workspaceId}
+                actor={actor}
               />
             )}
           </td>
@@ -287,6 +293,7 @@ export default function TableView({
   isAdmin = false,
   workspaceId,
   currentUserId,
+  actor,
 }: Props) {
   const { confirm } = useDialog();
   const { data: records, error, isLoading, mutate } = useSWR<ParsedRecord[]>(
@@ -760,6 +767,7 @@ export default function TableView({
                       onTitleClick={() => setSelectedRecordId(record.id)}
                       readOnly={readOnly}
                       workspaceId={workspaceId}
+              actor={actor}
                     />
                   ))}
                 </SortableContext>
@@ -835,6 +843,7 @@ export default function TableView({
           mutate={mutate}
           onClear={clearSelection}
           workspaceId={workspaceId}
+          actor={actor}
         />
       )}
     </>
