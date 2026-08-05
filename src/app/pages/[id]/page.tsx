@@ -52,6 +52,10 @@ export default async function PageView({
           readOnly={readOnly}
           isAdmin={isAdmin}
           currentUserId={user.id}
+          // Le rôle BRUT, en plus des deux booléens : les règles de transition
+          // ciblent des rôles, et « editor » vs « viewer » est indistinguable
+          // depuis readOnly/isAdmin seuls. Résolu au SSR — pas de flash.
+          role={membership.role}
         />
       ) : (
         <EditorClient

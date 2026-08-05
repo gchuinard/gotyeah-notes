@@ -18,7 +18,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Plus, ChevronDown, Play, CheckCircle2 } from "lucide-react";
+import { Plus, ChevronDown, Play, CheckCircle2, Lock } from "lucide-react";
 import type {
   ParsedDatabaseProperty,
   ParsedRecord,
@@ -41,6 +41,8 @@ import {
   buildKanbanColumns,
 } from "@/lib/client/kanban";
 import type { KanbanColumn, KanbanColumnSeed } from "@/lib/client/kanban";
+import { canTransition } from "@/lib/permissionRules";
+import type { TransitionActor, TransitionRule } from "@/lib/permissionRules";
 import { useWorkspaceMembers } from "@/lib/client/useWorkspaceMembers";
 import { useDialog } from "@/contexts/DialogContext";
 import Portal from "@/components/databases/portal";
@@ -62,6 +64,8 @@ type Props = {
   workspaceId?: string;
   /** Utilisateur qui regarde — résout le jeton « Moi » des filtres. */
   currentUserId?: string;
+  /** Identité + rôle, pour les règles de transition par colonne. */
+  actor?: TransitionActor;
 };
 
 /**
@@ -70,7 +74,16 @@ type Props = {
  * inline. `option: null` sur un axe `user` : c'est ce qui neutralise le
  * renommage, une propriété utilisateur n'ayant AUCUNE option à réécrire.
  */
-type KanbanCol = KanbanColumn<ParsedRecord> & { option: SelectOption | null };
+type KanbanCol = KanbanColumn<ParsedRecord> & {
+  option: SelectOption | null;
+  /**
+   * Colonne interdite à cet utilisateur (règle de transition). Porté par la
+   * COLONNE et calculé une seule fois : le droppable et handleDragEnd doivent
+   * lire la même valeur, sinon ils divergent — c'est exactement ce qui a imposé
+   * le double garde-fou de la colonne « Membre retiré ».
+   */
+  locked: boolean;
+};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -203,6 +216,7 @@ function KanbanCard({
   onDuplicate,
   readOnly,
   workspaceId,
+  actor,
 }: {
   record: ParsedRecord;
   /** Colonne de rendu : un record multiselect apparaît dans plusieurs colonnes. */
@@ -217,6 +231,7 @@ function KanbanCard({
   onDelete: () => void;
   onDuplicate: () => void;
   readOnly: boolean;
+  actor?: TransitionActor;
   workspaceId?: string;
 }) {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -364,6 +379,7 @@ function KanbanCard({
                       property={p}
                       record={record}
                       workspaceId={workspaceId}
+                      actor={actor}
                       onSave={(value) => onPropSave?.(record.id, p, value)}
                       onEditingChange={(editing) =>
                         setEditingPropId((prev) => (editing ? p.id : prev === p.id ? null : prev))
@@ -398,6 +414,7 @@ export function KanbanColView({
   createOnlyInUnassigned,
   readOnly = false,
   workspaceId,
+  actor,
 }: {
   col: KanbanCol;
   previewProps: ParsedDatabaseProperty[];
@@ -414,11 +431,15 @@ export function KanbanColView({
   createOnlyInUnassigned: boolean;
   readOnly?: boolean;
   workspaceId?: string;
+  actor?: TransitionActor;
 }) {
   // La colonne « Membre retiré » n'est PAS une cible de dépôt : son optionId est
   // null, y déposer une carte appliquerait la sémantique « Sans valeur » et
   // effacerait tous ses assignés.
-  const { setNodeRef, isOver } = useDroppable({ id: col.id, disabled: col.kind === "orphan" });
+  const { setNodeRef, isOver } = useDroppable({
+    id: col.id,
+    disabled: col.kind === "orphan" || col.locked,
+  });
 
   const [isRenamingCol, setIsRenamingCol] = useState(false);
   const [colNameValue, setColNameValue] = useState(col.label);
@@ -481,13 +502,20 @@ export function KanbanColView({
         ) : (
           <span className="text-sm font-medium text-[var(--text-muted)]">Sans valeur</span>
         )}
+        {col.locked && (
+          <Lock
+            size={12}
+            className="text-[var(--text-muted)] shrink-0"
+            aria-label="Colonne verrouillée"
+          />
+        )}
         <span className="text-xs text-[var(--text-muted)] ml-auto tabular-nums">
           {col.records.length}
         </span>
         {/* Bouton d'ajout ANCRÉ en tête de colonne : reste visible même quand la
             lane déborde (le board scrolle globalement, pas la lane). Le flag ne
             change QUE l'affichage, jamais la position. */}
-        {!readOnly && col.kind !== "orphan" &&
+        {!readOnly && col.kind !== "orphan" && !col.locked &&
           shouldShowKanbanAddButton(createOnlyInUnassigned, col.optionId) && (
           <button
             onClick={() => onAddRecord(col)}
@@ -527,6 +555,7 @@ export function KanbanColView({
               onDuplicate={() => onDuplicateRecord(record)}
               readOnly={readOnly}
               workspaceId={workspaceId}
+              actor={actor}
             />
           ))}
           {col.records.length === 0 && (
@@ -638,7 +667,7 @@ function SprintBoardHeader({
 // ─── KanbanView (main) ────────────────────────────────────────────────────────
 
 export default function KanbanView({
-  databaseId, view, properties, readOnly = false, workspaceId, currentUserId,
+  databaseId, view, properties, readOnly = false, workspaceId, currentUserId, actor,
 }: Props) {
   const { confirm, alert } = useDialog();
   const {
@@ -716,6 +745,10 @@ export default function KanbanView({
   } = useWorkspaceMembers(groupsByUser ? workspaceId : null);
   const memberIds = useMemo(() => members.map((m) => m.userId), [members]);
 
+  // Règles de transition de l'axe de regroupement (absentes sur les 22 boards
+  // existants → `locked` vaut false partout, comportement inchangé).
+  const rules = (groupByProp?.config as { rules?: TransitionRule[] } | undefined)?.rules;
+
   const columns = useMemo<KanbanCol[]>(() => {
     if (!groupByProp) return [];
     const options = (groupByProp.config as { options?: SelectOption[] }).options ?? [];
@@ -735,8 +768,12 @@ export default function KanbanView({
       // carte assignée serait déclarée orpheline (le rendu est gardé plus bas,
       // ceci est la seconde ceinture).
       { includeOrphans: groupsByUser && !membersLoading, orphanLabel: "Membre retiré" }
-    ).map((col) => ({ ...col, option: col.optionId ? byId.get(col.optionId) ?? null : null }));
-  }, [displayedRecords, groupByProp, groupsByUser, members, membersLoading]);
+    ).map((col) => ({
+      ...col,
+      option: col.optionId ? byId.get(col.optionId) ?? null : null,
+      locked: !canTransition(rules, null, col.optionId, actor),
+    }));
+  }, [displayedRecords, groupByProp, groupsByUser, members, membersLoading, rules, actor]);
 
   // Propriétés affichées/éditables sur la carte : top-2 par position + « Main à » et
   // « Projet » garanties (présence non soumise au slice(0,2)).
@@ -1021,6 +1058,11 @@ export default function KanbanView({
       // drop y appliquerait la sémantique « Sans valeur » (optionId null) et
       // effacerait tous les assignés de la carte déplacée.
       if (targetCol.kind === "orphan") return;
+      // Même raison, même remède, pour une colonne verrouillée par une règle :
+      // le droppable désactivé ne bloque pas un dépôt sur l'une de ses CARTES.
+      // Le serveur refuserait en 403, mais l'optimisme aurait déjà fait bouger
+      // la carte — un aller-retour visuel que l'utilisateur lit comme un bug.
+      if (targetCol.locked) return;
 
       const targetRecords = targetCol.records.filter((r) => r.id !== activeRecordId);
       const overIsColumn = overRecordId === null;
@@ -1260,6 +1302,7 @@ export default function KanbanView({
                 createOnlyInUnassigned={view.config.createInUnassignedOnly ?? false}
                 readOnly={readOnly}
                 workspaceId={workspaceId}
+                actor={actor}
               />
             ))}
           </div>
@@ -1295,6 +1338,7 @@ export default function KanbanView({
           mutate={mutate}
           onClear={clearSelection}
           workspaceId={workspaceId}
+          actor={actor}
         />
       )}
     </div>

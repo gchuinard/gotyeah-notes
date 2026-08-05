@@ -69,6 +69,9 @@ function renderKanbanCol(opts: {
         label: opts.option?.name ?? "Sans valeur",
         kind: opts.optionId === null ? ("unassigned" as const) : ("seed" as const),
         option: opts.option,
+        // Ce test porte sur le flag « créer seulement dans Sans valeur », pas sur
+        // les règles d'accès : la colonne est ouverte.
+        locked: false,
         records: opts.records,
       },
       previewProps: [],

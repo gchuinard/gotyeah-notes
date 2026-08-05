@@ -1,15 +1,26 @@
 "use client";
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Trash2, Plus, GripVertical } from "lucide-react";
+import { Trash2, Plus, GripVertical, Lock, ChevronDown } from "lucide-react";
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, arrayMove, useSortable } from "@dnd-kit/sortable";
 import type { ParsedDatabaseProperty, SelectOption } from "@/lib/db";
 import Portal from "@/components/databases/portal";
 import { SELECT_COLORS } from "@/lib/propertyColors";
+import { useWorkspaceMembers } from "@/lib/client/useWorkspaceMembers";
+import type { RuleRole, TransitionRule } from "@/lib/permissionRules";
+import { SelectBadge } from "@/components/databases/Cell";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const COLORS: readonly string[] = SELECT_COLORS;
+
+/** Libellés des rôles dans l'écran des règles (hiérarchiques : « Éditeur »
+ *  laisse aussi passer un admin). */
+const RULE_ROLE_LABELS: { id: RuleRole; label: string }[] = [
+  { id: "admin", label: "Admins" },
+  { id: "editor", label: "Éditeurs" },
+  { id: "viewer", label: "Lecteurs" },
+];
 
 // Solid dot colors for the mini color-picker grid
 const SWATCH_BG: Record<string, string> = {
@@ -33,6 +44,10 @@ type Props = {
   onClose: () => void;
   /** Suppression DÉFINITIVE d'une colonne (purge la clé de tous les records) : admin. */
   canDelete?: boolean;
+  /** Écran des règles d'accès — ADMINS seulement (le serveur le gate aussi). */
+  canManageRules?: boolean;
+  /** Espace de la database : source des membres pour désigner une personne. */
+  workspaceId?: string;
 };
 
 // ─── SelectOption editor row ──────────────────────────────────────────────────
@@ -133,10 +148,21 @@ export default function PropertyPopover({
   onPropertyDeleted,
   onClose,
   canDelete = false,
+  canManageRules = false,
+  workspaceId,
 }: Props) {
   const [name, setName] = useState(property.name);
   const [options, setOptions] = useState<SelectOption[]>(
     (property.config as { options?: SelectOption[] }).options ?? []
+  );
+  const [rules, setRules] = useState<TransitionRule[]>(
+    (property.config as { rules?: TransitionRule[] }).rules ?? []
+  );
+  const [rulesOpen, setRulesOpen] = useState(false);
+  // Membres de l'espace : source des personnes désignables. Chargés seulement
+  // quand l'écran des règles est ouvert — un éditeur ne paie pas cette requête.
+  const { members } = useWorkspaceMembers(
+    canManageRules && rulesOpen ? workspaceId ?? null : null
   );
   const [newOptionId, setNewOptionId] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -179,6 +205,10 @@ export default function PropertyPopover({
       const res = await fetch(`/api/properties/${property.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
+        // Le spread réémet les `rules` de `property.config` À L'IDENTIQUE : le
+        // gate serveur portant sur la DIFFÉRENCE, un éditeur peut donc toujours
+        // renommer une option sans se prendre un 403. Ne JAMAIS y injecter l'état
+        // local `rules` : sur un config obsolète, ce serait une modification.
         body: JSON.stringify({ config: { ...property.config, options: nextOptions } }),
       });
       if (res.ok) {
@@ -250,6 +280,67 @@ export default function PropertyPopover({
     const updated = [...options, newOption];
     setOptions(updated);
     saveOptions(updated);
+  };
+
+  // ── PATCH rules (règles d'accès par colonne) ──────────────────────────────
+  // Écriture optimiste comme les options : on restaure si le serveur refuse.
+  const savedRulesRef = useRef<TransitionRule[]>(rules);
+  const saveRules = useCallback(async (next: TransitionRule[]) => {
+    setSaving(true);
+    setOptionsError(null);
+    // Une règle sans rôle NI personne n'autoriserait plus personne : on la
+    // retire plutôt que de laisser l'admin fabriquer une colonne morte.
+    const cleaned = next.filter((r) => (r.roles?.length ?? 0) > 0 || (r.userIds?.length ?? 0) > 0);
+    try {
+      const res = await fetch(`/api/properties/${property.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ config: { ...property.config, options, rules: cleaned } }),
+      });
+      if (res.ok) {
+        const updated: ParsedDatabaseProperty = await res.json();
+        savedRulesRef.current = cleaned;
+        setRules(cleaned);
+        onPropertyUpdated(updated);
+      } else {
+        const body = await res.json().catch(() => ({}));
+        setRules(savedRulesRef.current);
+        setOptionsError((body as { error?: string }).error ?? "Modification refusée");
+      }
+    } catch {
+      setRules(savedRulesRef.current);
+      setOptionsError("Réseau indisponible");
+    } finally {
+      setSaving(false);
+    }
+  }, [property, options, onPropertyUpdated]);
+
+  const ruleFor = (optionId: string) => rules.find((r) => r.toOptionId === optionId);
+
+  const toggleRuleRole = (optionId: string, role: RuleRole) => {
+    const current = ruleFor(optionId);
+    const roles = new Set(current?.roles ?? []);
+    if (roles.has(role)) roles.delete(role);
+    else roles.add(role);
+    const next: TransitionRule = {
+      toOptionId: optionId,
+      roles: [...roles],
+      userIds: current?.userIds ?? [],
+    };
+    saveRules([...rules.filter((r) => r.toOptionId !== optionId), next]);
+  };
+
+  const toggleRuleUser = (optionId: string, userId: string) => {
+    const current = ruleFor(optionId);
+    const ids = new Set(current?.userIds ?? []);
+    if (ids.has(userId)) ids.delete(userId);
+    else ids.add(userId);
+    const next: TransitionRule = {
+      toOptionId: optionId,
+      roles: current?.roles ?? [],
+      userIds: [...ids],
+    };
+    saveRules([...rules.filter((r) => r.toOptionId !== optionId), next]);
   };
 
   // ── DELETE property ───────────────────────────────────────────────────────
@@ -344,6 +435,84 @@ export default function PropertyPopover({
             <Plus size={13} />
             Ajouter une option
           </button>
+        </div>
+      )}
+
+      {/* Règles d'accès — ADMINS seulement. Le serveur gate aussi la clé `rules`
+          (403) : cet écran n'est que le confort, jamais l'autorité. */}
+      {hasOptions && canManageRules && (
+        <div className="border-t border-[var(--border)] mt-1 pt-1 px-2 pb-1">
+          <button
+            onClick={() => setRulesOpen((v) => !v)}
+            className="w-full flex items-center gap-2 px-1 py-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--text)] transition-colors"
+          >
+            <Lock size={12} />
+            Qui peut mettre une carte ici
+            <ChevronDown
+              size={12}
+              className={`ml-auto transition-transform ${rulesOpen ? "rotate-180" : ""}`}
+            />
+          </button>
+
+          {rulesOpen && (
+            <div className="flex flex-col gap-2 pb-1">
+              <p className="px-1 text-[11px] leading-snug text-[var(--text-muted)]">
+                Sans règle, tout le monde peut poser l&apos;option. Dès qu&apos;une
+                case est cochée, seuls les rôles et les personnes désignés le
+                peuvent — <strong>toi compris</strong> : un administrateur ne
+                contourne pas une règle, il la modifie ici.
+              </p>
+
+              {options.map((opt) => {
+                const rule = ruleFor(opt.id);
+                const restricted = (rule?.roles?.length ?? 0) > 0 || (rule?.userIds?.length ?? 0) > 0;
+                return (
+                  <div key={opt.id} className="px-1 py-1 rounded-md bg-[var(--surface)]">
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <SelectBadge option={opt} />
+                      {!restricted && (
+                        <span className="text-[10px] text-[var(--text-muted)]">
+                          ouverte à tous
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {RULE_ROLE_LABELS.map(({ id, label }) => (
+                        <button
+                          key={id}
+                          disabled={saving}
+                          onClick={() => toggleRuleRole(opt.id, id)}
+                          className={[
+                            "text-[11px] px-1.5 py-0.5 rounded border transition-colors",
+                            rule?.roles?.includes(id)
+                              ? "border-blue-400 text-blue-500 bg-blue-50"
+                              : "border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)]",
+                          ].join(" ")}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                      {members.map((m) => (
+                        <button
+                          key={m.userId}
+                          disabled={saving}
+                          onClick={() => toggleRuleUser(opt.id, m.userId)}
+                          className={[
+                            "text-[11px] px-1.5 py-0.5 rounded border transition-colors",
+                            rule?.userIds?.includes(m.userId)
+                              ? "border-blue-400 text-blue-500 bg-blue-50"
+                              : "border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)]",
+                          ].join(" ")}
+                        >
+                          {m.displayName}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 

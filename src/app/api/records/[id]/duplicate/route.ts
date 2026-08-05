@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 import { checkRecordAccess, hasRole } from "@/lib/workspace";
 import { nextPosition } from "@/lib/positions";
+import { checkCreationTransitions } from "@/lib/transitionGuard";
 import { parseRecord } from "@/lib/db";
 
 // Duplication d'un record côté SERVEUR (copie atomique). Remplace la logique
@@ -25,6 +26,17 @@ export async function POST(
 
   const src = access.record;
   const { databaseId } = access;
+
+  // Dupliquer une carte assise dans une colonne verrouillée PRODUIT une seconde
+  // carte dans cette colonne : le résultat observable est identique à une
+  // création directe, et le bouton est exposé dans les 5 vues. Gater la création
+  // sans gater la duplication laisserait un contournement à un clic.
+  const transitionCheck = await checkCreationTransitions(
+    databaseId,
+    parseRecord(src).properties,
+    { userId: user.id, role: access.membership.role }
+  );
+  if (transitionCheck) return transitionCheck;
 
   const record = await prisma.$transaction(async (tx) => {
     const position = await nextPosition("record", { databaseId }, tx);
