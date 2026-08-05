@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 import { getMembership, hasRole } from "@/lib/workspace";
 import { normalizeEmail } from "@/lib/oidc";
+import { notifyInvitation } from "@/lib/invitationEmail";
+import type { MailResult } from "@/lib/mailer";
 import {
   tooManyFailures,
   recordFailure,
@@ -28,6 +30,16 @@ const addMemberSchema = z.object({
   // Moindre privilège : lecteur par défaut, l'admin élève explicitement.
   role: z.enum(["admin", "editor", "viewer"]).default("viewer"),
 });
+
+/**
+ * Champs ADDITIFS de la réponse : le front et le MCP qui les ignorent ne cassent
+ * pas. Ils sont là parce qu'un email silencieusement raté est pire qu'un email
+ * absent — l'admin croirait la personne prévenue et attendrait une connexion qui
+ * ne viendra pas. `disabled` (pas de clé Brevo) n'est pas une panne : c'est le
+ * mode historique, où l'on prévient à la main.
+ */
+const mailStatus = (r: MailResult) =>
+  r.ok ? { emailSent: true } : { emailSent: false, emailReason: r.reason };
 
 const memberSelect = {
   userId: true,
@@ -125,6 +137,17 @@ export async function POST(
     select: { id: true, isService: true },
   });
 
+  // Nom de l'espace pour l'email — chargé une fois, avant les deux branches.
+  const workspace = await prisma.workspace.findUnique({
+    where: { id: workspaceId },
+    select: { name: true },
+  });
+  const mailCtx = {
+    workspaceName: workspace?.name ?? "un espace",
+    inviterName: user.displayName,
+    role: parsed.data.role,
+  };
+
   // Un compte de service voit les pages PRIVÉES des espaces où il est membre
   // (isPageAccessible). L'ajouter par un champ email anonyme reviendrait à ouvrir
   // toute la confidentialité de l'espace à l'automatisation sans qu'aucun écran
@@ -158,7 +181,10 @@ export async function POST(
       select: memberSelect,
     });
     clearFailures(rateKey);
-    return NextResponse.json({ status: "member", ...toMember(created) });
+    // Email d'INFORMATION : l'accès est déjà ouvert, rien à faire. Sans lui,
+    // on peut devenir membre d'un espace sans jamais l'apprendre.
+    const mail = await notifyInvitation(email, "member", mailCtx);
+    return NextResponse.json({ status: "member", ...toMember(created), ...mailStatus(mail) });
   }
 
   // ─── Pas de compte : PRÉ-AUTORISATION ────────────────────────────────────────
@@ -171,13 +197,22 @@ export async function POST(
     where: { workspaceId_email: { workspaceId, email } },
     create: { workspaceId, email, role: parsed.data.role, invitedBy: user.id },
     // Ré-inviter le même email met à jour le rôle plutôt que de rendre un 409 :
-    // c'est le geste attendu quand on s'est trompé de rôle.
-    update: { role: parsed.data.role, invitedBy: user.id },
+    // c'est le geste attendu quand on s'est trompé de rôle. C'est AUSSI le
+    // chemin du bouton « Renvoyer » — d'où le rafraîchissement de createdAt, qui
+    // vaut donc « dernière émission » et prolonge les INVITATION_TTL_DAYS.
+    // Sans lui, relancer une invitation périmée enverrait un email déjà mort.
+    update: { role: parsed.data.role, invitedBy: user.id, createdAt: new Date() },
     select: { id: true, email: true, role: true, createdAt: true },
   });
   recordFailure(inviteKey, Date.now(), INVITE_BUDGET);
+  const mail = await notifyInvitation(email, "invited", mailCtx);
+  // Ni l'adresse invitée ni le résultat détaillé : l'acteur et l'espace suffisent
+  // à corréler, la ligne d'invitation est en base.
   console.info(
-    `[member-invited] actor=${user.id} workspace=${workspaceId} role=${parsed.data.role}`
+    `[member-invited] actor=${user.id} workspace=${workspaceId} role=${parsed.data.role} mail=${mail.ok ? "sent" : mail.reason}`
   );
-  return NextResponse.json({ status: "invited", ...invitation }, { status: 201 });
+  return NextResponse.json(
+    { status: "invited", ...invitation, ...mailStatus(mail) },
+    { status: 201 }
+  );
 }

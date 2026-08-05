@@ -5,7 +5,7 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
 import { createWorkspaceWithDefaults } from "@/lib/workspace";
-import { claimInvitationsSafely } from "@/lib/invitations";
+import { claimInvitationsSafely, hasPendingInvitation } from "@/lib/invitations";
 import {
   oidcEnabled,
   oidcConfig,
@@ -116,7 +116,16 @@ export async function GET(req: NextRequest) {
     return finish(existing.id, ws?.workspaceId ?? null);
   }
 
-  if (!OIDC_ALLOW_SIGNUP) return fail("nosignup");
+  // ─── Pas de compte : le provisioning est-il ouvert à cette adresse ? ─────────
+  // Avec OIDC_ALLOW_SIGNUP=false, une invitation vivante fait office de
+  // laissez-passer. C'est ce qui cloisonne notes du reste de l'écosystème
+  // Keycloak : le realm `gotyeah` est partagé par tous les sites, donc sans ce
+  // filtre l'utilisateur de n'importe lequel d'entre eux se créait un compte
+  // notes en cliquant « Se connecter ». L'IdP dit QUI tu es ; l'invitation dit
+  // si tu es attendu ICI.
+  if (!OIDC_ALLOW_SIGNUP && !(await hasPendingInvitation(email))) {
+    return fail("nosignup");
+  }
 
   const name = str(claims.name);
   const firstName = str(claims.given_name) || name.split(" ")[0] || email.split("@")[0];
@@ -129,9 +138,12 @@ export async function GET(req: NextRequest) {
     data: { email, firstName, lastName, displayName, passwordHash },
     select: { id: true },
   });
-  // Chacun garde son propre espace, invité ou non — on y atterrit. Les espaces
-  // réclamés s'ajoutent à côté et sont accessibles par le sélecteur.
-  await claimInvitationsSafely(created.id, email);
+  // Chacun garde son propre espace, invité ou non. En revanche on ATTERRIT sur
+  // l'espace qui vient d'être réclamé : quelqu'un qui suit une invitation
+  // arriverait sinon dans un « Mon espace » vide, sans rien qui lui dise que
+  // l'espace où on l'attend existe — le sélecteur ne se remarque pas quand on
+  // découvre l'application.
+  const claimed = await claimInvitationsSafely(created.id, email);
   const workspace = await createWorkspaceWithDefaults("Mon espace", created.id);
-  return finish(created.id, workspace.id);
+  return finish(created.id, claimed.workspaceIds[0] ?? workspace.id);
 }
