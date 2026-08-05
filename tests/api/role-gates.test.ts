@@ -17,6 +17,7 @@ import { PATCH as sectionPATCH, DELETE as sectionDELETE } from "@/app/api/sectio
 import { DELETE as workspaceDELETE } from "@/app/api/workspaces/[id]/route";
 import { POST as membersPOST } from "@/app/api/workspaces/[id]/members/route";
 import { PATCH as memberPATCH, DELETE as memberDELETE } from "@/app/api/workspaces/[id]/members/[userId]/route";
+import { DELETE as invitationDELETE } from "@/app/api/workspaces/[id]/invitations/[invitationId]/route";
 import { POST as databasesPOST } from "@/app/api/databases/route";
 import { PATCH as databasePATCH, DELETE as databaseDELETE } from "@/app/api/databases/[id]/route";
 import { POST as propertiesPOST } from "@/app/api/databases/[id]/properties/route";
@@ -138,6 +139,7 @@ const cases: GateCase[] = [
   { name: "POST /api/workspaces/[id]/members", minRole: "admin", call: () => membersPOST(jsonReq(`/api/workspaces/${workspaceId}/members`, "POST", { email: "nobody@x.tld" }), P({ id: workspaceId })) },
   { name: "PATCH /api/workspaces/[id]/members/[userId]", minRole: "admin", call: () => memberPATCH(jsonReq(`/api/workspaces/${workspaceId}/members/${editorId}`, "PATCH", { role: "viewer" }), P({ id: workspaceId, userId: editorId })) },
   { name: "DELETE /api/workspaces/[id]/members/[userId] (autrui)", minRole: "admin", call: () => memberDELETE(req(`/api/workspaces/${workspaceId}/members/${adminId}`, "DELETE"), P({ id: workspaceId, userId: adminId })) },
+  { name: "DELETE /api/workspaces/[id]/invitations/[invitationId]", minRole: "admin", call: () => invitationDELETE(req(`/api/workspaces/${workspaceId}/invitations/nope`, "DELETE"), P({ id: workspaceId, invitationId: "nope" })) },
   { name: "POST /api/databases", minRole: "editor", call: () => databasesPOST(jsonReq("/api/databases", "POST", { pageId })) },
   { name: "PATCH /api/databases/[id]", minRole: "editor", call: () => databasePATCH(jsonReq(`/api/databases/${databaseId}`, "PATCH", {}), P({ id: databaseId })) },
   { name: "DELETE /api/databases/[id]", minRole: "admin", call: () => databaseDELETE(req(`/api/databases/${databaseId}`, "DELETE"), P({ id: databaseId })) },
@@ -268,6 +270,7 @@ const DECLARED: Record<string, string[]> = {
   "workspaces/[id]/route.ts": ["DELETE"],
   "workspaces/[id]/members/route.ts": ["POST"],
   "workspaces/[id]/members/[userId]/route.ts": ["PATCH", "DELETE"],
+  "workspaces/[id]/invitations/[invitationId]/route.ts": ["DELETE"],
   "databases/route.ts": ["POST"],
   "databases/[id]/route.ts": ["PATCH", "DELETE"],
   "databases/[id]/properties/route.ts": ["POST"],

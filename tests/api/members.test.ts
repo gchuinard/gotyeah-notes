@@ -5,7 +5,7 @@ vi.mock("@/lib/session", () => ({ getSession: vi.fn() }));
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { seedUserWithWorkspace, seedMember } from "../helpers/seed";
-import { _resetRateLimit, RATE_LIMIT_MAX_FAILURES } from "@/lib/rateLimit";
+import { _resetRateLimit, RATE_LIMIT_MAX_FAILURES, INVITE_BUDGET } from "@/lib/rateLimit";
 import { GET as membersGET, POST as membersPOST } from "@/app/api/workspaces/[id]/members/route";
 import { PATCH as memberPATCH, DELETE as memberDELETE } from "@/app/api/workspaces/[id]/members/[userId]/route";
 
@@ -111,83 +111,60 @@ describe("POST /api/workspaces/[id]/members (ajout par email)", () => {
     expect(res.status).toBe(409);
   });
 
-  it("email sans compte → 404 explicite", async () => {
+  it("email sans compte → 201 invitation (le 404 historique a disparu)", async () => {
     as(adminId);
     const res = await membersPOST(
       jsonReq(`/api/workspaces/${workspaceId}/members`, "POST", { email: "inconnu@x.tld" }),
       P({ id: workspaceId })
     );
-    expect(res.status).toBe(404);
+    // Avant les invitations, cette route répondait 404 « le compte doit d'abord
+    // exister ». Elle pré-autorise désormais l'email : cf. tests/api/invitations.test.ts.
+    expect(res.status).toBe(201);
+    expect((await res.json()).status).toBe("invited");
   });
 });
 
-describe("POST /members — anti-énumération (rate-limit + trace)", () => {
-  const addUnknown = (asUser: string, tag: string) => {
+describe("POST /members — plafond des invitations (rate-limit + trace)", () => {
+  // Depuis les invitations, un email inconnu n'est plus un ÉCHEC (404) mais un
+  // SUCCÈS (201 pré-autorisé). Le plafond existe toujours — c'est le seul frein
+  // au sondage d'emails — mais il vit dans sa propre famille de clés, avec son
+  // budget et son message : cf. INVITE_BUDGET et lib/rateLimit.ts.
+  const addUnknown = (asUser: string, tag: string, workspace = workspaceId) => {
     as(asUser);
     return membersPOST(
-      jsonReq(`/api/workspaces/${workspaceId}/members`, "POST", {
+      jsonReq(`/api/workspaces/${workspace}/members`, "POST", {
         email: `inconnu-${tag}-${Math.random().toString(36).slice(2)}@x.tld`,
       }),
-      P({ id: workspaceId })
+      P({ id: workspace })
     );
   };
 
-  it("bloque en 429 avec Retry-After après N sondages sur des comptes inexistants", async () => {
-    for (let i = 0; i < RATE_LIMIT_MAX_FAILURES; i++) {
-      expect((await addUnknown(adminId, `a${i}`)).status).toBe(404);
+  it("bloque en 429 avec Retry-After au-delà du budget d'invitations", async () => {
+    for (let i = 0; i < INVITE_BUDGET.max; i++) {
+      expect((await addUnknown(adminId, `a${i}`)).status).toBe(201);
     }
     const blocked = await addUnknown(adminId, "over");
     expect(blocked.status).toBe(429);
     expect(Number(blocked.headers.get("Retry-After"))).toBeGreaterThan(0);
   });
 
-  it("n'affecte pas un usage normal : sous le seuil, les messages restent explicites", async () => {
-    for (let i = 0; i < RATE_LIMIT_MAX_FAILURES - 1; i++) await addUnknown(adminId, `b${i}`);
-    // Le message de typo doit rester lisible — c'est tout l'intérêt d'avoir
-    // choisi le rate-limit plutôt qu'une réponse indifférenciée.
-    const res = await addUnknown(adminId, "last");
-    expect(res.status).toBe(404);
-    expect((await res.json()).error).toContain("introuvable");
-  });
-
-  it("un ajout réussi remet le compteur à zéro", async () => {
-    const invitee = await prisma.user.create({
-      data: {
-        email: `reset-${Date.now()}@x.tld`,
-        firstName: "R",
-        lastName: "S",
-        displayName: "Reset",
-        passwordHash: "not-a-real-hash",
-      },
-    });
-    for (let i = 0; i < RATE_LIMIT_MAX_FAILURES - 1; i++) await addUnknown(adminId, `c${i}`);
-
-    as(adminId);
-    const ok = await membersPOST(
-      jsonReq(`/api/workspaces/${workspaceId}/members`, "POST", { email: invitee.email }),
-      P({ id: workspaceId })
-    );
-    expect(ok.status).toBe(200);
-
-    // Sans le clearFailures, ce sondage serait le N-ième → 429.
-    expect((await addUnknown(adminId, "after-success")).status).toBe(404);
+  it("le budget d'invitations est plus large que celui du login", async () => {
+    // Régression de conception : réutiliser le budget du login (8/15 min) ferait
+    // qu'inviter une équipe de 10 déclencherait un 429 au message mensonger.
+    expect(INVITE_BUDGET.max).toBeGreaterThan(RATE_LIMIT_MAX_FAILURES);
+    for (let i = 0; i < RATE_LIMIT_MAX_FAILURES + 1; i++) {
+      expect((await addUnknown(adminId, `b${i}`)).status).toBe(201);
+    }
   });
 
   it("les compteurs sont par utilisateur : un admin bloqué n'en bloque pas un autre", async () => {
     // Espace SÉPARÉ : ajouter un 2e admin à l'espace partagé casserait les cas
     // « dernier admin » qui suivent.
     const other = await seedUserWithWorkspace(`members-rl-${Date.now()}@x.tld`);
-    for (let i = 0; i < RATE_LIMIT_MAX_FAILURES; i++) await addUnknown(adminId, `d${i}`);
+    for (let i = 0; i < INVITE_BUDGET.max; i++) await addUnknown(adminId, `d${i}`);
     expect((await addUnknown(adminId, "blocked")).status).toBe(429);
 
-    as(other.user.id);
-    const res = await membersPOST(
-      jsonReq(`/api/workspaces/${other.workspace.id}/members`, "POST", {
-        email: `inconnu-other-${Date.now()}@x.tld`,
-      }),
-      P({ id: other.workspace.id })
-    );
-    expect(res.status).toBe(404);
+    expect((await addUnknown(other.user.id, "other", other.workspace.id)).status).toBe(201);
   });
 
   it("le GET (liste des membres) n'est jamais limité", async () => {

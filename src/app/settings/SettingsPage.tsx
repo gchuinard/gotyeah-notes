@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import useSWR, { mutate as globalMutate } from "swr";
 import {
   ArrowLeft, User, Users, HardDrive, Palette,
-  Eye, EyeOff, Check, Trash2, UserPlus,
+  Eye, EyeOff, Check, Trash2, UserPlus, Clock, X, Bot,
 } from "lucide-react";
 import type { SessionUser } from "@/lib/session";
 import { useWorkspace, type WorkspaceRole } from "@/contexts/WorkspaceContext";
@@ -227,7 +227,18 @@ type Member = {
   role: WorkspaceRole;
   email: string;
   displayName: string;
+  /** Compte de SERVICE (pont MCP) : il voit les pages PRIVÉES de cet espace. */
+  isService?: boolean;
   createdAt: string;
+};
+
+/** Pré-autorisation en attente : l'email n'a pas encore de compte. */
+type Invitation = {
+  id: string;
+  email: string;
+  role: WorkspaceRole;
+  createdAt: string;
+  invitedByName: string | null;
 };
 
 const ROLE_OPTIONS: { id: WorkspaceRole; label: string; description: string }[] = [
@@ -249,6 +260,12 @@ function MembersSection({ user }: { user: SessionUser }) {
   const wsId = activeWorkspace?.id ?? null;
   const key = wsId ? `/api/workspaces/${wsId}/members` : null;
   const { data: members, mutate } = useSWR<Member[]>(key, membersFetcher);
+  // Route SÉPARÉE de /members à dessein : cette clé-là est partagée avec le board
+  // (useWorkspaceMembers), y mêler des invités sans userId ferait apparaître des
+  // assignés fantômes dans les cellules et les colonnes kanban. Admin seulement.
+  const invitationsKey = wsId && isAdmin ? `/api/workspaces/${wsId}/invitations` : null;
+  const { data: invitations, mutate: mutateInvitations } =
+    useSWR<Invitation[]>(invitationsKey, membersFetcher);
 
   const [email, setEmail]   = useState("");
   // Moindre privilège : lecteur proposé par défaut, on élève explicitement.
@@ -260,6 +277,23 @@ function MembersSection({ user }: { user: SessionUser }) {
   // la liste des workspaces (badge lecture seule, entrées de nav, etc.).
   const refreshSelf = (targetUserId: string) => {
     if (targetUserId === user.id) globalMutate("/api/workspaces");
+  };
+
+  const revokeInvitation = async (inv: Invitation) => {
+    if (!wsId) return;
+    const ok = await confirm({
+      title: "Annuler l'invitation",
+      message: `${inv.email} ne rejoindra pas cet espace. Tu pourras la réinviter plus tard.`,
+      confirmLabel: "Annuler l'invitation",
+      tone: "danger",
+    });
+    if (!ok) return;
+    const res = await fetch(`/api/workspaces/${wsId}/invitations/${inv.id}`, { method: "DELETE" });
+    if (!res.ok) {
+      setError(`Impossible d'annuler l'invitation (${res.status}).`);
+      return;
+    }
+    mutateInvitations();
   };
 
   const addMember = async (e: React.FormEvent) => {
@@ -281,7 +315,11 @@ function MembersSection({ user }: { user: SessionUser }) {
       }
       setEmail("");
       setRole("viewer");
+      // 201 = pas encore de compte : la personne apparaît dans « invitations en
+      // attente », pas dans les membres. On rafraîchit les deux listes plutôt que
+      // de deviner laquelle a bougé.
       mutate();
+      mutateInvitations();
     } catch {
       setError("Impossible d'ajouter le membre.");
     } finally {
@@ -378,10 +416,40 @@ function MembersSection({ user }: { user: SessionUser }) {
             </button>
           </form>
           <p className="text-xs text-[var(--text-muted)] mb-4">
-            Le compte doit déjà exister (la personne se connecte une première fois), puis tu
-            l&apos;ajoutes ici. Lecteur par défaut : élève son rôle explicitement si besoin.
+            Si la personne a déjà un compte, elle rejoint l&apos;espace tout de suite. Sinon
+            son rôle est réservé et s&apos;appliquera à sa première connexion — préviens-la,
+            aucun email n&apos;est envoyé. Lecteur par défaut : élève son rôle si besoin.
           </p>
         </>
+      )}
+
+      {isAdmin && (invitations ?? []).length > 0 && (
+        <div className="mb-4">
+          <Label>En attente de première connexion</Label>
+          <div className="mt-1.5 flex flex-col divide-y divide-[var(--border)] border border-dashed border-[var(--border)] rounded-lg">
+            {(invitations ?? []).map((inv) => (
+              <div key={inv.id} className="flex items-center gap-3 px-3 py-2.5">
+                <div className="w-8 h-8 rounded-full border border-dashed border-[var(--border)] flex items-center justify-center text-[var(--text-muted)] shrink-0">
+                  <Clock size={14} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-[var(--text)] truncate">{inv.email}</p>
+                  <p className="text-xs text-[var(--text-muted)] truncate">
+                    {ROLE_OPTIONS.find((r) => r.id === inv.role)?.label ?? inv.role}
+                    {inv.invitedByName ? ` · invité par ${inv.invitedByName}` : ""}
+                  </p>
+                </div>
+                <button
+                  onClick={() => revokeInvitation(inv)}
+                  title="Annuler l'invitation"
+                  className="shrink-0 p-1.5 rounded-md text-[var(--text-muted)] hover:text-red-500 hover:bg-[var(--surface-hover)] transition-colors"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
       {error && <p className="text-xs text-red-500 mb-3">{error}</p>}
@@ -393,10 +461,18 @@ function MembersSection({ user }: { user: SessionUser }) {
               {m.displayName.charAt(0).toUpperCase()}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-[var(--text)] truncate">
+              <p className="text-sm font-medium text-[var(--text)] truncate flex items-center gap-1.5">
                 {m.displayName}
                 {m.userId === user.id && (
-                  <span className="ml-1.5 text-xs text-[var(--text-muted)]">(toi)</span>
+                  <span className="text-xs text-[var(--text-muted)]">(toi)</span>
+                )}
+                {m.isService && (
+                  <span
+                    title="Compte de service : il voit aussi les pages privées de cet espace."
+                    className="inline-flex items-center gap-1 text-[10px] font-normal uppercase tracking-wide text-[var(--text-muted)] border border-[var(--border)] rounded px-1 py-0.5"
+                  >
+                    <Bot size={10} /> service
+                  </span>
                 )}
               </p>
               <p className="text-xs text-[var(--text-muted)] truncate">{m.email}</p>

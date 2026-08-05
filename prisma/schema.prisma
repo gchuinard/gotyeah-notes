@@ -23,6 +23,7 @@ model User {
   createdAt    DateTime     @default(now())
   sessions     Session[]
   memberships  Membership[]
+  sentInvitations WorkspaceInvitation[] @relation("InvitationAuthor")
   pageVisits   PageVisit[]
   ownedPages   Page[]       @relation("PageOwner")
   records      Record[]
@@ -57,12 +58,43 @@ model Membership {
   @@index([workspaceId])
 }
 
+/// Pré-autorisation : « cet email aura ce rôle sur cet espace », posée AVANT que
+/// la personne ait un compte. Elle devient une Membership toute seule à sa
+/// première connexion (lib/invitations.ts > claimInvitations), puis la ligne est
+/// SUPPRIMÉE — la Membership créée est la trace, on ne garde pas de `claimedAt`.
+///
+/// ⚠️ Ce n'est pas une Membership à `userId` nullable : rendre `userId` nullable
+/// casserait @@unique([userId, workspaceId]), getMembership et les 5 check*Access.
+/// Table séparée = zéro impact sur le chemin d'autorisation existant.
+model WorkspaceInvitation {
+  id          String    @id @default(cuid())
+  /// Email NORMALISÉ (normalizeEmail) — sinon une invitation en casse mixte ne
+  /// matcherait jamais la connexion qui la réclame.
+  email       String
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  role        String // "admin" | "editor" | "viewer" — jamais de @default : cf. Membership
+  /// L'admin émetteur. SetNull comme Record.createdBy : supprimer un compte ne
+  /// doit ni détruire l'invitation ni bloquer la suppression. ⚠️ C'est aussi le
+  /// fil qui rattache l'invitation à une AUTORITÉ : perdre son rôle admin révoque
+  /// ses invitations en attente (lib/workspace.ts > updateMemberRole/removeMember).
+  invitedBy   String?
+  inviter     User?     @relation("InvitationAuthor", fields: [invitedBy], references: [id], onDelete: SetNull)
+  createdAt   DateTime  @default(now())
+
+  @@unique([workspaceId, email])
+  @@index([email]) // le claim interroge par email seul, à chaque connexion
+  @@index([workspaceId])
+  @@index([invitedBy])
+}
+
 model Workspace {
   id             String       @id @default(cuid())
   name           String       @default("Mon espace")
   createdAt      DateTime     @default(now())
   createdBy      String?      // userId du créateur — ref uniquement, pas l'autorité
   memberships    Membership[]
+  invitations    WorkspaceInvitation[]
   pages          Page[]
   sections       Section[]
   templates      Template[]

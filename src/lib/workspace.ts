@@ -263,6 +263,15 @@ export async function updateMemberRole(
       data: { role },
       select: { userId: true, role: true },
     });
+    // Un droit délégué ne survit pas à la perte du droit de déléguer : perdre
+    // admin révoque les invitations que ce membre avait émises, sinon une
+    // invitation « admin » posée par un ex-admin continuerait de conférer admin.
+    // DANS la transaction — sortie d'ici, une démotion réussie la laisserait.
+    if (target.role === "admin" && role !== "admin") {
+      await tx.workspaceInvitation.deleteMany({
+        where: { workspaceId, invitedBy: targetUserId },
+      });
+    }
     return { ok: true as const, membership: updated };
   });
 }
@@ -289,6 +298,11 @@ export async function removeMember(
 
     await tx.membership.delete({
       where: { userId_workspaceId: { userId: targetUserId, workspaceId } },
+    });
+    // Idem : quitter l'espace (ou en être retiré) emporte les invitations qu'on
+    // y avait émises et qui n'ont pas encore été réclamées.
+    await tx.workspaceInvitation.deleteMany({
+      where: { workspaceId, invitedBy: targetUserId },
     });
     return { ok: true as const };
   });
