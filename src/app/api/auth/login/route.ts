@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
 import { legacyLoginEnabled, normalizeEmail } from "@/lib/oidc";
 import { tooManyFailures, recordFailure, clearFailures, retryAfterSeconds } from "@/lib/rateLimit";
+import { claimInvitationsSafely } from "@/lib/invitations";
 
 // Hash bcrypt factice (coût 12, comme les vrais) : comparé quand l'email est inconnu
 // pour que le temps de réponse soit identique à « mauvais mot de passe » → pas d'oracle
@@ -55,6 +56,12 @@ export async function POST(req: Request) {
   }
 
   clearFailures(key);
+  // Rattrapage de la course « invitation posée alors que la personne était DÉJÀ
+  // inscrite » : POST /members a bien créé la membership dans ce cas, mais si
+  // l'invitation a été posée avant que le compte existe et que la personne se
+  // connecte par mot de passe plutôt que par l'IdP, c'est ici qu'elle est
+  // réclamée. Le compte existe déjà : aucune question de vérification d'email.
+  await claimInvitationsSafely(user.id, user.email);
   const token = await createSession(user.id);
 
   const res = NextResponse.json({ id: user.id, email: user.email });

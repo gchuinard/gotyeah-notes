@@ -5,6 +5,7 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
 import { createWorkspaceWithDefaults } from "@/lib/workspace";
+import { claimInvitationsSafely } from "@/lib/invitations";
 import {
   oidcEnabled,
   oidcConfig,
@@ -103,6 +104,10 @@ export async function GET(req: NextRequest) {
     select: { id: true },
   });
   if (existing) {
+    // ⚠️ AVANT le findFirst : une personne qui a quitté tous ses espaces et qu'on
+    // vient de réinviter atterrirait sinon sur `null`, alors qu'une membership
+    // vient d'être créée. L'email vient de l'IdP et est vérifié (cf. plus haut).
+    await claimInvitationsSafely(existing.id, email);
     const ws = await prisma.membership.findFirst({
       where: { userId: existing.id },
       orderBy: { createdAt: "asc" },
@@ -124,6 +129,9 @@ export async function GET(req: NextRequest) {
     data: { email, firstName, lastName, displayName, passwordHash },
     select: { id: true },
   });
+  // Chacun garde son propre espace, invité ou non — on y atterrit. Les espaces
+  // réclamés s'ajoutent à côté et sont accessibles par le sélecteur.
+  await claimInvitationsSafely(created.id, email);
   const workspace = await createWorkspaceWithDefaults("Mon espace", created.id);
   return finish(created.id, workspace.id);
 }
