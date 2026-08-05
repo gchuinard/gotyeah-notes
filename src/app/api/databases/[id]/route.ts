@@ -71,6 +71,8 @@ export async function PATCH(
   // Mapping « Patch notes » : la page cible doit exister dans le même workspace ET
   // être accessible à l'utilisateur — jamais la page privée d'un autre membre, sinon
   // l'auto-append écrirait dans un contenu privé. null retire le mapping, sans contrôle.
+  // ⚠️ isService doit suivre : l'append de clôture l'accepte déjà (appendReleaseNotesToPage),
+  // l'omettre ici laissait le pont MCP poser un mapping qu'il aurait pu honorer.
   if (result.data.patchNotesPageId) {
     const target = await prisma.page.findUnique({
       where: { id: result.data.patchNotesPageId },
@@ -79,7 +81,7 @@ export async function PATCH(
     if (
       !target ||
       target.workspaceId !== access.workspaceId ||
-      !isPageAccessible(target, user.id)
+      !isPageAccessible(target, user.id, user.isService)
     ) {
       return NextResponse.json(
         { error: "Page « Patch notes » introuvable ou inaccessible dans ce workspace." },
