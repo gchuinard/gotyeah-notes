@@ -670,6 +670,7 @@ export default function DatabaseShell({
             properties={data.properties}
             workspaceId={data.workspaceId}
             currentUserId={currentUserId}
+            actor={actor}
             readOnly={readOnly}
             isAdmin={isAdmin}
           />
@@ -690,6 +691,7 @@ export default function DatabaseShell({
             properties={data.properties}
             workspaceId={data.workspaceId}
             currentUserId={currentUserId}
+            actor={actor}
             readOnly={readOnly}
           />
         ) : activeView.type === "gallery" ? (
@@ -699,6 +701,7 @@ export default function DatabaseShell({
             properties={data.properties}
             workspaceId={data.workspaceId}
             currentUserId={currentUserId}
+            actor={actor}
             readOnly={readOnly}
           />
         ) : activeView.type === "backlog" ? (
@@ -708,6 +711,7 @@ export default function DatabaseShell({
             properties={data.properties}
             workspaceId={data.workspaceId}
             currentUserId={currentUserId}
+            actor={actor}
             readOnly={readOnly}
             isAdmin={isAdmin}
           />
