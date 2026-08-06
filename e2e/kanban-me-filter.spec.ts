@@ -105,7 +105,7 @@ test("vue partagée filtrée « Moi » : chacun voit ses cartes ; kanban regroup
 
 /** La colonne entière (en-tête + zone droppable), repérée par son libellé. */
 const column = (page: Page, label: string) =>
-  page.locator("div.w-64").filter({ hasText: label });
+  page.locator("[data-kanban-column]").filter({ hasText: label });
 
 /** Drag dnd-kit : dépasser l'activationConstraint (6 px) puis viser la colonne cible. */
 async function dragTo(page: Page, card: ReturnType<Page["locator"]>, targetLabel: string) {

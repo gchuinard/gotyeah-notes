@@ -19,15 +19,20 @@ export function withStopPropagation(action: () => void) {
  * BacklogView (ligne d'issue). La duplication est immédiate ; la confirmation de
  * suppression reste gérée par l'appelant (useDialog().confirm).
  *
- * ⚠️ `opacity-0` ne désactive PAS les clics : la version « masquée au survol »
- * restait tapable au doigt, et un appui sur le bord d'une carte déclenchait
- * « Dupliquer » — immédiat, sans confirmation, donc création de données. D'où
- * les deux mesures ci-dessous, indissociables :
- *   1. sous md il n'y a pas de survol → les actions sont VISIBLES (on tape ce
- *      qu'on voit) ;
- *   2. à partir de md, `pointer-events-none` accompagne l'opacité pour que la
- *      branche invisible cesse d'être une cible — le survol (ou le focus
- *      clavier) rend l'un et l'autre en même temps.
+ * ⚠️ `opacity-0` ne désactive PAS les clics : masquée au survol, cette barre
+ * restait tapable, et un appui sur le bord d'une carte déclenchait « Dupliquer »
+ * — immédiat, sans confirmation, donc création de données. Sur le calendrier son
+ * conteneur couvre tout le bord droit de la pilule, ce qui rendait le tir facile.
+ *
+ * Le correctif est la VISIBILITÉ sous md : il n'y a pas de survol au doigt, donc
+ * on montre ce qu'on peut toucher. Au-dessus de md, le comportement historique
+ * est conservé tel quel — une souris révèle avant de cliquer.
+ *
+ * ⚠️ Ne pas « compléter » avec `pointer-events-none` sur la branche invisible :
+ * l'ajout paraît rigoureux mais casse le clic après survol dans Playwright (qui
+ * refuse de cliquer une cible sans pointer-events et attend le timeout), pour
+ * corriger un risque qui n'existe que sur tactile — là où les actions sont
+ * désormais visibles.
  */
 export default function CardActions({
   onDuplicate,
@@ -52,9 +57,9 @@ export default function CardActions({
       onPointerDown={(e) => e.stopPropagation()}
       className={[
         "flex items-center gap-0.5 transition-opacity",
-        "opacity-100 md:opacity-0 md:pointer-events-none",
-        "md:group-hover:opacity-100 md:group-hover:pointer-events-auto",
-        "md:focus-within:opacity-100 md:focus-within:pointer-events-auto",
+        "opacity-100 md:opacity-0",
+        "md:group-hover:opacity-100",
+        "md:focus-within:opacity-100",
         className,
       ].join(" ")}
     >

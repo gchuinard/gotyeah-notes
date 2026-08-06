@@ -101,7 +101,7 @@ function OptionRow({
           {...attributes}
           {...listeners}
           title="Glisser pour réordonner"
-          className="opacity-100 md:opacity-0 md:group-hover/opt:opacity-100 md:pointer-events-none md:group-hover/opt:pointer-events-auto cursor-grab active:cursor-grabbing text-[var(--text-muted)] transition-opacity shrink-0 touch-none p-2 -m-2 md:p-0 md:m-0"
+          className="opacity-100 md:opacity-0 md:group-hover/opt:opacity-100 cursor-grab active:cursor-grabbing text-[var(--text-muted)] transition-opacity shrink-0 touch-none p-2 -m-2 md:p-0 md:m-0"
         >
           <GripVertical size={12} />
         </span>
@@ -115,7 +115,7 @@ function OptionRow({
         <button
           type="button"
           onClick={onDelete}
-          className="opacity-100 md:opacity-0 md:group-hover/opt:opacity-100 md:pointer-events-none md:group-hover/opt:pointer-events-auto text-[var(--text-muted)] hover:text-red-500 transition-opacity shrink-0 p-2.5 -my-2.5 md:p-0 md:my-0"
+          className="opacity-100 md:opacity-0 md:group-hover/opt:opacity-100 text-[var(--text-muted)] hover:text-red-500 transition-opacity shrink-0 p-2.5 -my-2.5 md:p-0 md:my-0"
         >
           <Trash2 size={12} />
         </button>

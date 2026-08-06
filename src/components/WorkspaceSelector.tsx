@@ -104,7 +104,7 @@ export default function WorkspaceSelector() {
                     e.stopPropagation();
                     deleteWorkspace(ws);
                   }}
-                  className="opacity-100 md:opacity-0 md:pointer-events-none md:group-hover:opacity-100 md:group-hover:pointer-events-auto p-2 md:p-0.5 hover:bg-[var(--surface-hover)] rounded"
+                  className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-2 md:p-0.5 hover:bg-[var(--surface-hover)] rounded"
                   title="Supprimer l'espace"
                 >
                   <Trash2 size={12} className="text-[var(--text-muted)]" />

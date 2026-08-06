@@ -35,7 +35,7 @@ async function seed(page: Page, propType: "multiselect" | "select") {
 }
 
 /** La colonne entière (en-tête + zone droppable), repérée par son libellé. */
-const column = (page: Page, label: string) => page.locator("div.w-64").filter({ hasText: label });
+const column = (page: Page, label: string) => page.locator("[data-kanban-column]").filter({ hasText: label });
 
 async function propValueOf(page: Page, dbId: string, propId: string, recordId: string) {
   const records = await (await page.request.get(`/api/databases/${dbId}/records`)).json();

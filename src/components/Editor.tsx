@@ -170,7 +170,7 @@ export default function Editor({
                 `pointer-events` suit l'opacité — invisible ne veut pas dire non cliquable. */}
             <button
               onClick={handleRemoveIcon}
-              className="opacity-100 md:opacity-0 md:group-hover:opacity-100 md:pointer-events-none md:group-hover:pointer-events-auto inline-flex items-center justify-center min-h-11 min-w-11 md:inline-block md:min-h-0 md:min-w-0 text-xs text-gray-400 hover:text-gray-600 transition-opacity px-1"
+              className="opacity-100 md:opacity-0 md:group-hover:opacity-100 inline-flex items-center justify-center min-h-11 min-w-11 md:inline-block md:min-h-0 md:min-w-0 text-xs text-gray-400 hover:text-gray-600 transition-opacity px-1"
               title="Supprimer l'icône"
             >
               ✕

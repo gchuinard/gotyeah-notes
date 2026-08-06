@@ -307,8 +307,8 @@ function KanbanCard({
             Contrôle distinct du clic d'ouverture / du drag (stopPropagation).
             ⚠️ Sous md, l'état masqué est VISIBLE : sans survol, la case restait
             invisible mais tapable — on basculait une sélection sans avoir vu de
-            case. Au-dessus de md, `pointer-events-none` va de pair avec
-            l'opacité pour que l'invisible cesse d'être une cible. */}
+            case. Au-dessus de md le comportement historique est conservé : une
+            souris révèle avant de cliquer. */}
         {!isEditing && !readOnly && (
           <SelectCheckbox
             selected={selected}
@@ -318,7 +318,7 @@ function KanbanCard({
               "grid absolute top-1 left-1 z-10",
               selected
                 ? "opacity-100"
-                : "opacity-100 md:opacity-0 md:pointer-events-none md:group-hover:opacity-100 md:group-hover:pointer-events-auto",
+                : "opacity-100 md:opacity-0 md:group-hover:opacity-100",
             ].join(" ")}
           />
         )}
@@ -479,7 +479,13 @@ export function KanbanColView({
     // du board : sans ça, on lit en permanence deux demi-colonnes. `max-w` évite
     // qu'une tablette de 760px hérite d'une colonne de 640px.
     // `snap-start` est inerte au-dessus de md, le board y repassant en `snap-none`.
-    <div className="w-[85vw] max-w-[18rem] md:w-64 md:max-w-none shrink-0 snap-start flex flex-col gap-2">
+    // `data-kanban-column` est la prise des tests E2E. Ils ciblaient `div.w-64`,
+    // donc une classe de PRÉSENTATION : la première largeur responsive posée ici
+    // a fait tomber sept specs d'un coup, sans qu'aucun comportement ne change.
+    <div
+      data-kanban-column
+      className="w-[85vw] max-w-[18rem] md:w-64 md:max-w-none shrink-0 snap-start flex flex-col gap-2"
+    >
       <div className="flex items-center gap-2 px-1 min-h-[28px]">
         {col.option ? (
           isRenamingCol ? (

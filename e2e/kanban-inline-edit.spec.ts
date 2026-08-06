@@ -71,7 +71,7 @@ async function seed(page: Page) {
   };
 }
 
-const column = (page: Page, label: string) => page.locator("div.w-64").filter({ hasText: label });
+const column = (page: Page, label: string) => page.locator("[data-kanban-column]").filter({ hasText: label });
 /** Marqueur « le RecordPanel est ouvert » (présent tant que le panneau est monté). */
 const panelOpen = (page: Page) => page.getByTitle("Modèle de cette carte");
 

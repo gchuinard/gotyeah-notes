@@ -438,7 +438,7 @@ function SectionBlock({
           // `pointer-events` suit l'opacité : un bouton invisible reste cliquable sinon.
           <button
             onClick={() => onCreate(null, section.id)}
-            className="opacity-100 md:opacity-0 md:pointer-events-none md:group-hover:opacity-100 md:group-hover:pointer-events-auto p-2 md:p-0.5 rounded cursor-pointer text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] transition-colors"
+            className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-2 md:p-0.5 rounded cursor-pointer text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] transition-colors"
             title="Nouvelle page"
           >
             <Plus size={11} />
@@ -616,14 +616,14 @@ function TreeItem({
                 e.stopPropagation();
                 onCreate(node.id, null);
               }}
-              className="opacity-100 md:opacity-0 md:pointer-events-none md:group-hover:opacity-100 md:group-hover:pointer-events-auto p-2 md:p-0.5 rounded cursor-pointer text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] transition-colors"
+              className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-2 md:p-0.5 rounded cursor-pointer text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] transition-colors"
               title="Ajouter une sous-page"
             >
               <Plus size={12} />
             </button>
             <button
               onClick={onDelete}
-              className="opacity-100 md:opacity-0 md:pointer-events-none md:group-hover:opacity-100 md:group-hover:pointer-events-auto p-2 md:p-0.5 rounded cursor-pointer text-[var(--text-muted)] hover:bg-red-500/15 hover:text-red-500 transition-colors"
+              className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-2 md:p-0.5 rounded cursor-pointer text-[var(--text-muted)] hover:bg-red-500/15 hover:text-red-500 transition-colors"
               title="Supprimer"
             >
               <Trash2 size={12} />

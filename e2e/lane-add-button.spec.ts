@@ -74,7 +74,7 @@ async function fillRecords(
 }
 
 /** La colonne kanban entière (en-tête + zone droppable), repérée par son libellé. */
-const column = (page: Page, label: string) => page.locator("div.w-64").filter({ hasText: label });
+const column = (page: Page, label: string) => page.locator("[data-kanban-column]").filter({ hasText: label });
 
 // ─── Kanban ─────────────────────────────────────────────────────────────────
 

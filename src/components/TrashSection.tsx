@@ -30,7 +30,7 @@ function Row({
       <button
         onClick={onRestore}
         title="Restaurer"
-        className="opacity-100 md:opacity-0 md:pointer-events-none md:group-hover:opacity-100 md:group-hover:pointer-events-auto p-2 md:p-0.5 rounded hover:bg-[var(--surface-active)]"
+        className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-2 md:p-0.5 rounded hover:bg-[var(--surface-active)]"
       >
         <RotateCcw size={12} />
       </button>
@@ -39,7 +39,7 @@ function Row({
         <button
           onClick={onPurge}
           title="Supprimer définitivement"
-          className="opacity-100 md:opacity-0 md:pointer-events-none md:group-hover:opacity-100 md:group-hover:pointer-events-auto p-2 md:p-0.5 rounded hover:bg-[var(--surface-active)] text-red-500"
+          className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-2 md:p-0.5 rounded hover:bg-[var(--surface-active)] text-red-500"
         >
           <X size={13} />
         </button>
