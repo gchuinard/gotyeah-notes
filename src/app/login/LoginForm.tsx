@@ -62,8 +62,10 @@ export default function LoginForm({
     router.refresh();
   };
 
+  // min-h-dvh + py plutôt que h-screen : clavier mobile ouvert, le formulaire
+  // était rogné sans aucun défilement possible — sur la porte d'entrée de l'app.
   return (
-    <div className="flex items-center justify-center h-screen w-full bg-[var(--bg)]">
+    <div className="flex items-center justify-center min-h-dvh w-full bg-[var(--bg)] py-10">
       <div className="w-full max-w-sm px-6">
         <h1 className="text-2xl font-bold text-center text-[var(--text)] mb-8">
           📝 Notes
@@ -85,7 +87,7 @@ export default function LoginForm({
                 onChange={(e) => setEmail(e.target.value)}
                 required
                 autoFocus
-                className="border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 transition-colors"
+                className="border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] rounded-lg px-3 py-2 text-base sm:text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 transition-colors"
               />
             </div>
             <div className="flex flex-col gap-1.5">
@@ -97,13 +99,13 @@ export default function LoginForm({
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                className="border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 transition-colors"
+                className="border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] rounded-lg px-3 py-2 text-base sm:text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 transition-colors"
               />
             </div>
             <button
               type="submit"
               disabled={loading}
-              className="bg-blue-500 hover:bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-50 transition-colors mt-1"
+              className="bg-blue-500 hover:bg-blue-600 text-white rounded-lg px-4 py-2.5 md:py-2 text-sm font-medium disabled:opacity-50 transition-colors mt-1"
             >
               {loading ? "Connexion…" : "Se connecter"}
             </button>
@@ -123,8 +125,8 @@ export default function LoginForm({
               href="/api/auth/oidc/login"
               className={
                 showPasswordForm
-                  ? "block text-center border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-hover)] text-[var(--text)] rounded-lg px-4 py-2 text-sm font-medium transition-colors"
-                  : "block text-center bg-blue-500 hover:bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+                  ? "block text-center border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-hover)] text-[var(--text)] rounded-lg px-4 py-2.5 md:py-2 text-sm font-medium transition-colors"
+                  : "block text-center bg-blue-500 hover:bg-blue-600 text-white rounded-lg px-4 py-2.5 md:py-2 text-sm font-medium transition-colors"
               }
             >
               {oidcLabel}

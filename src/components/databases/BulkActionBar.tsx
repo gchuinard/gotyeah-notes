@@ -61,6 +61,9 @@ function MenuUp({
       bottom: window.innerHeight - rect.top + 6,
       left: Math.max(8, left),
       minWidth,
+      // Les entrées sont en `whitespace-nowrap` : un nom de membre long ferait
+      // sortir le menu de l'écran sur un mobile étroit.
+      maxWidth: window.innerWidth - 16,
       zIndex: 1100,
       visibility: "visible",
     });
@@ -90,7 +93,7 @@ function MenuUp({
     <div
       ref={contentRef}
       style={style}
-      className="bg-[var(--bg)] border border-[var(--border)] rounded-lg shadow-lg py-1 overflow-y-auto max-h-72"
+      className="bg-[var(--bg)] border border-[var(--border)] rounded-lg shadow-lg py-1 overflow-y-auto overflow-x-auto max-h-72"
     >
       {children}
     </div>,
@@ -116,7 +119,7 @@ function BulkSelectControl({
       <button
         ref={btnRef}
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1 px-2.5 py-1 text-sm rounded-md bg-[var(--surface)] border border-[var(--border)] hover:bg-[var(--surface-hover)] text-[var(--text)]"
+        className="shrink-0 flex items-center gap-1 px-2.5 py-2 md:py-1 text-sm rounded-md bg-[var(--surface)] border border-[var(--border)] hover:bg-[var(--surface-hover)] text-[var(--text)]"
         title={`Appliquer « ${property.name} » à la sélection`}
       >
         <span className="truncate max-w-[120px]">{property.name}</span>
@@ -132,7 +135,7 @@ function BulkSelectControl({
             options.map((opt) => (
               <button
                 key={opt.id}
-                className="w-full text-left px-3 py-1.5 text-sm hover:bg-[var(--surface-hover)] flex items-center gap-2"
+                className="w-full text-left px-3 py-2.5 md:py-1.5 text-sm hover:bg-[var(--surface-hover)] flex items-center gap-2"
                 onMouseDown={(e) => {
                   e.preventDefault();
                   setOpen(false);
@@ -144,7 +147,7 @@ function BulkSelectControl({
             ))
           )}
           <button
-            className="w-full text-left px-3 py-1.5 text-sm hover:bg-[var(--surface-hover)] text-[var(--text-muted)] border-t border-[var(--border)]"
+            className="w-full text-left px-3 py-2.5 md:py-1.5 text-sm hover:bg-[var(--surface-hover)] text-[var(--text-muted)] border-t border-[var(--border)]"
             onMouseDown={(e) => {
               e.preventDefault();
               setOpen(false);
@@ -179,7 +182,7 @@ function BulkUserControl({
       <button
         ref={btnRef}
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1 px-2.5 py-1 text-sm rounded-md bg-[var(--surface)] border border-[var(--border)] hover:bg-[var(--surface-hover)] text-[var(--text)]"
+        className="shrink-0 flex items-center gap-1 px-2.5 py-2 md:py-1 text-sm rounded-md bg-[var(--surface)] border border-[var(--border)] hover:bg-[var(--surface-hover)] text-[var(--text)]"
         title={`Appliquer « ${property.name} » à la sélection`}
       >
         <span className="truncate max-w-[120px]">{property.name}</span>
@@ -195,7 +198,7 @@ function BulkUserControl({
             members.map((m) => (
               <button
                 key={m.userId}
-                className="w-full text-left px-3 py-1.5 text-sm hover:bg-[var(--surface-hover)] flex items-center gap-2 whitespace-nowrap"
+                className="w-full text-left px-3 py-2.5 md:py-1.5 text-sm hover:bg-[var(--surface-hover)] flex items-center gap-2 whitespace-nowrap"
                 onMouseDown={(e) => {
                   e.preventDefault();
                   setOpen(false);
@@ -207,7 +210,7 @@ function BulkUserControl({
             ))
           )}
           <button
-            className="w-full text-left px-3 py-1.5 text-sm hover:bg-[var(--surface-hover)] text-[var(--text-muted)] border-t border-[var(--border)]"
+            className="w-full text-left px-3 py-2.5 md:py-1.5 text-sm hover:bg-[var(--surface-hover)] text-[var(--text-muted)] border-t border-[var(--border)]"
             onMouseDown={(e) => {
               e.preventDefault();
               setOpen(false);
@@ -379,35 +382,43 @@ export default function BulkActionBar({
   if (!mounted || count === 0) return null;
 
   return createPortal(
-    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[900] flex items-center gap-2 px-3 py-2 rounded-xl bg-[var(--bg)] border border-[var(--border)] shadow-xl max-w-[92vw]">
-      <span className="text-sm font-medium text-[var(--text)] tabular-nums px-1 whitespace-nowrap">
+    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[900] flex flex-wrap md:flex-nowrap items-center gap-x-2 gap-y-1.5 px-3 py-2 rounded-xl bg-[var(--bg)] border border-[var(--border)] shadow-xl max-w-[92vw]">
+      <span className="text-sm font-medium text-[var(--text)] tabular-nums px-1 whitespace-nowrap shrink-0">
         {count} sélectionné{count > 1 ? "s" : ""}
       </span>
+      {/* Le libellé cède la place à l'icône seule sous md : sur 375px il pousse
+          à lui seul les contrôles de propriété hors de la barre. */}
       <button
         onClick={onClear}
-        className="flex items-center gap-1 px-2 py-1 text-sm rounded-md text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"
+        aria-label="Tout désélectionner"
+        className="shrink-0 flex items-center gap-1 px-2 py-2 md:py-1 text-sm rounded-md text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"
         title="Tout désélectionner"
       >
         <X size={14} />
-        Désélectionner
+        <span className="hidden md:inline">Désélectionner</span>
       </button>
       {selectProps.length > 0 && (
-        <div className="w-px h-5 bg-[var(--border)] mx-0.5 shrink-0" />
+        <div className="hidden md:block w-px h-5 bg-[var(--border)] mx-0.5 shrink-0" />
       )}
-      <div className="flex items-center gap-1.5 overflow-x-auto">
-        {selectProps.map((p) =>
-          p.type === "user" ? (
-            <BulkUserControl
-              key={p.id}
-              property={p}
-              workspaceId={workspaceId}
-              onApply={applyOption}
-            />
-          ) : (
-            <BulkSelectControl key={p.id} property={p} onApply={applyOption} />
-          )
-        )}
-      </div>
+      {/* `min-w-0` + `basis-full` : sans eux, la rangée de contrôles gonfle la
+          barre au lieu de défiler dans son propre conteneur. Rendue seulement si
+          elle a du contenu — vide, `basis-full` créerait une ligne fantôme. */}
+      {selectProps.length > 0 && (
+        <div className="flex items-center gap-1.5 overflow-x-auto overscroll-x-contain min-w-0 basis-full md:basis-auto">
+          {selectProps.map((p) =>
+            p.type === "user" ? (
+              <BulkUserControl
+                key={p.id}
+                property={p}
+                workspaceId={workspaceId}
+                onApply={applyOption}
+              />
+            ) : (
+              <BulkSelectControl key={p.id} property={p} onApply={applyOption} />
+            )
+          )}
+        </div>
+      )}
     </div>,
     document.body
   );

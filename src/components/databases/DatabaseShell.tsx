@@ -6,7 +6,7 @@ import { Plus, MoreHorizontal, Trash2, Pencil, Check, Table2, Kanban, Calendar, 
 import {
   DndContext,
   type DragEndEvent,
-  PointerSensor,
+  MouseSensor,
   useSensor,
   useSensors,
   closestCenter,
@@ -97,7 +97,7 @@ function TabMenu({
     // menu hors du viewport (il est en position:fixed, donc sans scroll).
     <Portal anchor={anchor} onClose={onClose} minWidth={isKanban ? 290 : 150}>
       <button
-        className="w-full text-left px-3 py-1.5 text-sm hover:bg-[var(--surface-hover)] text-[var(--text)] flex items-center gap-2"
+        className="w-full text-left px-3 py-2.5 md:py-1.5 text-sm hover:bg-[var(--surface-hover)] text-[var(--text)] flex items-center gap-2"
         onMouseDown={(e) => { e.preventDefault(); onRename(); onClose(); }}
       >
         <Pencil size={13} />
@@ -105,7 +105,7 @@ function TabMenu({
       </button>
       {isKanban && (
         <button
-          className="w-full text-left px-3 py-1.5 text-sm hover:bg-[var(--surface-hover)] text-[var(--text)] flex items-start gap-2"
+          className="w-full text-left px-3 py-2.5 md:py-1.5 text-sm hover:bg-[var(--surface-hover)] text-[var(--text)] flex items-start gap-2"
           onMouseDown={(e) => { e.preventDefault(); onToggleCreateInUnassignedOnly(); onClose(); }}
           title="Toute nouvelle carte naît sans valeur d'axe, à classer ensuite"
         >
@@ -117,7 +117,7 @@ function TabMenu({
       )}
       {canDelete && (
         <button
-          className="w-full text-left px-3 py-1.5 text-sm hover:bg-[var(--surface-hover)] text-red-500 flex items-center gap-2"
+          className="w-full text-left px-3 py-2.5 md:py-1.5 text-sm hover:bg-[var(--surface-hover)] text-red-500 flex items-center gap-2"
           onMouseDown={(e) => { e.preventDefault(); onDelete(); }}
         >
           <Trash2 size={13} />
@@ -189,6 +189,7 @@ function SortableViewTab({
       ].join(" ")}
     >
       {isEditing ? (
+        // text-base sous sm : iOS Safari zoome sur tout champ < 16px et ne dézoome pas au blur.
         <input
           ref={editInputRef}
           value={editingName}
@@ -198,14 +199,14 @@ function SortableViewTab({
             if (e.key === "Enter") { e.preventDefault(); onCommitRename(); }
             if (e.key === "Escape") { e.preventDefault(); onCancelRename(); }
           }}
-          className="px-2 py-2 text-sm border-b-2 border-[var(--accent)] bg-transparent outline-none text-[var(--text)] min-w-[60px] -mb-px"
+          className="px-2 py-3 md:py-2 text-base sm:text-sm border-b-2 border-[var(--accent)] bg-transparent outline-none text-[var(--text)] min-w-[60px] -mb-px"
           style={{ width: Math.max(60, editingName.length * 8) + "px" }}
         />
       ) : (
         <button
           onClick={onSwitchView}
           className={[
-            "flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap",
+            "flex items-center gap-1.5 px-3 py-3 md:py-2 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap",
             isActive
               ? "border-[var(--accent)] text-[var(--accent)]"
               : "border-transparent text-[var(--text-muted)] hover:text-[var(--text)] hover:border-[var(--border)]",
@@ -216,12 +217,14 @@ function SortableViewTab({
         </button>
       )}
 
-      {/* ⋯ context button */}
+      {/* ⋯ context button — visible d'office sous md : sans survol au doigt il
+          resterait invisible tout en restant tapable (opacity-0 ne désarme pas
+          le clic), donc introuvable et déclenchable par erreur. */}
       {!isEditing && !readOnly && (
         <button
           ref={(el) => { if (el) menuBtnRefs.current.set(view.id, el); }}
           onClick={(e) => { e.stopPropagation(); onToggleMenu(); }}
-          className="opacity-0 group-hover/tab:opacity-100 p-0.5 mr-1 rounded text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] transition-opacity shrink-0"
+          className="opacity-100 md:opacity-0 md:group-hover/tab:opacity-100 p-2 md:p-0.5 mr-1 rounded text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] transition-opacity shrink-0"
           title="Options"
         >
           <MoreHorizontal size={12} />
@@ -312,11 +315,12 @@ function AddViewPopover({
       <form onSubmit={handleSubmit} className="p-3 flex flex-col gap-3">
         <div className="flex flex-col gap-1">
           <label className="text-xs text-[var(--text-muted)]">Nom</label>
+          {/* text-base sous sm : iOS Safari zoome sur tout champ < 16px et ne dézoome pas au blur. */}
           <input
             ref={nameRef}
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="text-sm bg-[var(--surface)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-[var(--text)] outline-none focus:border-[var(--accent)]"
+            className="text-base sm:text-sm bg-[var(--surface)] border border-[var(--border)] rounded-md px-2.5 py-2 sm:py-1.5 text-[var(--text)] outline-none focus:border-[var(--accent)]"
           />
         </div>
 
@@ -325,7 +329,7 @@ function AddViewPopover({
           <select
             value={type}
             onChange={(e) => setType(e.target.value as ViewType)}
-            className="text-sm bg-[var(--surface)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-[var(--text)] outline-none focus:border-[var(--accent)]"
+            className="text-base sm:text-sm bg-[var(--surface)] border border-[var(--border)] rounded-md px-2.5 py-2 sm:py-1.5 text-[var(--text)] outline-none focus:border-[var(--accent)]"
           >
             {VIEW_TYPES.map((vt) => (
               <option key={vt.value} value={vt.value}>{vt.label}</option>
@@ -339,14 +343,14 @@ function AddViewPopover({
           <button
             type="button"
             onClick={onClose}
-            className="text-sm px-3 py-1.5 rounded-md text-[var(--text-muted)] hover:bg-[var(--surface-hover)]"
+            className="text-sm px-3 py-2.5 md:py-1.5 rounded-md text-[var(--text-muted)] hover:bg-[var(--surface-hover)]"
           >
             Annuler
           </button>
           <button
             type="submit"
             disabled={saving}
-            className="text-sm px-3 py-1.5 rounded-md bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-50"
+            className="text-sm px-3 py-2.5 md:py-1.5 rounded-md bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-50"
           >
             {saving ? "Création…" : "Créer"}
           </button>
@@ -446,8 +450,11 @@ export default function DatabaseShell({
   );
 
   // ── View tabs drag-and-drop (réordonnancement, ordre partagé via View.position)
+  // ⚠️ MouseSensor SEUL, pas de TouchSensor : les listeners couvrent tout l'onglet
+  // dans une bande `overflow-x-auto`. Les rendre draggables au doigt interdirait
+  // de faire défiler la bande pour atteindre les vues 4 et 5.
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
+    useSensor(MouseSensor, { activationConstraint: { distance: 6 } })
   );
 
   const handleTabDragEnd = useCallback(
@@ -602,7 +609,7 @@ export default function DatabaseShell({
   return (
     <div className="flex flex-col h-full">
       {/* View tabs + add button */}
-      <div className="flex items-center gap-0.5 px-4 border-b border-[var(--border)] shrink-0 overflow-x-auto">
+      <div className="flex items-center gap-0.5 px-2 md:px-4 border-b border-[var(--border)] shrink-0 overflow-x-auto overscroll-x-contain">
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleTabDragEnd}>
           <SortableContext items={views.map((v) => v.id)} strategy={horizontalListSortingStrategy}>
             {views.map((view) => (
@@ -639,7 +646,7 @@ export default function DatabaseShell({
           <button
             ref={addButtonRef}
             onClick={() => setShowAddView((v) => !v)}
-            className="ml-1 p-2 shrink-0 text-[var(--text-muted)] hover:text-[var(--text)] transition-colors"
+            className="ml-1 p-3 md:p-2 shrink-0 text-[var(--text-muted)] hover:text-[var(--text)] transition-colors"
             title="Ajouter une vue"
           >
             <Plus size={14} />
@@ -649,7 +656,7 @@ export default function DatabaseShell({
 
       {/* Sort / Filter / Count toolbar — les contrôles PATCHent le config PARTAGÉ
           de la vue : masqués en lecture seule, seul le compteur reste. */}
-      <div className="flex items-center gap-1 px-4 py-1.5 border-b border-[var(--border)] shrink-0">
+      <div className="flex flex-wrap items-center gap-x-1 gap-y-1 px-2 md:px-4 py-1.5 border-b border-[var(--border)] shrink-0">
         {!readOnly && (
           <>
             <SortControls view={activeView} properties={data.properties} databaseId={databaseId} />

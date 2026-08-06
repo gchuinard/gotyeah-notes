@@ -48,8 +48,10 @@ const PASSWORD_CRITERIA = [
 
 // ─── Shared UI ───────────────────────────────────────────────────────────────
 
+// text-base sous sm : iOS Safari zoome sur tout champ dont la police fait moins
+// de 16px, et ne dézoome pas au blur. Cette constante habille TOUT l'écran.
 const fieldClass =
-  "border border-[var(--border)] bg-[var(--bg)] text-[var(--text)] rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 transition-colors w-full";
+  "border border-[var(--border)] bg-[var(--bg)] text-[var(--text)] rounded-lg px-3 py-2 text-base sm:text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 transition-colors w-full";
 
 function Label({ children }: { children: React.ReactNode }) {
   return (
@@ -74,7 +76,7 @@ function SaveButton({ label = "Enregistrer" }: { label?: string }) {
   return (
     <button
       type="button"
-      className="mt-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+      className="mt-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg px-4 py-2.5 md:py-2 text-sm font-medium transition-colors"
     >
       {label}
     </button>
@@ -96,13 +98,16 @@ function PasswordField({ label, show, onToggle, value, onChange }: {
           type={show ? "text" : "password"}
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className={`${fieldClass} pr-10`}
+          className={`${fieldClass} pr-12 md:pr-10`}
         />
+        {/* Cible tactile pleine hauteur sous md ; au-dessus, on retrouve exactement
+            l'icône flottante d'origine (mêmes offsets, largeur au contenu). */}
         <button
           type="button"
           onClick={onToggle}
           tabIndex={-1}
-          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text)]"
+          aria-label={show ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+          className="absolute right-0 top-0 bottom-0 flex w-11 items-center justify-center text-[var(--text-muted)] hover:text-[var(--text)] md:right-2.5 md:top-1/2 md:bottom-auto md:w-auto md:-translate-y-1/2"
         >
           {show ? <EyeOff size={15} /> : <Eye size={15} />}
         </button>
@@ -204,13 +209,14 @@ function ProfileSection({ user }: { user: SessionUser }) {
               type={showConfirm ? "text" : "password"}
               value={confirmPw}
               onChange={(e) => setConfirmPw(e.target.value)}
-              className={`${fieldClass} pr-10`}
+              className={`${fieldClass} pr-12 md:pr-10`}
             />
             <button
               type="button"
               onClick={() => setShowConfirm((v) => !v)}
               tabIndex={-1}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text)]"
+              aria-label={showConfirm ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+              className="absolute right-0 top-0 bottom-0 flex w-11 items-center justify-center text-[var(--text-muted)] hover:text-[var(--text)] md:right-2.5 md:top-1/2 md:bottom-auto md:w-auto md:-translate-y-1/2"
             >
               {showConfirm ? <EyeOff size={15} /> : <Eye size={15} />}
             </button>
@@ -477,7 +483,7 @@ function MembersSection({ user }: { user: SessionUser }) {
       {/* Ajout par email — le compte doit déjà exister (connexion GotYeah). */}
       {isAdmin && (
         <>
-          <form onSubmit={addMember} className="flex items-end gap-2 mb-2">
+          <form onSubmit={addMember} className="flex flex-col sm:flex-row sm:items-end gap-2 mb-2">
             <div className="flex-1 flex flex-col gap-1.5">
               <Label>Ajouter par email</Label>
               <input
@@ -493,7 +499,7 @@ function MembersSection({ user }: { user: SessionUser }) {
               <select
                 value={role}
                 onChange={(e) => setRole(e.target.value as WorkspaceRole)}
-                className={`${fieldClass} w-auto`}
+                className={`${fieldClass} sm:w-auto`}
               >
                 {ROLE_OPTIONS.map((r) => (
                   <option key={r.id} value={r.id}>{r.label}</option>
@@ -503,7 +509,7 @@ function MembersSection({ user }: { user: SessionUser }) {
             <button
               type="submit"
               disabled={adding || !email.trim()}
-              className="shrink-0 flex items-center gap-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded-lg px-3 py-2 text-sm font-medium transition-colors disabled:opacity-50"
+              className="shrink-0 flex items-center justify-center gap-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded-lg px-3 py-2.5 md:py-2 text-sm font-medium transition-colors disabled:opacity-50"
             >
               <UserPlus size={14} />
               {adding ? "Ajout…" : "Ajouter"}
@@ -524,33 +530,39 @@ function MembersSection({ user }: { user: SessionUser }) {
           <Label>En attente de première connexion</Label>
           <div className="mt-1.5 flex flex-col divide-y divide-[var(--border)] border border-dashed border-[var(--border)] rounded-lg">
             {(invitations ?? []).map((inv) => (
-              <div key={inv.id} className="flex items-center gap-3 px-3 py-2.5">
+              <div key={inv.id} className="flex flex-wrap items-center gap-3 px-3 py-2.5">
                 <div className="w-8 h-8 rounded-full border border-dashed border-[var(--border)] flex items-center justify-center text-[var(--text-muted)] shrink-0">
                   <Clock size={14} />
                 </div>
-                <div className="flex-1 min-w-0">
+                {/* basis pleine ligne (moins l'icône et son gap) sous sm : les deux
+                    actions passent en dessous plutôt que d'écraser l'email. */}
+                <div className="min-w-0 grow basis-[calc(100%_-_2.75rem)] sm:basis-0">
                   <p className="text-sm text-[var(--text)] truncate">{inv.email}</p>
-                  <p className="text-xs text-[var(--text-muted)] truncate">
+                  {/* Sans truncate : il coupait par la droite, donc supprimait
+                      « expire dans N j » — la seule info actionnable de la ligne. */}
+                  <p className="text-xs text-[var(--text-muted)]">
                     {ROLE_OPTIONS.find((r) => r.id === inv.role)?.label ?? inv.role}
                     {inv.invitedByName ? ` · invité par ${inv.invitedByName}` : ""}
                     {` · ${expiryLabel(inv.createdAt)}`}
                   </p>
                 </div>
-                <button
-                  onClick={() => resendInvitation(inv)}
-                  disabled={resending !== null}
-                  title="Renvoyer l'email d'invitation"
-                  className="shrink-0 p-1.5 rounded-md text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] transition-colors disabled:opacity-40"
-                >
-                  <Send size={14} />
-                </button>
-                <button
-                  onClick={() => revokeInvitation(inv)}
-                  title="Annuler l'invitation"
-                  className="shrink-0 p-1.5 rounded-md text-[var(--text-muted)] hover:text-red-500 hover:bg-[var(--surface-hover)] transition-colors"
-                >
-                  <X size={14} />
-                </button>
+                <div className="flex items-center gap-3 ml-11 sm:ml-0">
+                  <button
+                    onClick={() => resendInvitation(inv)}
+                    disabled={resending !== null}
+                    title="Renvoyer l'email d'invitation"
+                    className="shrink-0 flex h-10 w-10 items-center justify-center rounded-md text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] transition-colors disabled:opacity-40 md:h-auto md:w-auto md:p-1.5"
+                  >
+                    <Send size={14} />
+                  </button>
+                  <button
+                    onClick={() => revokeInvitation(inv)}
+                    title="Annuler l'invitation"
+                    className="shrink-0 flex h-10 w-10 items-center justify-center rounded-md text-[var(--text-muted)] hover:text-red-500 hover:bg-[var(--surface-hover)] transition-colors md:h-auto md:w-auto md:p-1.5"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -562,11 +574,13 @@ function MembersSection({ user }: { user: SessionUser }) {
 
       <div className="flex flex-col divide-y divide-[var(--border)] border border-[var(--border)] rounded-lg">
         {(members ?? []).map((m) => (
-          <div key={m.userId} className="flex items-center gap-3 px-3 py-2.5">
+          <div key={m.userId} className="flex flex-wrap items-center gap-3 px-3 py-2.5">
             <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-sm font-bold text-blue-600 shrink-0">
               {m.displayName.charAt(0).toUpperCase()}
             </div>
-            <div className="flex-1 min-w-0">
+            {/* basis pleine ligne (moins l'avatar et son gap) sous sm : rôle et
+                retrait passent en dessous plutôt que de réduire le nom à rien. */}
+            <div className="min-w-0 grow basis-[calc(100%_-_2.75rem)] sm:basis-0">
               <p className="text-sm font-medium text-[var(--text)] truncate flex items-center gap-1.5">
                 {m.displayName}
                 {m.userId === user.id && (
@@ -583,32 +597,36 @@ function MembersSection({ user }: { user: SessionUser }) {
               </p>
               <p className="text-xs text-[var(--text-muted)] truncate">{m.email}</p>
             </div>
-            {isAdmin ? (
-              <select
-                value={m.role}
-                onChange={(e) => changeRole(m, e.target.value as WorkspaceRole)}
-                title={ROLE_OPTIONS.find((r) => r.id === m.role)?.description}
-                className="shrink-0 text-sm bg-[var(--surface)] border border-[var(--border)] rounded-md px-2 py-1 text-[var(--text)] outline-none focus:border-blue-400"
-              >
-                {ROLE_OPTIONS.map((r) => (
-                  <option key={r.id} value={r.id}>{r.label}</option>
-                ))}
-              </select>
-            ) : (
-              <span className="shrink-0 text-xs text-[var(--text-muted)]">
-                {ROLE_OPTIONS.find((r) => r.id === m.role)?.label ?? m.role}
-              </span>
-            )}
-            {(isAdmin || m.userId === user.id) && (
-              <button
-                type="button"
-                onClick={() => removeMember(m)}
-                title={m.userId === user.id ? "Quitter l'espace" : "Retirer de l'espace"}
-                className="shrink-0 p-1 rounded text-[var(--text-muted)] hover:text-red-500 hover:bg-red-500/10 transition-colors"
-              >
-                <Trash2 size={14} />
-              </button>
-            )}
+            <div className="flex items-center gap-3 ml-11 sm:ml-0">
+              {isAdmin ? (
+                <select
+                  value={m.role}
+                  onChange={(e) => changeRole(m, e.target.value as WorkspaceRole)}
+                  title={ROLE_OPTIONS.find((r) => r.id === m.role)?.description}
+                  className="shrink-0 text-base sm:text-sm bg-[var(--surface)] border border-[var(--border)] rounded-md px-2 py-2 md:py-1 text-[var(--text)] outline-none focus:border-blue-400"
+                >
+                  {ROLE_OPTIONS.map((r) => (
+                    <option key={r.id} value={r.id}>{r.label}</option>
+                  ))}
+                </select>
+              ) : (
+                <span className="shrink-0 text-xs text-[var(--text-muted)]">
+                  {ROLE_OPTIONS.find((r) => r.id === m.role)?.label ?? m.role}
+                </span>
+              )}
+              {(isAdmin || m.userId === user.id) && (
+                // Retrait d'un membre : action destructrice, elle jouxtait le
+                // sélecteur de rôle sur ~22px de large.
+                <button
+                  type="button"
+                  onClick={() => removeMember(m)}
+                  title={m.userId === user.id ? "Quitter l'espace" : "Retirer de l'espace"}
+                  className="shrink-0 flex h-10 w-10 items-center justify-center rounded text-[var(--text-muted)] hover:text-red-500 hover:bg-red-500/10 transition-colors md:h-auto md:w-auto md:p-1"
+                >
+                  <Trash2 size={14} />
+                </button>
+              )}
+            </div>
           </div>
         ))}
         {members === undefined && (
@@ -693,7 +711,7 @@ function StorageSection() {
           type="button"
           onClick={save}
           disabled={saving || maxMb == null}
-          className="mt-2 self-start bg-blue-500 hover:bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50"
+          className="mt-2 self-start bg-blue-500 hover:bg-blue-600 text-white rounded-lg px-4 py-2.5 md:py-2 text-sm font-medium transition-colors disabled:opacity-50"
         >
           {saving ? "Enregistrement…" : saved ? "Enregistré ✓" : "Enregistrer"}
         </button>
@@ -756,12 +774,14 @@ function AppearanceSection() {
       <SectionTitle title="Apparence" description="Choisissez le thème de l'interface." />
 
       <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)] mb-3">Clairs</p>
-      <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 mb-8">
+      {/* 2 colonnes sous sm : à 375px, 3 tuiles réduisaient le libellé du thème
+          à une bouillie tronquée. Au-dessus de sm, la grille est inchangée. */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 mb-8">
         {lightThemes.map(renderTheme)}
       </div>
 
       <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)] mb-3">Sombres</p>
-      <div className="grid grid-cols-3 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {darkThemes.map(renderTheme)}
       </div>
     </div>
@@ -781,40 +801,43 @@ export default function SettingsPage({ user }: { user: SessionUser }) {
   const visibleNav = NAV.filter(({ id }) => id !== "storage" || adminSomewhere);
   const effectiveActive = visibleNav.some((n) => n.id === active) ? active : "profile";
 
+  // Colonne sous md : une nav latérale de 208px + un contenu en p-8 mangeaient
+  // 272px de chrome avant le premier champ, sur un écran qui en fait 375.
   return (
-    <div className="flex h-full text-sm">
-      {/* Left nav */}
-      <nav className="w-52 shrink-0 border-r border-[var(--border)] flex flex-col">
-        <div className="px-4 py-4 border-b border-[var(--border)]">
+    <div className="flex flex-col md:flex-row h-full text-sm">
+      {/* Left nav — bandeau d'onglets défilant sous md, colonne au-dessus */}
+      <nav className="shrink-0 flex flex-col border-b border-[var(--border)] md:w-52 md:border-b-0 md:border-r">
+        <div className="px-4 py-3 md:py-4 border-b border-[var(--border)]">
           <Link
             href="/"
-            className="flex items-center gap-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--text)] mb-3"
+            className="flex items-center gap-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--text)] mb-3 py-2 md:py-0"
           >
             <ArrowLeft size={13} />
             Retour
           </Link>
           <h1 className="font-semibold text-[var(--text)]">Paramètres</h1>
         </div>
-        <div className="flex flex-col gap-0.5 p-2">
+        <div className="flex flex-row overflow-x-auto gap-1 p-2 md:flex-col md:gap-0.5 md:overflow-x-visible">
           {visibleNav.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               onClick={() => setActive(id)}
-              className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-colors ${
+              className={`shrink-0 flex items-center gap-2.5 px-3 py-2.5 md:py-2 rounded-lg text-left whitespace-nowrap transition-colors ${
                 effectiveActive === id
                   ? "bg-blue-50 text-blue-600 font-medium"
                   : "text-[var(--text-muted)] hover:bg-[var(--surface-hover)]"
               }`}
             >
-              <Icon size={15} />
+              <Icon size={15} className="shrink-0" />
               {label}
             </button>
           ))}
         </div>
       </nav>
 
-      {/* Content */}
-      <main className="flex-1 overflow-y-auto p-8">
+      {/* min-h-0 : en flex-col, sans lui le contenu pousse le conteneur et le
+          défilement interne disparaît. */}
+      <main className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 md:p-8">
         {effectiveActive === "profile"    && <ProfileSection user={user} />}
         {effectiveActive === "users"      && <MembersSection user={user} />}
         {effectiveActive === "storage"    && <StorageSection />}

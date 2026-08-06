@@ -7,7 +7,8 @@ import {
   DragEndEvent,
   DragStartEvent,
   DragOverlay,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   useSensor,
   useSensors,
   closestCenter,
@@ -42,8 +43,13 @@ const MAX_COL_WIDTH = 600;
 // « + propriété ». ⚠️ En table-layout:fixed la largeur vient de la PREMIÈRE
 // ligne (le <thead>) : le <th> correspondant doit porter la même valeur, sinon
 // les icônes débordent de la colonne.
+// ⚠️ La gouttière de gauche est en style INLINE (table-layout:fixed) : elle ne
+// peut pas être responsive. Elle vaut 64 pour tenir le pire cas — celui du
+// tactile, où la case de sélection est affichée en permanence faute de survol :
+// 8 (px-2) + 13 (poignée) + 4 (gap) + 24 (case) + 8 (px-2) = 57.
+const ROW_GUTTER_WIDTH = 64;
 const ROW_ACTIONS_WIDTH = 52;
-const FIXED_COLS_WIDTH = 56 + ROW_ACTIONS_WIDTH;
+const FIXED_COLS_WIDTH = ROW_GUTTER_WIDTH + ROW_ACTIONS_WIDTH;
 
 function getColWidth(propId: string, propType: string, widths: Record<string, number>): number {
   if (propId in widths) return widths[propId];
@@ -184,19 +190,24 @@ function SortableRow({
       ].join(" ")}
     >
       {/* Drag handle + (row number ↔ selection checkbox) — fixed width, not resizable */}
-      <td className="px-2 py-1.5 select-none" style={{ width: 56, minWidth: 56 }}>
+      <td
+        className="px-2 py-1.5 select-none"
+        style={{ width: ROW_GUTTER_WIDTH, minWidth: ROW_GUTTER_WIDTH }}
+      >
         <div className="flex items-center gap-1">
           {!readOnly && (
             <span
               {...attributes}
               {...listeners}
-              className="opacity-0 group-hover:opacity-100 cursor-grab active:cursor-grabbing text-[var(--text-muted)] transition-opacity shrink-0 touch-none"
+              className="opacity-100 md:opacity-0 md:group-hover:opacity-100 cursor-grab active:cursor-grabbing text-[var(--text-muted)] transition-opacity shrink-0 touch-none flex items-center h-6 md:h-auto"
             >
               <GripVertical size={13} />
             </span>
           )}
           {/* Case de sélection : visible au survol OU quand la ligne est cochée.
-              Contrôle distinct du clic d'ouverture du panneau. */}
+              Contrôle distinct du clic d'ouverture du panneau.
+              Sous md elle est TOUJOURS visible : sans survol au doigt, la barre
+              d'action groupée serait structurellement inatteignable. */}
           {!readOnly && (
             <SelectCheckbox
               selected={selected}
@@ -204,14 +215,16 @@ function SortableRow({
               label="Sélectionner la ligne"
               className={[
                 "shrink-0",
-                selected ? "grid" : "hidden group-hover:grid",
+                selected ? "grid" : "grid md:hidden md:group-hover:grid",
               ].join(" ")}
             />
           )}
+          {/* Le numéro cède la place à la case sous md : les deux ensemble
+              dépasseraient la gouttière, qui n'est pas responsive. */}
           <span
             className={[
               "text-xs text-[var(--text-muted)] tabular-nums",
-              readOnly ? "inline" : selected ? "hidden" : "inline group-hover:hidden",
+              readOnly ? "inline" : selected ? "hidden" : "hidden md:inline md:group-hover:hidden",
             ].join(" ")}
           >
             {index + 1}
@@ -271,7 +284,7 @@ function DragRow({ record }: { record: ParsedRecord }) {
     <table className="text-sm border-collapse" style={{ tableLayout: "fixed" }}>
       <tbody>
         <tr className="bg-[var(--bg)] border border-[var(--border)] shadow-xl rounded">
-          <td className="px-2 py-1.5 text-[var(--text-muted)]" style={{ width: 56 }}>
+          <td className="px-2 py-1.5 text-[var(--text-muted)]" style={{ width: ROW_GUTTER_WIDTH }}>
             <GripVertical size={13} />
           </td>
           <td className="px-3 py-1.5 text-[var(--text)] font-medium" style={{ width: 250 }}>
@@ -430,8 +443,12 @@ export default function TableView({
 
   const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
 
+  // Deux capteurs plutôt qu'un PointerSensor : au doigt, le navigateur revendique
+  // le geste pour le scroll et émet `pointercancel` avant les 6px. Le `delay`
+  // distingue l'appui long (déplacer) du glissement (faire défiler la table).
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
+    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 6 } })
   );
 
   const getHeaderRef = useCallback((propId: string): React.RefObject<HTMLElement | null> => {
@@ -676,7 +693,11 @@ export default function TableView({
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
       >
-        <div className="overflow-x-auto">
+        {/* Le défilement horizontal est ASSUMÉ sur mobile (pas de bascule de vue,
+            pas de colonne titre collante) : il doit rester enfermé ici.
+            `overscroll-x-contain` évite qu'un swipe en bout de course déclenche
+            le geste « page précédente » du navigateur. */}
+        <div className="overflow-x-auto overscroll-x-contain max-w-full">
           <table
             className="text-sm border-collapse"
             style={{ tableLayout: "fixed", width: totalWidth }}
@@ -686,7 +707,7 @@ export default function TableView({
                 {/* Row number — fixed, not resizable */}
                 <th
                   className="px-2 py-2 text-left text-xs font-medium text-[var(--text-muted)] uppercase tracking-wide select-none"
-                  style={{ width: 56, minWidth: 56 }}
+                  style={{ width: ROW_GUTTER_WIDTH, minWidth: ROW_GUTTER_WIDTH }}
                 >
                   #
                 </th>
@@ -728,7 +749,7 @@ export default function TableView({
                   {!readOnly && (
                     <button
                       onClick={() => setShowAddProperty(true)}
-                      className="text-[var(--text-muted)] hover:text-[var(--text)] transition-colors"
+                      className="p-2 md:p-0 text-[var(--text-muted)] hover:text-[var(--text)] transition-colors"
                       title="Ajouter une propriété"
                     >
                       <Plus size={14} />
@@ -777,7 +798,7 @@ export default function TableView({
                   <td colSpan={sorted.length + 2} className="px-3 py-1.5">
                     <button
                       onClick={handleAddRecord}
-                      className="flex items-center gap-1.5 text-sm text-[var(--text-muted)] hover:text-[var(--text)] transition-colors"
+                      className="flex items-center gap-1.5 py-2 md:py-0 text-sm text-[var(--text-muted)] hover:text-[var(--text)] transition-colors"
                     >
                       <Plus size={13} />
                       Nouveau

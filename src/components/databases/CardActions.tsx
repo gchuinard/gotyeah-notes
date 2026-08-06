@@ -18,6 +18,21 @@ export function withStopPropagation(action: () => void) {
  * carte, en remplacement de l'ancien menu ⋯. Partagé par KanbanView (carte) et
  * BacklogView (ligne d'issue). La duplication est immédiate ; la confirmation de
  * suppression reste gérée par l'appelant (useDialog().confirm).
+ *
+ * ⚠️ `opacity-0` ne désactive PAS les clics : masquée au survol, cette barre
+ * restait tapable, et un appui sur le bord d'une carte déclenchait « Dupliquer »
+ * — immédiat, sans confirmation, donc création de données. Sur le calendrier son
+ * conteneur couvre tout le bord droit de la pilule, ce qui rendait le tir facile.
+ *
+ * Le correctif est la VISIBILITÉ sous md : il n'y a pas de survol au doigt, donc
+ * on montre ce qu'on peut toucher. Au-dessus de md, le comportement historique
+ * est conservé tel quel — une souris révèle avant de cliquer.
+ *
+ * ⚠️ Ne pas « compléter » avec `pointer-events-none` sur la branche invisible :
+ * l'ajout paraît rigoureux mais casse le clic après survol dans Playwright (qui
+ * refuse de cliquer une cible sans pointer-events et attend le timeout), pour
+ * corriger un risque qui n'existe que sur tactile — là où les actions sont
+ * désormais visibles.
  */
 export default function CardActions({
   onDuplicate,
@@ -41,7 +56,10 @@ export default function CardActions({
       onClick={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
       className={[
-        "flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity",
+        "flex items-center gap-0.5 transition-opacity",
+        "opacity-100 md:opacity-0",
+        "md:group-hover:opacity-100",
+        "md:focus-within:opacity-100",
         className,
       ].join(" ")}
     >
@@ -51,7 +69,9 @@ export default function CardActions({
         title="Dupliquer"
         onClick={withStopPropagation(onDuplicate)}
         onPointerDown={(e) => e.stopPropagation()}
-        className="p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)]"
+        // Le padding est la seule variable d'ajustement : l'icône fait 14px, et
+        // la pilule du calendrier (24px de haut) interdit une cible plus large.
+        className="p-1.5 md:p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)]"
       >
         <Copy size={14} />
       </button>
@@ -62,7 +82,7 @@ export default function CardActions({
           title="Supprimer"
           onClick={withStopPropagation(onDelete)}
           onPointerDown={(e) => e.stopPropagation()}
-          className="p-0.5 rounded text-[var(--text-muted)] hover:text-red-500 hover:bg-[var(--surface-hover)]"
+          className="p-1.5 md:p-0.5 rounded text-[var(--text-muted)] hover:text-red-500 hover:bg-[var(--surface-hover)]"
         >
           <Trash2 size={14} />
         </button>

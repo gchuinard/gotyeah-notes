@@ -65,7 +65,7 @@ test("kanban : au survol, 2 icônes directes ; Dupliquer clone sans dialog ni Re
   });
 
   await page.goto(`/pages/${pageId}?v=${viewId}`);
-  const column = page.locator("div.w-64").filter({ hasText: "Alpha" });
+  const column = page.locator("[data-kanban-column]").filter({ hasText: "Alpha" });
   const card = column.getByText(title, { exact: true });
   await expect(card).toBeVisible();
 
@@ -94,7 +94,7 @@ test("kanban : Supprimer ouvre la popup maison — Annuler conserve, Confirmer r
   });
 
   await page.goto(`/pages/${pageId}?v=${viewId}`);
-  const column = page.locator("div.w-64").filter({ hasText: "Alpha" });
+  const column = page.locator("[data-kanban-column]").filter({ hasText: "Alpha" });
   const card = column.getByText(title, { exact: true });
   await expect(card).toBeVisible();
 

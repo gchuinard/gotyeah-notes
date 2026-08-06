@@ -17,17 +17,20 @@ function Row({
   icon: string | null; title: string; onRestore: () => void; onPurge: () => void; canPurge: boolean;
 }) {
   return (
-    <div className="group flex items-center gap-1.5 px-2 py-1 rounded hover:bg-[var(--surface-hover)] text-[var(--text-muted)]">
+    <div className="group flex items-center gap-1.5 px-2 py-1.5 md:py-1 rounded hover:bg-[var(--surface-hover)] text-[var(--text-muted)]">
       {icon ? (
         <span className="shrink-0 text-sm leading-none">{icon}</span>
       ) : (
         <FileText size={12} className="shrink-0" />
       )}
       <span className="truncate text-xs flex-1 line-through opacity-70">{title || "Sans titre"}</span>
+      {/* Sans survol, ces deux boutons étaient introuvables au doigt : la corbeille
+          devenait un cul-de-sac. `pointer-events` suit l'opacité côté desktop, sinon
+          la version invisible reste cliquable. */}
       <button
         onClick={onRestore}
         title="Restaurer"
-        className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-[var(--surface-active)]"
+        className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-2 md:p-0.5 rounded hover:bg-[var(--surface-active)]"
       >
         <RotateCcw size={12} />
       </button>
@@ -36,7 +39,7 @@ function Row({
         <button
           onClick={onPurge}
           title="Supprimer définitivement"
-          className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-[var(--surface-active)] text-red-500"
+          className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-2 md:p-0.5 rounded hover:bg-[var(--surface-active)] text-red-500"
         >
           <X size={13} />
         </button>
@@ -85,7 +88,7 @@ export default function TrashSection() {
     <div className="px-2">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center gap-1.5 px-2 py-1 text-xs font-medium uppercase tracking-wide text-[var(--text-muted)] hover:text-[var(--text)]"
+        className="w-full flex items-center gap-1.5 px-2 py-2.5 md:py-1 text-xs font-medium uppercase tracking-wide text-[var(--text-muted)] hover:text-[var(--text)]"
       >
         {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
         <Trash2 size={11} />

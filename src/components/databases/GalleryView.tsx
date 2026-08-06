@@ -246,13 +246,16 @@ export default function GalleryView({
 
   return (
     <>
-      <div className="p-4">
+      <div className="p-3 sm:p-4">
         {displayedRecords.length === 0 && (
           <p className="text-sm text-[var(--text-muted)] text-center py-6">
             Aucun enregistrement.
           </p>
         )}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+        {/* Une seule colonne sous sm : à 375px, deux cartes font 165px de large,
+            le titre y tient en trois mots et la cover n'est plus qu'une bande.
+            Le palier md/lg reproduit l'existant — le desktop ne bouge pas. */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
           {displayedRecords.map((record) => (
             <GalleryCard
               key={record.id}

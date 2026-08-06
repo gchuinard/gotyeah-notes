@@ -54,7 +54,7 @@ export default function SortControls({ view, properties, databaseId }: Props) {
         ref={btnRef}
         onClick={() => setOpen((v) => !v)}
         className={[
-          "flex items-center gap-1.5 px-2.5 py-1.5 text-sm rounded-md transition-colors",
+          "flex items-center gap-1.5 px-2.5 py-2.5 md:py-1.5 text-sm rounded-md transition-colors",
           sorts.length > 0
             ? "bg-[var(--accent)]/10 text-[var(--accent)]"
             : "text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)]",
@@ -86,10 +86,12 @@ export default function SortControls({ view, properties, databaseId }: Props) {
 
           {sorts.map((sort, i) => (
             <div key={i} className="flex items-center gap-2 px-3 py-1.5">
+              {/* text-base sous sm : iOS Safari zoome sur tout champ < 16px et ne
+                  dézoome jamais au blur — la page reste agrandie ensuite. */}
               <select
                 value={sort.propertyId}
                 onChange={(e) => handleUpdate(i, { propertyId: e.target.value })}
-                className="flex-1 min-w-0 text-sm bg-[var(--surface)] border border-[var(--border)] rounded px-2 py-1 text-[var(--text)] outline-none focus:border-[var(--accent)]"
+                className="flex-1 min-w-0 text-base sm:text-sm bg-[var(--surface)] border border-[var(--border)] rounded px-2 py-2 sm:py-1 text-[var(--text)] outline-none focus:border-[var(--accent)]"
               >
                 {properties.map((p) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
@@ -98,15 +100,18 @@ export default function SortControls({ view, properties, databaseId }: Props) {
               <select
                 value={sort.direction}
                 onChange={(e) => handleUpdate(i, { direction: e.target.value as SortDirection })}
-                className="text-sm bg-[var(--surface)] border border-[var(--border)] rounded px-2 py-1 text-[var(--text)] outline-none focus:border-[var(--accent)]"
+                className="text-base sm:text-sm bg-[var(--surface)] border border-[var(--border)] rounded px-2 py-2 sm:py-1 text-[var(--text)] outline-none focus:border-[var(--accent)]"
               >
                 {(["asc", "desc"] as SortDirection[]).map((d) => (
                   <option key={d} value={d}>{DIRECTION_LABELS[d]}</option>
                 ))}
               </select>
+              {/* Marge négative VERTICALE seulement : elle agrandit la cible sans
+                  déborder sur le sélecteur voisin — un chevauchement au doigt
+                  supprimerait le tri qu'on voulait modifier. */}
               <button
                 onClick={() => handleRemove(i)}
-                className="shrink-0 text-[var(--text-muted)] hover:text-red-500 transition-colors"
+                className="shrink-0 text-[var(--text-muted)] hover:text-red-500 transition-colors p-2 -my-2 md:p-0 md:my-0"
               >
                 <X size={14} />
               </button>
@@ -117,7 +122,7 @@ export default function SortControls({ view, properties, databaseId }: Props) {
             <button
               onClick={handleAddSort}
               disabled={properties.length === 0}
-              className="text-sm text-[var(--accent)] hover:opacity-80 transition-opacity disabled:opacity-40"
+              className="text-sm text-[var(--accent)] hover:opacity-80 transition-opacity disabled:opacity-40 py-2 -my-2 md:py-0 md:my-0"
             >
               + Ajouter un tri
             </button>

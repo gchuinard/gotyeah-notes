@@ -167,7 +167,7 @@ test("le dialogue est utilisable depuis l'icône Supprimer d'une carte kanban (s
   // Icône Supprimer DIRECTE de la carte (le menu ⋯ a été remplacé par 2 icônes).
   // Scopé à la colonne : la corbeille sidebar et l'onglet de vue portent des
   // libellés proches.
-  const column = page.locator("div.w-64").filter({ hasText: "Alpha" });
+  const column = page.locator("[data-kanban-column]").filter({ hasText: "Alpha" });
   await card.hover();
   await column.getByLabel("Supprimer").click();
 

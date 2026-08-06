@@ -138,18 +138,18 @@ function RevisionHistory({
     (field !== "title" && !properties.some((p) => p.id === field));
 
   if (isLoading) {
-    return <p className="px-6 py-4 text-sm text-[var(--text-muted)]">Chargement…</p>;
+    return <p className="px-4 md:px-6 py-4 text-sm text-[var(--text-muted)]">Chargement…</p>;
   }
   if (!revisions || revisions.length === 0) {
     return (
-      <p className="px-6 py-4 text-sm text-[var(--text-muted)]">
+      <p className="px-4 md:px-6 py-4 text-sm text-[var(--text-muted)]">
         Aucune modification enregistrée pour l’instant.
       </p>
     );
   }
 
   return (
-    <ul className="px-6 py-3 flex flex-col gap-3">
+    <ul className="px-4 md:px-6 py-3 flex flex-col gap-3">
       {revisions.map((rev) => (
         <li key={rev.id} className="flex flex-col gap-0.5 text-sm">
           <div className="flex items-baseline justify-between gap-2">
@@ -443,7 +443,7 @@ export default function RecordPanel({
             window.localStorage.removeItem("recordPanel:width");
           }}
           style={{ right: panelWidth }}
-          className="fixed top-0 bottom-0 w-1 z-[51] cursor-ew-resize hover:bg-[var(--accent)] transition-colors"
+          className="hidden md:block fixed top-0 bottom-0 w-1 z-[51] cursor-ew-resize hover:bg-[var(--accent)] transition-colors"
           title="Glisser pour redimensionner · double-clic pour réinitialiser"
         />
       )}
@@ -451,14 +451,17 @@ export default function RecordPanel({
       <div
         style={{ width: panelWidth }}
         className={[
-          "fixed right-0 top-0 bottom-0 max-w-full z-50",
+          // `min-w-full` l'emporte sur le `width` inline (min-width gagne toujours sur
+          // width) : le panneau est plein écran sous md sans dupliquer l'état de largeur,
+          // qui reste celui du desktop. `h-dvh` évite que le bas passe sous la barre d'URL.
+          "fixed right-0 top-0 bottom-0 h-dvh md:h-auto min-w-full md:min-w-0 max-w-full z-50",
           "bg-[var(--bg)] shadow-2xl overflow-y-auto flex flex-col",
           "transition-transform duration-200",
           visible ? "translate-x-0" : "translate-x-full",
         ].join(" ")}
       >
         {/* Header */}
-        <div className="flex items-start justify-between px-6 pt-5 pb-2 shrink-0">
+        <div className="flex items-start justify-between px-4 md:px-6 pt-5 pb-2 shrink-0">
           <div className="flex-1 min-w-0 mr-3">
             {isEditingTitle ? (
               <input
@@ -498,7 +501,7 @@ export default function RecordPanel({
               <button
                 onClick={() => setTplMenuOpen((o) => !o)}
                 title="Modèle de cette carte"
-                className="flex items-center gap-1 px-2 py-1.5 text-sm text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] rounded transition-colors"
+                className="flex items-center justify-center gap-1 min-h-11 min-w-11 md:min-h-0 md:min-w-0 px-2 py-1.5 text-sm text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] rounded transition-colors"
               >
                 <LayoutTemplate size={15} />
                 <ChevronDown size={13} />
@@ -532,9 +535,11 @@ export default function RecordPanel({
               )}
             </div>
             )}
+            {/* Seule sortie du panneau quand il est plein écran : cible ~44px sous md. */}
             <button
               onClick={handleClose}
-              className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] rounded transition-colors"
+              aria-label="Fermer"
+              className="flex items-center justify-center h-11 w-11 md:block md:h-auto md:w-auto p-1.5 text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] rounded transition-colors"
             >
               <X size={18} />
             </button>
@@ -542,7 +547,7 @@ export default function RecordPanel({
         </div>
 
         {/* Onglets : Contenu / Historique */}
-        <div className="flex items-center gap-4 px-6 border-b border-[var(--border)] shrink-0">
+        <div className="flex items-center gap-4 px-4 md:px-6 border-b border-[var(--border)] shrink-0">
           {([
             { key: "content", label: "Contenu", icon: null },
             { key: "history", label: "Historique", icon: <History size={14} /> },
@@ -551,7 +556,7 @@ export default function RecordPanel({
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
               className={[
-                "flex items-center gap-1.5 py-2 -mb-px border-b-2 text-sm transition-colors",
+                "flex items-center gap-1.5 py-3 md:py-2 -mb-px border-b-2 text-sm transition-colors",
                 activeTab === tab.key
                   ? "border-[var(--accent)] text-[var(--text)]"
                   : "border-transparent text-[var(--text-muted)] hover:text-[var(--text)]",
@@ -568,7 +573,7 @@ export default function RecordPanel({
         <div className={activeTab === "content" ? "flex flex-col flex-1 min-h-0" : "hidden"}>
           {/* Properties */}
           {visibleProps.length > 0 && (
-            <div className="px-6 py-1 pt-3 shrink-0 grid grid-cols-[minmax(5.5rem,max-content)_minmax(0,1fr)] gap-x-3">
+            <div className="px-4 md:px-6 py-1 pt-3 shrink-0 grid grid-cols-[minmax(5.5rem,max-content)_minmax(0,1fr)] gap-x-3">
               {visibleProps.map((property) => (
                 <Fragment key={property.id}>
                   <div className="flex items-center gap-2 max-w-[11rem] py-1.5 min-h-[36px] text-sm text-[var(--text-muted)]">
@@ -593,10 +598,12 @@ export default function RecordPanel({
             </div>
           )}
 
-          <div className="border-t border-[var(--border)] mx-6 my-3 shrink-0" />
+          <div className="border-t border-[var(--border)] mx-4 md:mx-6 my-3 shrink-0" />
 
-          {/* Corps : sectionné (libellés fixes) ou libre */}
-          <div className="flex-1 px-2 min-h-[200px]">
+          {/* Corps : sectionné (libellés fixes) ou libre.
+              La CSS de BlockNote impose `padding-inline: 54px` en dur sur `.bn-editor`
+              sans aucune media query : 108px de gouttière mangés sur un écran de 375px. */}
+          <div className="flex-1 px-2 min-h-[200px] [&_.bn-editor]:px-3 md:[&_.bn-editor]:px-[54px]">
             {isSectioned ? (
               sections.map((section) => (
                 <SectionEditor

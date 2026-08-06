@@ -10,7 +10,8 @@ import { useEffect, useRef, useState } from "react";
 import {
   DndContext,
   DragEndEvent,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   closestCenter,
   useSensor,
   useSensors,
@@ -38,7 +39,16 @@ const SIDEBAR_MIN_WIDTH = 180;
 const SIDEBAR_MAX_WIDTH = 520;
 const SIDEBAR_WIDTH_KEY = "sidebar:width";
 
-export default function Sidebar({ user }: { user: SessionUser }) {
+export default function Sidebar({
+  user,
+  open = true,
+  onClose,
+}: {
+  user: SessionUser;
+  /** Tiroir mobile (état détenu par AppShell). Défaut ouvert : le desktop ignore ces props. */
+  open?: boolean;
+  onClose?: () => void;
+}) {
   const { activeWorkspace, isViewer } = useWorkspace();
   const workspaceId = activeWorkspace?.id ?? null;
 
@@ -54,10 +64,6 @@ export default function Sidebar({ user }: { user: SessionUser }) {
   const params = useParams<{ id?: string }>();
 
   const tree = buildTree(pages);
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
-  );
 
   const createPage = async (parentId: string | null = null, sectionId: string | null = null) => {
     if (!workspaceId) return;
@@ -196,11 +202,28 @@ export default function Sidebar({ user }: { user: SessionUser }) {
     window.addEventListener("pointerup", onUp);
   };
 
+  // Le tiroir mobile recouvre la page : sans ça, ouvrir une page laisserait la sidebar
+  // par-dessus le contenu qu'on vient justement de demander.
+  const closeAfterNavigation = (e: React.MouseEvent) => {
+    if ((e.target as Element).closest("a")) onClose?.();
+  };
+
   return (
     <>
     <aside
       style={{ width: sidebarWidth }}
-      className="bg-[var(--surface)] h-screen shrink-0 overflow-y-auto p-2 text-sm flex flex-col"
+      onClick={closeAfterNavigation}
+      // `max-w-[85vw]` : la largeur est persistée en localStorage (jusqu'à 520 px) et
+      // recouvrirait tout l'écran du téléphone — il faut garder une zone à toucher pour sortir.
+      // Les deux états sont explicites et dans la MÊME unité (`0%` ↔ `-100%`)
+      // plutôt qu'une classe simplement absente à l'ouverture. En Tailwind v4
+      // ces utilitaires écrivent la propriété CSS `translate` : laisser l'état
+      // ouvert sans classe ferait interpoler vers `none`, et `translate-x-0`
+      // vaudrait `0px` face à un `-100%`. Deux pourcentages garantissent une
+      // interpolation homogène, donc un glissement propre.
+      className={`bg-[var(--surface)] h-dvh shrink-0 overflow-y-auto p-2 text-sm flex flex-col fixed inset-y-0 left-0 z-50 max-w-[85vw] border-r border-[var(--border)] shadow-xl transition-transform md:static md:max-w-none md:border-r-0 md:shadow-none md:translate-x-[0%] ${
+        open ? "translate-x-[0%]" : "-translate-x-full"
+      }`}
     >
       <WorkspaceSelector />
 
@@ -208,7 +231,7 @@ export default function Sidebar({ user }: { user: SessionUser }) {
       <div className="flex flex-col gap-0.5 mb-2">
         <Link
           href="/"
-          className={`flex items-center gap-2 px-2 py-1.5 rounded hover:bg-[var(--surface-hover)] text-[var(--text-muted)] ${
+          className={`flex items-center gap-2 px-2 py-2.5 md:py-1.5 rounded hover:bg-[var(--surface-hover)] text-[var(--text-muted)] ${
             !params?.id ? "bg-[var(--surface-active)]" : ""
           }`}
         >
@@ -221,7 +244,7 @@ export default function Sidebar({ user }: { user: SessionUser }) {
             onClick={() => setDbMenuOpen((o) => !o)}
             disabled={creatingDb || !workspaceId}
             title="Crée une database prête à l'emploi à partir d'un modèle"
-            className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-[var(--surface-hover)] text-[var(--text-muted)] disabled:opacity-50 text-left"
+            className="w-full flex items-center gap-2 px-2 py-2.5 md:py-1.5 rounded hover:bg-[var(--surface-hover)] text-[var(--text-muted)] disabled:opacity-50 text-left"
           >
             <LayoutTemplate size={14} />
             <span className="flex-1">{creatingDb ? "Création…" : "Nouvelle database"}</span>
@@ -235,7 +258,7 @@ export default function Sidebar({ user }: { user: SessionUser }) {
                   <button
                     key={t.id}
                     onClick={() => createDatabaseFromTemplate(t.id, t.name)}
-                    className="w-full text-left px-3 py-1.5 hover:bg-[var(--surface-hover)] text-[var(--text)]"
+                    className="w-full text-left px-3 py-2.5 md:py-1.5 hover:bg-[var(--surface-hover)] text-[var(--text)]"
                   >
                     {t.name}
                     {t.builtin && <span className="ml-1 text-xs text-[var(--text-muted)]">(fourni)</span>}
@@ -245,7 +268,7 @@ export default function Sidebar({ user }: { user: SessionUser }) {
                 <Link
                   href="/templates"
                   onClick={() => setDbMenuOpen(false)}
-                  className="block px-3 py-1.5 hover:bg-[var(--surface-hover)] text-[var(--text-muted)]"
+                  className="block px-3 py-2.5 md:py-1.5 hover:bg-[var(--surface-hover)] text-[var(--text-muted)]"
                 >
                   Gérer les modèles…
                 </Link>
@@ -267,7 +290,7 @@ export default function Sidebar({ user }: { user: SessionUser }) {
             <Link
               key={page.id}
               href={`/pages/${page.id}`}
-              className={`flex items-center gap-1.5 px-2 py-1 rounded hover:bg-[var(--surface-hover)] text-[var(--text-muted)] truncate ${
+              className={`flex items-center gap-1.5 px-2 py-2 md:py-1 rounded hover:bg-[var(--surface-hover)] text-[var(--text-muted)] truncate ${
                 params?.id === page.id ? "bg-[var(--surface-active)]" : ""
               }`}
             >
@@ -326,7 +349,7 @@ export default function Sidebar({ user }: { user: SessionUser }) {
           </span>
           <Link
             href="/settings"
-            className="p-1 hover:bg-[var(--surface-hover)] rounded"
+            className="p-2 md:p-1 hover:bg-[var(--surface-hover)] rounded"
             title="Paramètres"
           >
             <Settings size={13} className="text-[var(--text-muted)]" />
@@ -336,7 +359,7 @@ export default function Sidebar({ user }: { user: SessionUser }) {
               await fetch("/api/auth/logout", { method: "POST" });
               window.location.href = "/login";
             }}
-            className="p-1 hover:bg-[var(--surface-hover)] rounded"
+            className="p-2 md:p-1 hover:bg-[var(--surface-hover)] rounded"
             title="Se déconnecter"
           >
             <LogOut size={13} className="text-[var(--text-muted)]" />
@@ -351,7 +374,8 @@ export default function Sidebar({ user }: { user: SessionUser }) {
         setSidebarWidth(SIDEBAR_DEFAULT_WIDTH);
         window.localStorage.removeItem(SIDEBAR_WIDTH_KEY);
       }}
-      className="w-1 shrink-0 h-screen bg-[var(--border)] hover:bg-[var(--accent)] cursor-ew-resize transition-colors"
+      // 4 px sont insaisissables au doigt, et cette poignée volerait 4 px de largeur utile.
+      className="hidden md:block w-1 shrink-0 h-dvh bg-[var(--border)] hover:bg-[var(--accent)] cursor-ew-resize transition-colors"
       title="Glisser pour redimensionner · double-clic pour réinitialiser"
     />
     </>
@@ -381,8 +405,12 @@ function SectionBlock({
   onDragEnd: (event: DragEndEvent) => void;
   readOnly?: boolean;
 }) {
+  // Un PointerSensor unique ne s'arme quasiment jamais au doigt : le navigateur revendique
+  // le geste pour le scroll et émet `pointercancel`. Le `delay` du TouchSensor distingue
+  // l'appui long (= déplacer) du glissement (= faire défiler la sidebar).
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
+    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 6 } })
   );
   const rootIds = tree.map((n) => n.id);
 
@@ -406,9 +434,11 @@ function SectionBlock({
         {icon}
         <span className="flex-1 truncate">{section.name}</span>
         {!readOnly && (
+          // Visible d'office au tactile (il n'y a pas de survol), rendu au survol sur desktop.
+          // `pointer-events` suit l'opacité : un bouton invisible reste cliquable sinon.
           <button
             onClick={() => onCreate(null, section.id)}
-            className="opacity-0 group-hover:opacity-100 p-0.5 rounded cursor-pointer text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] transition-colors"
+            className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-2 md:p-0.5 rounded cursor-pointer text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] transition-colors"
             title="Nouvelle page"
           >
             <Plus size={11} />
@@ -435,7 +465,7 @@ function SectionBlock({
       {tree.length === 0 && !readOnly && (
         <button
           onClick={() => onCreate(null, section.id)}
-          className="w-full flex items-center gap-2 px-3 py-1 rounded cursor-pointer hover:bg-[var(--surface-hover)] text-[var(--text-muted)] hover:text-[var(--text)] text-xs transition-colors"
+          className="w-full flex items-center gap-2 px-3 py-2.5 md:py-1 rounded cursor-pointer hover:bg-[var(--surface-hover)] text-[var(--text-muted)] hover:text-[var(--text)] text-xs transition-colors"
         >
           <Plus size={11} /> Nouvelle page
         </button>
@@ -524,7 +554,7 @@ function TreeItem({
       <div
         {...attributes}
         {...listeners}
-        className={`group flex items-center gap-1 px-1 py-1 rounded hover:bg-[var(--surface-hover)] ${
+        className={`group flex items-center gap-1 px-1 py-2 md:py-1 rounded hover:bg-[var(--surface-hover)] ${
           isDragging ? "cursor-grabbing" : ""
         } ${currentId === node.id ? "bg-[var(--surface-active)]" : ""}`}
         style={{ paddingLeft: 8 + depth * 12 }}
@@ -538,7 +568,7 @@ function TreeItem({
             }}
             onMouseDown={(e) => { if (e.shiftKey) e.preventDefault(); }}
             title="Maj+clic : replier/déplier toute la branche"
-            className="w-4 shrink-0 flex items-center justify-center select-none text-[var(--text-muted)]"
+            className="w-7 md:w-4 py-2 md:py-0 shrink-0 flex items-center justify-center select-none text-[var(--text-muted)]"
           >
             <ChevronRight
               size={12}
@@ -546,7 +576,7 @@ function TreeItem({
             />
           </button>
         ) : (
-          <span className="w-4 shrink-0" />
+          <span className="w-7 md:w-4 shrink-0" />
         )}
 
         {editing ? (
@@ -559,7 +589,8 @@ function TreeItem({
               if (e.key === "Enter") commitRename();
               if (e.key === "Escape") setEditing(false);
             }}
-            className="flex-1 bg-[var(--bg)] text-[var(--text)] border border-blue-400 rounded px-1 text-sm outline-none min-w-0"
+            // text-base sous sm : iOS Safari zoome sur tout champ < 16 px et ne dézoome pas au blur.
+            className="flex-1 bg-[var(--bg)] text-[var(--text)] border border-blue-400 rounded px-1 text-base sm:text-sm outline-none min-w-0"
             onClick={(e) => e.preventDefault()}
           />
         ) : (
@@ -585,14 +616,14 @@ function TreeItem({
                 e.stopPropagation();
                 onCreate(node.id, null);
               }}
-              className="opacity-0 group-hover:opacity-100 p-0.5 rounded cursor-pointer text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] transition-colors"
+              className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-2 md:p-0.5 rounded cursor-pointer text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] transition-colors"
               title="Ajouter une sous-page"
             >
               <Plus size={12} />
             </button>
             <button
               onClick={onDelete}
-              className="opacity-0 group-hover:opacity-100 p-0.5 rounded cursor-pointer text-[var(--text-muted)] hover:bg-red-500/15 hover:text-red-500 transition-colors"
+              className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-2 md:p-0.5 rounded cursor-pointer text-[var(--text-muted)] hover:bg-red-500/15 hover:text-red-500 transition-colors"
               title="Supprimer"
             >
               <Trash2 size={12} />

@@ -66,7 +66,7 @@ export default function WorkspaceSelector() {
     <div ref={containerRef} className="relative px-2 py-2">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center justify-between gap-1 px-2 py-1.5 rounded hover:bg-[var(--surface-hover)] font-semibold text-[var(--text)] text-base"
+        className="w-full flex items-center justify-between gap-1 px-2 py-2.5 md:py-1.5 rounded hover:bg-[var(--surface-hover)] font-semibold text-[var(--text)] text-base"
       >
         <span className="truncate">{activeWorkspace?.name ?? "—"}</span>
         {/* Signal UX : évite de prendre les boutons masqués pour un bug. */}
@@ -78,12 +78,15 @@ export default function WorkspaceSelector() {
         <ChevronDown size={14} className="shrink-0 text-[var(--text-muted)]" />
       </button>
 
+      {/* Largeur calée sur la sidebar (left/right) : l'aside est `overflow-y-auto`, donc
+          clippant horizontalement — un menu plus large que le tiroir serait coupé.
+          Le plafond de hauteur évite qu'une longue liste sorte de l'écran du téléphone. */}
       {open && (
-        <div className="absolute left-2 right-2 top-full mt-1 bg-[var(--bg)] border border-[var(--border)] rounded-lg shadow-lg z-50 py-1">
+        <div className="absolute left-2 right-2 top-full mt-1 bg-[var(--bg)] border border-[var(--border)] rounded-lg shadow-lg z-50 py-1 max-h-[60vh] overflow-y-auto md:max-h-none md:overflow-visible">
           {workspaces.map((ws) => (
             <div
               key={ws.id}
-              className="group flex items-center gap-2 px-3 py-1.5 hover:bg-[var(--surface-hover)] cursor-pointer"
+              className="group flex items-center gap-2 px-3 py-3 md:py-1.5 hover:bg-[var(--surface-hover)] cursor-pointer"
               onClick={() => {
                 switchWorkspace(ws.id);
                 setOpen(false);
@@ -101,7 +104,7 @@ export default function WorkspaceSelector() {
                     e.stopPropagation();
                     deleteWorkspace(ws);
                   }}
-                  className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[var(--surface-hover)] rounded"
+                  className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-2 md:p-0.5 hover:bg-[var(--surface-hover)] rounded"
                   title="Supprimer l'espace"
                 >
                   <Trash2 size={12} className="text-[var(--text-muted)]" />
@@ -125,7 +128,8 @@ export default function WorkspaceSelector() {
                     }
                   }}
                   placeholder="Nom de l'espace…"
-                  className="w-full bg-[var(--bg)] text-[var(--text)] border border-blue-400 rounded px-2 py-0.5 text-sm outline-none"
+                  // text-base sous sm : iOS Safari zoome sur tout champ < 16 px et ne dézoome pas au blur.
+                  className="w-full bg-[var(--bg)] text-[var(--text)] border border-blue-400 rounded px-2 py-2 md:py-0.5 text-base sm:text-sm outline-none"
                 />
               </div>
             ) : (
@@ -134,7 +138,7 @@ export default function WorkspaceSelector() {
                   e.stopPropagation();
                   setCreating(true);
                 }}
-                className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-[var(--surface-hover)] text-[var(--text-muted)] text-sm"
+                className="w-full flex items-center gap-2 px-3 py-3 md:py-1.5 hover:bg-[var(--surface-hover)] text-[var(--text-muted)] text-sm"
               >
                 <Plus size={12} />
                 Nouvel espace

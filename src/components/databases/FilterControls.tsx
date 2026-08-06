@@ -74,6 +74,13 @@ const OPS_USER: OpDef[] = [
 
 const NO_VALUE_OPS = new Set<FilterOperator>(["isEmpty", "isNotEmpty"]);
 
+/** Classes communes aux champs du panneau.
+ *  ⚠️ `text-base` sous `sm` : iOS Safari zoome sur tout champ dont la police fait
+ *  moins de 16px, et ne dézoome PAS au blur — la page reste agrandie ensuite. */
+const FIELD_CLASS =
+  "text-base sm:text-sm bg-[var(--surface)] border border-[var(--border)] rounded px-2 py-2 sm:py-1 text-[var(--text)] outline-none focus:border-[var(--accent)]";
+const GROW_FIELD_CLASS = `flex-1 min-w-0 ${FIELD_CLASS}`;
+
 function opsForType(type: PropertyType): OpDef[] {
   switch (type) {
     case "number":      return OPS_NUMBER;
@@ -135,7 +142,7 @@ function FilterValueInput({
         <select
           value={value === true ? "true" : "false"}
           onChange={(e) => onChange(e.target.value === "true")}
-          className="text-sm bg-[var(--surface)] border border-[var(--border)] rounded px-2 py-1 text-[var(--text)] outline-none focus:border-[var(--accent)]"
+          className={FIELD_CLASS}
         >
           <option value="true">Coché</option>
           <option value="false">Non coché</option>
@@ -148,7 +155,7 @@ function FilterValueInput({
         <select
           value={value != null ? String(value) : ""}
           onChange={(e) => onChange(e.target.value || undefined)}
-          className="flex-1 min-w-0 text-sm bg-[var(--surface)] border border-[var(--border)] rounded px-2 py-1 text-[var(--text)] outline-none focus:border-[var(--accent)]"
+          className={GROW_FIELD_CLASS}
         >
           <option value="">— choisir —</option>
           {opts.map((o) => (
@@ -164,7 +171,7 @@ function FilterValueInput({
         <select
           value={value != null ? String(value) : ""}
           onChange={(e) => onChange(e.target.value || undefined)}
-          className="flex-1 min-w-0 text-sm bg-[var(--surface)] border border-[var(--border)] rounded px-2 py-1 text-[var(--text)] outline-none focus:border-[var(--accent)]"
+          className={GROW_FIELD_CLASS}
         >
           <option value="">— choisir —</option>
           {opts.map((o) => (
@@ -179,7 +186,7 @@ function FilterValueInput({
         <select
           value={value != null ? String(value) : ""}
           onChange={(e) => onChange(e.target.value || undefined)}
-          className="flex-1 min-w-0 text-sm bg-[var(--surface)] border border-[var(--border)] rounded px-2 py-1 text-[var(--text)] outline-none focus:border-[var(--accent)]"
+          className={GROW_FIELD_CLASS}
         >
           <option value="">— choisir —</option>
           {/* « Moi » stocke un JETON, pas un userId : le config de vue est partagé
@@ -198,7 +205,7 @@ function FilterValueInput({
           type="date"
           value={value != null ? String(value).slice(0, 10) : ""}
           onChange={(e) => onChange(e.target.value || undefined)}
-          className="flex-1 min-w-0 text-sm bg-[var(--surface)] border border-[var(--border)] rounded px-2 py-1 text-[var(--text)] outline-none focus:border-[var(--accent)]"
+          className={GROW_FIELD_CLASS}
         />
       );
 
@@ -215,7 +222,7 @@ function FilterValueInput({
           onKeyDown={(e) => {
             if (e.key === "Enter") (e.target as HTMLInputElement).blur();
           }}
-          className="flex-1 min-w-0 text-sm bg-[var(--surface)] border border-[var(--border)] rounded px-2 py-1 text-[var(--text)] outline-none focus:border-[var(--accent)]"
+          className={GROW_FIELD_CLASS}
           placeholder="Valeur"
         />
       );
@@ -230,7 +237,7 @@ function FilterValueInput({
           onKeyDown={(e) => {
             if (e.key === "Enter") (e.target as HTMLInputElement).blur();
           }}
-          className="flex-1 min-w-0 text-sm bg-[var(--surface)] border border-[var(--border)] rounded px-2 py-1 text-[var(--text)] outline-none focus:border-[var(--accent)]"
+          className={GROW_FIELD_CLASS}
           placeholder="Valeur"
         />
       );
@@ -309,7 +316,7 @@ export default function FilterControls({ view, properties, databaseId, workspace
         ref={btnRef}
         onClick={() => setOpen((v) => !v)}
         className={[
-          "flex items-center gap-1.5 px-2.5 py-1.5 text-sm rounded-md transition-colors",
+          "flex items-center gap-1.5 px-2.5 py-2.5 md:py-1.5 text-sm rounded-md transition-colors",
           filters.length > 0
             ? "bg-[var(--accent)]/10 text-[var(--accent)]"
             : "text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)]",
@@ -349,7 +356,7 @@ export default function FilterControls({ view, properties, databaseId, workspace
                 <select
                   value={filter.propertyId}
                   onChange={(e) => handleChangeProperty(i, e.target.value)}
-                  className="text-sm bg-[var(--surface)] border border-[var(--border)] rounded px-2 py-1 text-[var(--text)] outline-none focus:border-[var(--accent)]"
+                  className={FIELD_CLASS}
                 >
                   {properties.map((p) => (
                     <option key={p.id} value={p.id}>{p.name}</option>
@@ -360,7 +367,7 @@ export default function FilterControls({ view, properties, databaseId, workspace
                 <select
                   value={filter.operator}
                   onChange={(e) => handleChangeOperator(i, e.target.value as FilterOperator)}
-                  className="text-sm bg-[var(--surface)] border border-[var(--border)] rounded px-2 py-1 text-[var(--text)] outline-none focus:border-[var(--accent)]"
+                  className={FIELD_CLASS}
                 >
                   {ops.map((op) => (
                     <option key={op.value} value={op.value}>{op.label}</option>
@@ -376,9 +383,12 @@ export default function FilterControls({ view, properties, databaseId, workspace
                   workspaceId={workspaceId}
                 />
 
+                {/* Marge négative VERTICALE seulement : elle agrandit la cible sans
+                    déborder sur le champ voisin — un chevauchement au doigt
+                    supprimerait le filtre qu'on voulait modifier. */}
                 <button
                   onClick={() => handleRemove(i)}
-                  className="shrink-0 text-[var(--text-muted)] hover:text-red-500 transition-colors"
+                  className="shrink-0 text-[var(--text-muted)] hover:text-red-500 transition-colors p-2 -my-2 md:p-0 md:my-0"
                 >
                   <X size={14} />
                 </button>
@@ -390,7 +400,7 @@ export default function FilterControls({ view, properties, databaseId, workspace
             <button
               onClick={handleAdd}
               disabled={properties.length === 0}
-              className="text-sm text-[var(--accent)] hover:opacity-80 transition-opacity disabled:opacity-40"
+              className="text-sm text-[var(--accent)] hover:opacity-80 transition-opacity disabled:opacity-40 py-2 -my-2 md:py-0 md:my-0"
             >
               + Ajouter un filtre
             </button>

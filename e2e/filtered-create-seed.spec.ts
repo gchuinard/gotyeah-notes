@@ -33,7 +33,7 @@ async function mkSelect(page: Page, dbId: string, name: string, options: { id: s
   ).json();
 }
 
-const column = (page: Page, label: string) => page.locator("div.w-64").filter({ hasText: label });
+const column = (page: Page, label: string) => page.locator("[data-kanban-column]").filter({ hasText: label });
 const panelOpen = (page: Page) => page.getByTitle("Modèle de cette carte");
 
 const postRecordResp = (page: Page, dbId: string) =>
