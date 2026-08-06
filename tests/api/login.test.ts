@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from "vitest";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { POST as loginPOST } from "@/app/api/auth/login/route";
@@ -88,5 +88,62 @@ describe("POST /api/auth/register — inscription off par défaut", () => {
     expect(res.status).toBe(200);
     expect(await prisma.user.findUnique({ where: { email: e.trim().toLowerCase() } })).not.toBeNull();
     delete process.env.REGISTRATION;
+  });
+});
+
+describe("Claim d'invitation au login — l'inscription ouverte le neutralise", () => {
+  /** Compte + invitation admin en attente sur la même adresse. */
+  async function scenario(tag: string) {
+    const mail = `claim-${tag}-${Date.now()}@x.tld`;
+    const owner = await prisma.user.create({
+      data: { email: `owner-${tag}-${Date.now()}@x.tld`, firstName: "O", lastName: "W", displayName: "Own", passwordHash: "x" },
+    });
+    const ws = await prisma.workspace.create({ data: { name: "Espace", createdBy: owner.id } });
+    await prisma.membership.create({ data: { userId: owner.id, workspaceId: ws.id, role: "admin" } });
+    // La cible : un compte créé SANS aucune vérification d'adresse.
+    const user = await prisma.user.create({
+      data: { email: mail, firstName: "S", lastName: "Q", displayName: "Squat", passwordHash: await bcrypt.hash(PW, 12) },
+    });
+    await prisma.workspaceInvitation.create({
+      data: { workspaceId: ws.id, email: mail, role: "admin", invitedBy: owner.id },
+    });
+    return { mail, workspaceId: ws.id, userId: user.id };
+  }
+
+  const membershipOf = (userId: string, workspaceId: string) =>
+    prisma.membership.findUnique({ where: { userId_workspaceId: { userId, workspaceId } } });
+
+  // REGISTRATION pilote une garde de sécurité : le laisser modifié fuiterait sur
+  // les fichiers suivants, où « inscription ouverte » n'est pas l'hypothèse.
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("REGISTRATION=on : le login NE réclame PAS — sinon register contourne la garde", async () => {
+    // Le scénario d'attaque : POST /api/auth/register ne vérifie aucune adresse.
+    // Quiconque occupe l'email visé se crée le compte, puis se connecte. Si le
+    // login réclamait, l'invitation « admin » lui tomberait dessus — et la
+    // protection annoncée (« le claim n'est jamais branché sur register »)
+    // ne serait qu'un détour d'une requête.
+    vi.stubEnv("REGISTRATION", "on");
+    const s = await scenario("open");
+    const res = await loginPOST(loginReq(s.mail, PW));
+    expect(res.status).toBe(200);
+    expect(await membershipOf(s.userId, s.workspaceId)).toBeNull();
+    // L'invitation reste en attente : elle sera réclamée par le vrai
+    // propriétaire de l'adresse via l'IdP, qui lui vérifie l'email.
+    expect(
+      await prisma.workspaceInvitation.findFirst({ where: { email: s.mail } })
+    ).not.toBeNull();
+  });
+
+  it("REGISTRATION=off : le rattrapage fonctionne (comptes créés par un admin)", async () => {
+    // Inscription fermée = les comptes mot de passe viennent d'un admin ou d'un
+    // script : « le compte existe » redevient une information fiable.
+    vi.stubEnv("REGISTRATION", "off");
+    const s = await scenario("closed");
+    const res = await loginPOST(loginReq(s.mail, PW));
+    expect(res.status).toBe(200);
+    const m = await membershipOf(s.userId, s.workspaceId);
+    expect(m?.role).toBe("admin");
+    expect(await prisma.workspaceInvitation.findFirst({ where: { email: s.mail } })).toBeNull();
   });
 });

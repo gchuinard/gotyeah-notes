@@ -19,6 +19,10 @@ export default defineConfig({
       AUTH_SECRET: "vitest-secret-placeholder-0123456789-abcdef",
       // Pont MCP OFF par défaut dans les tests (aucune surface ajoutée).
       MCP_SHARED_SECRET: "",
+      // Envoi d'email OFF : sendEmail sort sur `disabled` AVANT tout fetch. Même
+      // un test qui oublierait de mocker le mailer ne peut donc pas appeler
+      // Brevo depuis la CI.
+      BREVO_API_KEY: "",
     },
   },
 });

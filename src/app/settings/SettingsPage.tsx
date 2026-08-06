@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import useSWR, { mutate as globalMutate } from "swr";
 import {
   ArrowLeft, User, Users, HardDrive, Palette,
-  Eye, EyeOff, Check, Trash2, UserPlus, Clock, X, Bot,
+  Eye, EyeOff, Check, Trash2, UserPlus, Clock, X, Bot, Send,
 } from "lucide-react";
 import type { SessionUser } from "@/lib/session";
 import { useWorkspace, type WorkspaceRole } from "@/contexts/WorkspaceContext";
@@ -253,6 +253,47 @@ const membersFetcher = (url: string) =>
     return r.json();
   });
 
+/** Doit rester aligné sur INVITATION_TTL_DAYS (lib/invitations.ts). */
+const INVITATION_TTL_DAYS = 7;
+
+/**
+ * « expire dans N jours ». Affiché parce qu'une invitation périmée est
+ * silencieuse : sans repère de temps, l'admin attend une connexion qui ne peut
+ * plus arriver, au lieu de cliquer « Renvoyer ».
+ */
+function expiryLabel(createdAt: string): string {
+  const end = new Date(createdAt).getTime() + INVITATION_TTL_DAYS * 86_400_000;
+  const days = Math.ceil((end - Date.now()) / 86_400_000);
+  if (days <= 0) return "expirée";
+  return days === 1 ? "expire demain" : `expire dans ${days} j`;
+}
+
+/**
+ * Retour d'envoi : l'écriture a RÉUSSI, seul le mail peut avoir échoué.
+ *
+ * Le `status` compte autant que `emailSent` : un compte existant devient membre
+ * sur-le-champ et n'apparaît jamais dans « En attente », donc lui parler
+ * d'« invitation » et le renvoyer vers un bouton « Renvoyer » qu'il ne verra pas
+ * serait doublement faux.
+ */
+function mailNotice(
+  body: { emailSent?: boolean; emailReason?: string; status?: string },
+  to: string
+): string {
+  const acquis = body.status === "member" ? `${to} a rejoint l'espace` : "Invitation enregistrée";
+  if (body.emailSent) return `${acquis}. Email envoyé.`;
+  if (body.emailReason === "disabled") {
+    return `${acquis}. L'envoi d'email n'est pas configuré sur cette instance : préviens ${to} toi-même.`;
+  }
+  // « http » = Brevo a refusé (expéditeur non vérifié, clé invalide…). Réessayer
+  // à l'identique redonnera la même erreur : ne promettons pas le contraire.
+  const suite =
+    body.emailReason === "http"
+      ? "Brevo a refusé l'envoi (expéditeur ou clé à vérifier) — préviens la personne toi-même en attendant."
+      : "l'email n'est pas parti (réseau). Tu peux réessayer.";
+  return `${acquis}, mais ${suite}`;
+}
+
 /** Membres de l'ESPACE ACTIF : liste, ajout par email (compte existant), rôle, retrait. */
 function MembersSection({ user }: { user: SessionUser }) {
   const { activeWorkspace, isAdmin } = useWorkspace();
@@ -272,6 +313,9 @@ function MembersSection({ user }: { user: SessionUser }) {
   const [role, setRole]     = useState<WorkspaceRole>("viewer");
   const [adding, setAdding] = useState(false);
   const [error, setError]   = useState<string | null>(null);
+  // Distinct de `error` : l'invitation a RÉUSSI, c'est l'email qui peut manquer.
+  const [notice, setNotice] = useState<string | null>(null);
+  const [resending, setResending] = useState<string | null>(null);
 
   // Se retirer / se rétrograder soi-même change son propre rôle → resynchroniser
   // la liste des workspaces (badge lecture seule, entrées de nav, etc.).
@@ -281,6 +325,10 @@ function MembersSection({ user }: { user: SessionUser }) {
 
   const revokeInvitation = async (inv: Invitation) => {
     if (!wsId) return;
+    // Le message de la dernière invitation décrit une ligne qu'on s'apprête à
+    // supprimer : le laisser affiché après coup, c'est afficher une confirmation
+    // pour quelque chose qui n'existe plus.
+    setNotice(null);
     const ok = await confirm({
       title: "Annuler l'invitation",
       message: `${inv.email} ne rejoindra pas cet espace. Tu pourras la réinviter plus tard.`,
@@ -294,6 +342,37 @@ function MembersSection({ user }: { user: SessionUser }) {
       return;
     }
     mutateInvitations();
+  };
+
+  /**
+   * Renvoyer = RÉ-INVITER. Aucune route dédiée : POST /members fait déjà un
+   * upsert sur (workspace, email), qui rafraîchit la date d'émission — donc
+   * prolonge les 7 jours — et repart l'email. Une route « resend » n'aurait rien
+   * ajouté qu'une entrée de plus à déclarer dans le méta-test des gates.
+   */
+  const resendInvitation = async (inv: Invitation) => {
+    if (!wsId || resending) return;
+    setResending(inv.id);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await fetch(`/api/workspaces/${wsId}/members`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: inv.email, role: inv.role }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError((body as { error?: string }).error ?? `Erreur ${res.status}`);
+        return;
+      }
+      setNotice(mailNotice(body as { emailSent?: boolean }, inv.email));
+      mutateInvitations();
+    } catch {
+      setError("Impossible de renvoyer l'invitation.");
+    } finally {
+      setResending(null);
+    }
   };
 
   const addMember = async (e: React.FormEvent) => {
@@ -315,6 +394,7 @@ function MembersSection({ user }: { user: SessionUser }) {
       }
       setEmail("");
       setRole("viewer");
+      setNotice(mailNotice(body as { emailSent?: boolean }, trimmed));
       // 201 = pas encore de compte : la personne apparaît dans « invitations en
       // attente », pas dans les membres. On rafraîchit les deux listes plutôt que
       // de deviner laquelle a bougé.
@@ -330,6 +410,7 @@ function MembersSection({ user }: { user: SessionUser }) {
   const changeRole = async (m: Member, newRole: WorkspaceRole) => {
     if (!wsId || newRole === m.role) return;
     setError(null);
+    setNotice(null);
     const res = await fetch(`/api/workspaces/${wsId}/members/${m.userId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -356,6 +437,7 @@ function MembersSection({ user }: { user: SessionUser }) {
     });
     if (!ok) return;
     setError(null);
+    setNotice(null);
     const res = await fetch(`/api/workspaces/${wsId}/members/${m.userId}`, { method: "DELETE" });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
@@ -389,7 +471,7 @@ function MembersSection({ user }: { user: SessionUser }) {
               <input
                 type="email"
                 value={email}
-                onChange={(e) => { setEmail(e.target.value); setError(null); }}
+                onChange={(e) => { setEmail(e.target.value); setError(null); setNotice(null); }}
                 placeholder="email@exemple.fr"
                 className={fieldClass}
               />
@@ -417,8 +499,10 @@ function MembersSection({ user }: { user: SessionUser }) {
           </form>
           <p className="text-xs text-[var(--text-muted)] mb-4">
             Si la personne a déjà un compte, elle rejoint l&apos;espace tout de suite. Sinon
-            son rôle est réservé et s&apos;appliquera à sa première connexion — préviens-la,
-            aucun email n&apos;est envoyé. Lecteur par défaut : élève son rôle si besoin.
+            son accès est réservé et s&apos;ouvrira à sa première connexion, dans un délai de{" "}
+            {INVITATION_TTL_DAYS} jours — passé ce délai, renvoie l&apos;invitation. Un email
+            est envoyé si l&apos;instance est configurée pour ; le message qui suit
+            l&apos;ajout te dira ce qu&apos;il en est. Lecteur par défaut : élève son rôle si besoin.
           </p>
         </>
       )}
@@ -437,8 +521,17 @@ function MembersSection({ user }: { user: SessionUser }) {
                   <p className="text-xs text-[var(--text-muted)] truncate">
                     {ROLE_OPTIONS.find((r) => r.id === inv.role)?.label ?? inv.role}
                     {inv.invitedByName ? ` · invité par ${inv.invitedByName}` : ""}
+                    {` · ${expiryLabel(inv.createdAt)}`}
                   </p>
                 </div>
+                <button
+                  onClick={() => resendInvitation(inv)}
+                  disabled={resending !== null}
+                  title="Renvoyer l'email d'invitation"
+                  className="shrink-0 p-1.5 rounded-md text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] transition-colors disabled:opacity-40"
+                >
+                  <Send size={14} />
+                </button>
                 <button
                   onClick={() => revokeInvitation(inv)}
                   title="Annuler l'invitation"
@@ -453,6 +546,7 @@ function MembersSection({ user }: { user: SessionUser }) {
       )}
 
       {error && <p className="text-xs text-red-500 mb-3">{error}</p>}
+      {notice && <p className="text-xs text-[var(--text-muted)] mb-3">{notice}</p>}
 
       <div className="flex flex-col divide-y divide-[var(--border)] border border-[var(--border)] rounded-lg">
         {(members ?? []).map((m) => (

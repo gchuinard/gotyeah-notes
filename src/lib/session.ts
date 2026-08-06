@@ -58,7 +58,7 @@ async function userFromSessionToken(token: string): Promise<SessionUser | null> 
 
 /**
  * Appel de confiance du serveur MCP (pont OIDC). Le MCP distant, déjà authentifié
- * par l'IdP Pocket ID, agit au nom d'un utilisateur via deux en-têtes :
+ * par l'IdP Keycloak, agit au nom d'un utilisateur via deux en-têtes :
  *   X-MCP-Secret    secret partagé (== MCP_SHARED_SECRET), comparé en temps constant
  *   X-Act-As-Email  email vérifié par l'IdP → mappé sur un User EXISTANT (sinon null)
  * Entièrement désactivé tant que MCP_SHARED_SECRET n'est pas défini → aucune surface

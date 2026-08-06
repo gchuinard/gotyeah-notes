@@ -40,9 +40,10 @@ npm run test:e2e  # tests end-to-end (Playwright)
   sur une DB jetable **hors du dossier projet** (le cookie de session n'est `secure`
   qu'en production ; en dev il circule sur `http://localhost`).
 - **CI** : `.github/workflows/ci.yml` exécute `build`, `test` (Vitest) et `e2e`
-  (Playwright). Un test rouge bloque la CI (condition DoD). ⚠️ Au *push*, la CI ne tourne
-  que sur `main` et `feat/**` ; sur les autres branches (`fix/**`, `docs/**`…) elle ne
-  s'exécute qu'à l'ouverture de la **PR**.
+  (Playwright). Un test rouge bloque la CI (condition DoD). Au *push*, elle tourne sur
+  `main`, `feat/**`, `fix/**`, `docs/**` et `chore/**` (depuis la PR #39) ; l'événement
+  `pull_request` n'a aucun filtre et couvre donc **toutes** les branches. ⚠️ Une branche
+  nommée hors de ces préfixes ne déclenche rien au push : sa CI n'arrive qu'à la PR.
 
 ## Configuration
 
@@ -170,6 +171,6 @@ pris avant chaque MEP (ci-dessus) — qui ne survit pas à la perte du Pi.
 ## Intégration MCP
 
 Les outils MCP `notes_*` (gérer pages, sections, databases, records, modèles… depuis Claude) sont
-**greffés sur le serveur MCP distant Sonar** et réutilisent son auth OIDC (Pocket ID) — pas de serveur séparé.
+**greffés sur le serveur MCP distant Sonar** et réutilisent son auth OIDC (Keycloak) — pas de serveur séparé.
 L'API accepte un appel de confiance du MCP (`X-MCP-Secret` + `X-Act-As-Email`), désactivé tant
 que `MCP_SHARED_SECRET` est vide. Détails, outils et roadmap : voir `CLAUDE.md`.

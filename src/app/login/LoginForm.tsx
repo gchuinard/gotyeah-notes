@@ -8,7 +8,10 @@ function ssoErrorMessage(code: string): string {
     case "provider":
       return "Connexion via GotYeah refusée ou annulée.";
     case "nosignup":
-      return "Aucun compte n'est associé à cet identifiant.";
+      // L'identité est bonne (l'IdP a authentifié) — c'est l'accès à CETTE
+      // application qui manque. Dire « aucun compte » enverrait chercher un
+      // problème de connexion là où il faut demander une invitation.
+      return "Cette adresse n'est pas encore invitée sur GotYeah Notes. Demande à un administrateur de t'ajouter à un espace.";
     case "unverified":
       return "Adresse email non vérifiée côté fournisseur d'identité.";
     case "noemail":
