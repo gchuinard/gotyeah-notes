@@ -268,13 +268,30 @@ function expiryLabel(createdAt: string): string {
   return days === 1 ? "expire demain" : `expire dans ${days} j`;
 }
 
-/** Retour d'envoi : l'invitation est écrite, seul le mail peut avoir échoué. */
-function mailNotice(body: { emailSent?: boolean; emailReason?: string }, to: string): string {
-  if (body.emailSent) return `Email envoyé à ${to}.`;
+/**
+ * Retour d'envoi : l'écriture a RÉUSSI, seul le mail peut avoir échoué.
+ *
+ * Le `status` compte autant que `emailSent` : un compte existant devient membre
+ * sur-le-champ et n'apparaît jamais dans « En attente », donc lui parler
+ * d'« invitation » et le renvoyer vers un bouton « Renvoyer » qu'il ne verra pas
+ * serait doublement faux.
+ */
+function mailNotice(
+  body: { emailSent?: boolean; emailReason?: string; status?: string },
+  to: string
+): string {
+  const acquis = body.status === "member" ? `${to} a rejoint l'espace` : "Invitation enregistrée";
+  if (body.emailSent) return `${acquis}. Email envoyé.`;
   if (body.emailReason === "disabled") {
-    return `Invitation enregistrée. L'envoi d'email n'est pas configuré sur cette instance : préviens ${to} toi-même.`;
+    return `${acquis}. L'envoi d'email n'est pas configuré sur cette instance : préviens ${to} toi-même.`;
   }
-  return `Invitation enregistrée, mais l'email n'est pas parti. Réessaie avec « Renvoyer ».`;
+  // « http » = Brevo a refusé (expéditeur non vérifié, clé invalide…). Réessayer
+  // à l'identique redonnera la même erreur : ne promettons pas le contraire.
+  const suite =
+    body.emailReason === "http"
+      ? "Brevo a refusé l'envoi (expéditeur ou clé à vérifier) — préviens la personne toi-même en attendant."
+      : "l'email n'est pas parti (réseau). Tu peux réessayer.";
+  return `${acquis}, mais ${suite}`;
 }
 
 /** Membres de l'ESPACE ACTIF : liste, ajout par email (compte existant), rôle, retrait. */
@@ -308,6 +325,10 @@ function MembersSection({ user }: { user: SessionUser }) {
 
   const revokeInvitation = async (inv: Invitation) => {
     if (!wsId) return;
+    // Le message de la dernière invitation décrit une ligne qu'on s'apprête à
+    // supprimer : le laisser affiché après coup, c'est afficher une confirmation
+    // pour quelque chose qui n'existe plus.
+    setNotice(null);
     const ok = await confirm({
       title: "Annuler l'invitation",
       message: `${inv.email} ne rejoindra pas cet espace. Tu pourras la réinviter plus tard.`,
@@ -389,6 +410,7 @@ function MembersSection({ user }: { user: SessionUser }) {
   const changeRole = async (m: Member, newRole: WorkspaceRole) => {
     if (!wsId || newRole === m.role) return;
     setError(null);
+    setNotice(null);
     const res = await fetch(`/api/workspaces/${wsId}/members/${m.userId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -415,6 +437,7 @@ function MembersSection({ user }: { user: SessionUser }) {
     });
     if (!ok) return;
     setError(null);
+    setNotice(null);
     const res = await fetch(`/api/workspaces/${wsId}/members/${m.userId}`, { method: "DELETE" });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
@@ -476,9 +499,10 @@ function MembersSection({ user }: { user: SessionUser }) {
           </form>
           <p className="text-xs text-[var(--text-muted)] mb-4">
             Si la personne a déjà un compte, elle rejoint l&apos;espace tout de suite. Sinon
-            son accès est réservé et s&apos;ouvrira à sa première connexion. Dans les deux cas
-            elle reçoit un email. L&apos;invitation vaut {INVITATION_TTL_DAYS} jours ; passé ce
-            délai, renvoie-la. Lecteur par défaut : élève son rôle si besoin.
+            son accès est réservé et s&apos;ouvrira à sa première connexion, dans un délai de{" "}
+            {INVITATION_TTL_DAYS} jours — passé ce délai, renvoie l&apos;invitation. Un email
+            est envoyé si l&apos;instance est configurée pour ; le message qui suit
+            l&apos;ajout te dira ce qu&apos;il en est. Lecteur par défaut : élève son rôle si besoin.
           </p>
         </>
       )}

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
-import { legacyLoginEnabled, normalizeEmail } from "@/lib/oidc";
+import { legacyLoginEnabled, normalizeEmail, registrationEnabled } from "@/lib/oidc";
 import { tooManyFailures, recordFailure, clearFailures, retryAfterSeconds } from "@/lib/rateLimit";
 import { claimInvitationsSafely } from "@/lib/invitations";
 
@@ -60,8 +60,19 @@ export async function POST(req: Request) {
   // inscrite » : POST /members a bien créé la membership dans ce cas, mais si
   // l'invitation a été posée avant que le compte existe et que la personne se
   // connecte par mot de passe plutôt que par l'IdP, c'est ici qu'elle est
-  // réclamée. Le compte existe déjà : aucune question de vérification d'email.
-  await claimInvitationsSafely(user.id, user.email);
+  // réclamée.
+  //
+  // ⚠️ SEULEMENT si l'inscription publique est FERMÉE, et c'est load-bearing.
+  // « Le compte existe déjà » ne prouve rien quand n'importe qui peut le créer :
+  // POST /api/auth/register ne vérifie aucune adresse. Sans cette condition,
+  // l'exclusion du claim sur register — la protection écrite dans CLAUDE.md —
+  // se contourne en une requête de plus : register sur l'email visé, puis se
+  // connecter, et l'invitation (fût-elle « admin ») tombe dans l'escarcelle.
+  // REGISTRATION=off ⇒ les comptes mot de passe viennent d'un admin ou d'un
+  // script, et le rattrapage redevient sûr.
+  if (!registrationEnabled()) {
+    await claimInvitationsSafely(user.id, user.email);
+  }
   const token = await createSession(user.id);
 
   const res = NextResponse.json({ id: user.id, email: user.email });

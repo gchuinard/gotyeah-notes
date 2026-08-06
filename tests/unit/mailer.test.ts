@@ -128,7 +128,13 @@ describe("Contenu des emails", () => {
   });
 
   it("escapeHtml couvre les cinq caractères qui comptent", () => {
-    expect(escapeHtml('<>&"')).toBe("&lt;&gt;&amp;&quot;");
+    expect(escapeHtml(`<>&"'`)).toBe("&lt;&gt;&amp;&quot;&#39;");
+  });
+
+  it("l'esperluette est échappée EN PREMIER, sinon on double-échappe", () => {
+    // Ordre load-bearing : `&` après `<` transformerait le `&` de `&lt;` en
+    // `&amp;lt;`, et le lecteur verrait « &lt; » écrit en toutes lettres.
+    expect(escapeHtml("&lt;")).toBe("&amp;lt;");
   });
 
   it("un rôle inconnu s'affiche « membre », jamais son identifiant brut", () => {

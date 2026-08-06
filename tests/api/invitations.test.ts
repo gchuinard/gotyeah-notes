@@ -421,3 +421,76 @@ describe("Renvoyer une invitation = la ré-émettre", () => {
     expect(body.status).toBe("invited");
   });
 });
+
+describe("L'ajout d'un membre CONSOMME l'invitation qui visait la même adresse", () => {
+  it("aucune ligne fantôme ne survit à la membership", async () => {
+    // État atteignable : invitation posée, puis la personne obtient un compte par
+    // un chemin qui ne réclame pas (register), puis l'admin l'ajoute à la main.
+    const email = `fantome-${Date.now()}@x.tld`;
+    await prisma.workspaceInvitation.create({
+      data: { workspaceId, email, role: "admin", invitedBy: admin.id },
+    });
+    const user = await mkUser(email);
+
+    const res = await addMember(post({ email, role: "viewer" }), withId(workspaceId));
+    expect(res.status).toBe(200);
+    expect((await res.json()).status).toBe("member");
+
+    // L'invitation est consommée : plus de ligne « En attente » dont le bouton
+    // « Renvoyer » ne pourrait rendre qu'un 409.
+    expect(await prisma.workspaceInvitation.findFirst({ where: { workspaceId, email } })).toBeNull();
+    // Et le rôle appliqué est celui de l'AJOUT (viewer), pas celui de
+    // l'invitation périmée (admin).
+    const m = await prisma.membership.findUnique({
+      where: { userId_workspaceId: { userId: user.id, workspaceId } },
+    });
+    expect(m?.role).toBe("viewer");
+  });
+
+  it("retirer le membre ne le fait pas revenir tout seul à la connexion suivante", async () => {
+    // LE défaut visé : removeMember ne supprime que les invitations ÉMISES PAR la
+    // personne, jamais celles qui la VISENT. Une invitation survivante rouvrait
+    // donc l'accès au premier login — un retrait qui ne retire pas.
+    const email = `revenant-${Date.now()}@x.tld`;
+    await prisma.workspaceInvitation.create({
+      data: { workspaceId, email, role: "admin", invitedBy: admin.id },
+    });
+    const user = await mkUser(email);
+    await addMember(post({ email, role: "viewer" }), withId(workspaceId));
+
+    const removed = await removeMember(workspaceId, user.id);
+    expect(removed.ok).toBe(true);
+
+    // Le claim d'une connexion ultérieure ne doit RIEN retrouver.
+    expect((await claimInvitations(user.id, email)).workspaceIds).toEqual([]);
+    expect(
+      await prisma.membership.findUnique({
+        where: { userId_workspaceId: { userId: user.id, workspaceId } },
+      })
+    ).toBeNull();
+  });
+
+  it("l'email d'ajout consomme le budget d'invitation, comme celui d'invitation", async () => {
+    // Sans ça, la boucle ajouter/retirer sur un compte existant offrait un canal
+    // d'envoi ILLIMITÉ vers l'adresse d'un tiers, depuis l'expéditeur vérifié de
+    // l'instance — le plafond ne couvrait que la branche « invited ».
+    _resetRateLimit();
+    const cible = await mkUser(`budget-${Date.now()}@x.tld`);
+    const ws = await prisma.workspace.create({ data: { name: "B", createdBy: admin.id } });
+    await prisma.membership.create({ data: { userId: admin.id, workspaceId: ws.id, role: "admin" } });
+
+    for (let i = 0; i < INVITE_BUDGET.max; i++) {
+      const r = await addMember(post({ email: cible.email, role: "viewer" }), withId(ws.id));
+      // 200 la 1re fois (ajout), 409 ensuite (déjà membre) — dans les deux cas
+      // c'est l'ENVOI qu'on plafonne, et seul le 1er en déclenche un.
+      expect([200, 409]).toContain(r.status);
+      if (r.status === 200) {
+        await prisma.membership.delete({
+          where: { userId_workspaceId: { userId: cible.id, workspaceId: ws.id } },
+        });
+      }
+    }
+    const bloque = await addMember(post({ email: cible.email, role: "viewer" }), withId(ws.id));
+    expect(bloque.status).toBe(429);
+  });
+});

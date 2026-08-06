@@ -40,9 +40,10 @@ npm run test:e2e  # tests end-to-end (Playwright)
   sur une DB jetable **hors du dossier projet** (le cookie de session n'est `secure`
   qu'en production ; en dev il circule sur `http://localhost`).
 - **CI** : `.github/workflows/ci.yml` exécute `build`, `test` (Vitest) et `e2e`
-  (Playwright). Un test rouge bloque la CI (condition DoD). ⚠️ Au *push*, la CI ne tourne
-  que sur `main` et `feat/**` ; sur les autres branches (`fix/**`, `docs/**`…) elle ne
-  s'exécute qu'à l'ouverture de la **PR**.
+  (Playwright). Un test rouge bloque la CI (condition DoD). Au *push*, elle tourne sur
+  `main`, `feat/**`, `fix/**`, `docs/**` et `chore/**` (depuis la PR #39) ; l'événement
+  `pull_request` n'a aucun filtre et couvre donc **toutes** les branches. ⚠️ Une branche
+  nommée hors de ces préfixes ne déclenche rien au push : sa CI n'arrive qu'à la PR.
 
 ## Configuration
 

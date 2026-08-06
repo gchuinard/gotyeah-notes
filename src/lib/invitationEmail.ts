@@ -37,7 +37,11 @@ export function escapeHtml(value: string): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/"/g, "&quot;")
+    // Inutile dans nos gabarits (tous les attributs sont en guillemets doubles),
+    // mais échapper les DEUX quotes coûte un replace et survit au jour où un
+    // attribut passera en quotes simples.
+    .replace(/'/g, "&#39;");
 }
 
 type EmailContext = {
@@ -48,7 +52,7 @@ type EmailContext = {
   url: string;
 };
 
-function layout(heading: string, body: string, url: string): string {
+function layout(heading: string, body: string, url: string, footer: string): string {
   const button = url
     ? `<tr><td align="center" style="padding:26px 32px 6px;">
         <a href="${escapeHtml(url)}" style="display:inline-block;padding:13px 34px;font-family:Segoe UI,Arial,sans-serif;font-size:15px;font-weight:600;color:#ffffff;background:#2f6feb;text-decoration:none;border-radius:8px;">Ouvrir GotYeah Notes</a>
@@ -73,7 +77,7 @@ function layout(heading: string, body: string, url: string): string {
   </td></tr>
   ${button}
   <tr><td style="padding:24px 32px 30px;">
-    <p style="margin:0;font-family:Segoe UI,Arial,sans-serif;font-size:12px;color:#718096;">Si tu ne t'attendais pas à ce message, ignore-le : aucun accès n'est ouvert tant que tu ne t'es pas connecté.</p>
+    <p style="margin:0;font-family:Segoe UI,Arial,sans-serif;font-size:12px;color:#718096;">${footer}</p>
   </td></tr>
 </table>
 </td></tr></table>
@@ -82,6 +86,17 @@ function layout(heading: string, body: string, url: string): string {
 
 const paragraph = (text: string) =>
   `<p style="margin:0 0 10px;font-family:Segoe UI,Arial,sans-serif;font-size:14px;line-height:1.6;color:#4a5568;">${text}</p>`;
+
+/**
+ * Le pied de page diffère selon l'issue, et ce n'est pas cosmétique : pour un
+ * AJOUT, l'accès est déjà effectif (la Membership est créée avant l'envoi), donc
+ * promettre qu'« aucun accès n'est ouvert » serait faux — et rassurerait à tort
+ * quelqu'un qui devrait justement se manifester.
+ */
+const FOOTER_INVITE =
+  "Si tu ne t'attendais pas à ce message, ignore-le : aucun accès n'est ouvert tant que tu ne t'es pas connecté.";
+const FOOTER_ADDED =
+  "Tu reçois ce message parce qu'un administrateur t'a ajouté à cet espace. Si c'est une erreur, signale-le-lui : l'accès est déjà actif.";
 
 /** Email à une adresse SANS compte : la connexion créera le compte et l'accès. */
 export function invitationEmail(ctx: EmailContext): Omit<OutgoingEmail, "to"> {
@@ -97,14 +112,15 @@ export function invitationEmail(ctx: EmailContext): Omit<OutgoingEmail, "to"> {
         paragraph(
           "Connecte-toi avec ton compte GotYeah : ton accès sera créé automatiquement, il n'y a rien à accepter."
         ),
-      ctx.url
+      ctx.url,
+      FOOTER_INVITE
     ),
     text: `${ctx.inviterName} t'a invité à rejoindre l'espace « ${ctx.workspaceName} » sur GotYeah Notes, avec le rôle ${what}.
 
 Connecte-toi avec ton compte GotYeah : ton accès sera créé automatiquement, il n'y a rien à accepter.
 ${ctx.url || ""}
 
-Si tu ne t'attendais pas à ce message, ignore-le : aucun accès n'est ouvert tant que tu ne t'es pas connecté.`,
+${FOOTER_INVITE}`,
   };
 }
 
@@ -120,12 +136,15 @@ export function addedToWorkspaceEmail(ctx: EmailContext): Omit<OutgoingEmail, "t
       "Nouvel espace",
       paragraph(`<strong>${who}</strong> t'a ajouté à l'espace <strong>${where}</strong>, avec le rôle <strong>${what}</strong>.`) +
         paragraph("Il apparaît dès maintenant dans ton sélecteur d'espaces."),
-      ctx.url
+      ctx.url,
+      FOOTER_ADDED
     ),
     text: `${ctx.inviterName} t'a ajouté à l'espace « ${ctx.workspaceName} », avec le rôle ${what}.
 
 Il apparaît dès maintenant dans ton sélecteur d'espaces.
-${ctx.url || ""}`,
+${ctx.url || ""}
+
+${FOOTER_ADDED}`,
   };
 }
 

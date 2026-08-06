@@ -87,7 +87,12 @@ export async function GET(
   return NextResponse.json(members.map(toMember));
 }
 
-/** Ajout d'un compte EXISTANT par email (pas d'envoi d'email en v1) — admin. */
+/**
+ * Ajout par email — admin. Deux issues selon que l'adresse a déjà un compte :
+ * membership immédiate (200, `member`) ou pré-autorisation (201, `invited`).
+ * Dans les deux cas un email de notification est tenté (jamais bloquant).
+ * C'est aussi le chemin du bouton « Renvoyer » : l'upsert ré-émet l'invitation.
+ */
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -176,11 +181,28 @@ export async function POST(
 
     // role TOUJOURS explicite : Membership.role a @default("admin") en schéma —
     // un create qui l'omettrait fabriquerait un admin silencieux.
-    const created = await prisma.membership.create({
-      data: { userId: target.id, workspaceId, role: parsed.data.role },
-      select: memberSelect,
+    //
+    // ⚠️ La membership CONSOMME l'invitation en attente sur la même adresse, dans
+    // la même transaction. Sans ça elle survit à l'ajout, et devient une porte
+    // dérobée : retirer le membre ne le retire plus vraiment, l'invitation
+    // orpheline le ré-admet à sa connexion suivante (removeMember ne supprime que
+    // les invitations ÉMISES PAR la personne, pas celles qui la VISENT). Elle
+    // laissait en prime une ligne fantôme dans « En attente », dont le bouton
+    // « Renvoyer » ne pouvait plus rendre qu'un 409.
+    const created = await prisma.$transaction(async (tx) => {
+      const membership = await tx.membership.create({
+        data: { userId: target.id, workspaceId, role: parsed.data.role },
+        select: memberSelect,
+      });
+      await tx.workspaceInvitation.deleteMany({ where: { workspaceId, email } });
+      return membership;
     });
     clearFailures(rateKey);
+    // L'envoi qui suit consomme le budget d'invitation au MÊME titre que la
+    // branche « invited » : c'est l'EMAIL qu'on plafonne, pas l'écriture. Sans
+    // ça, la boucle ajouter/retirer offrait un canal d'envoi illimité vers
+    // l'adresse d'un tiers, depuis l'expéditeur vérifié de l'instance.
+    recordFailure(inviteKey, Date.now(), INVITE_BUDGET);
     // Email d'INFORMATION : l'accès est déjà ouvert, rien à faire. Sans lui,
     // on peut devenir membre d'un espace sans jamais l'apprendre.
     const mail = await notifyInvitation(email, "member", mailCtx);

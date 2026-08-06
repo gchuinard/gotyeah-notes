@@ -20,6 +20,12 @@ const env = {
   // Env de test jetable : les specs créent leurs users via POST /api/auth/register,
   // désactivé par défaut en prod (REGISTRATION=off). On le rouvre ici uniquement.
   REGISTRATION: "on",
+  // ⚠️ Envoi d'email NEUTRALISÉ, explicitement. `...process.env` hérite d'une
+  // vraie clé si le dev en a une, et `next dev` charge en plus le .env du projet :
+  // sans cette ligne, `npm run test:e2e` expédierait de vrais emails Brevo vers
+  // les adresses fabriquées par les specs. Même rôle que le BREVO_API_KEY: ""
+  // de vitest.config.ts — un test ne sort pas de la machine.
+  BREVO_API_KEY: "",
   AUTH_SECRET: process.env.AUTH_SECRET ?? "e2e-secret-placeholder-0123456789-abcdefghij",
 };
 

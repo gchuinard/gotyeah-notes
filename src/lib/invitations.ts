@@ -5,11 +5,13 @@ import { WORKSPACE_ROLES, type WorkspaceRole } from "./workspace";
 /**
  * Invitations : pré-autorisation d'un email qui n'a pas encore de compte.
  *
- * Le projet n'a AUCUNE dépendance mail et tourne en self-host : « inviter » ne
- * peut donc pas signifier « envoyer un message ». Le modèle retenu est une
- * PRÉ-AUTORISATION — on enregistre « cet email aura ce rôle sur cet espace », et
- * la Membership se matérialise toute seule à la première connexion (décision de
- * Gautier du 05/08 : pas d'écran d'acceptation).
+ * Le modèle est une PRÉ-AUTORISATION : on enregistre « cet email aura ce rôle sur
+ * cet espace », et la Membership se matérialise toute seule à la première
+ * connexion (décision de Gautier du 05/08 : pas d'écran d'acceptation).
+ *
+ * Un email de notification part depuis le 05/08 (lib/mailer.ts), mais il reste
+ * une NOTIFICATION : il ne porte aucun jeton, et la pré-autorisation vaut avec
+ * ou sans lui. C'est ce qui permet à l'envoi d'échouer sans rien casser.
  *
  * ⚠️ Le claim n'est PAS branché sur POST /api/auth/register : cette route ne
  * vérifie aucun email, une invitation admin y serait réclamable par quiconque
