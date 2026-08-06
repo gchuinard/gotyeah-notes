@@ -140,7 +140,7 @@ function ProfileSection({ user }: { user: SessionUser }) {
 
       {/* Avatar */}
       <div className="flex items-center gap-4 mb-6">
-        <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center text-xl font-bold text-blue-600">
+        <div className="w-16 h-16 rounded-full bg-blue-500/15 flex items-center justify-center text-xl font-bold text-blue-500">
           {user.displayName.charAt(0).toUpperCase()}
         </div>
         <button
@@ -201,7 +201,7 @@ function ProfileSection({ user }: { user: SessionUser }) {
           <div className="flex items-center gap-2">
             <Label>Confirmer le nouveau mot de passe</Label>
             {confirmPw.length > 0 && (
-              <Check size={13} className={passwordsMatch ? "text-green-500" : "text-gray-300"} />
+              <Check size={13} className={passwordsMatch ? "text-green-500" : "text-[var(--text-muted)]"} />
             )}
           </div>
           <div className="relative">
@@ -575,7 +575,7 @@ function MembersSection({ user }: { user: SessionUser }) {
       <div className="flex flex-col divide-y divide-[var(--border)] border border-[var(--border)] rounded-lg">
         {(members ?? []).map((m) => (
           <div key={m.userId} className="flex flex-wrap items-center gap-3 px-3 py-2.5">
-            <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-sm font-bold text-blue-600 shrink-0">
+            <div className="w-8 h-8 rounded-full bg-blue-500/15 flex items-center justify-center text-sm font-bold text-blue-500 shrink-0">
               {m.displayName.charAt(0).toUpperCase()}
             </div>
             {/* basis pleine ligne (moins l'avatar et son gap) sous sm : rôle et
@@ -760,7 +760,7 @@ function AppearanceSection() {
       </div>
       <div className={`flex items-center justify-between px-2 py-1.5 text-xs font-medium ${
         selected === theme.id
-          ? "bg-blue-50 text-blue-600"
+          ? "bg-[var(--surface-active)] text-[var(--text)]"
           : "bg-[var(--surface)] text-[var(--text-muted)]"
       }`}>
         {theme.name}
@@ -824,7 +824,7 @@ export default function SettingsPage({ user }: { user: SessionUser }) {
               onClick={() => setActive(id)}
               className={`shrink-0 flex items-center gap-2.5 px-3 py-2.5 md:py-2 rounded-lg text-left whitespace-nowrap transition-colors ${
                 effectiveActive === id
-                  ? "bg-blue-50 text-blue-600 font-medium"
+                  ? "bg-[var(--surface-active)] text-[var(--text)] font-medium"
                   : "text-[var(--text-muted)] hover:bg-[var(--surface-hover)]"
               }`}
             >

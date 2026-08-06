@@ -148,7 +148,7 @@ export default function Editor({
     // La CSS de BlockNote impose `padding-inline: 54px` en dur sur `.bn-editor` et n'a
     // aucune media query (hors @media print) : 108px de gouttière sur un écran de 375px.
     <div className="max-w-3xl mx-auto py-6 px-3 sm:py-12 sm:px-6 text-[var(--text)] [&_.bn-editor]:px-3 sm:[&_.bn-editor]:px-[54px]">
-      <div className="text-xs text-gray-400 h-4 mb-2">
+      <div className="text-xs text-[var(--text-muted)] h-4 mb-2">
         {saving === "saving" && "Enregistrement…"}
         {saving === "saved" && "Enregistré ✓"}
       </div>
@@ -170,7 +170,7 @@ export default function Editor({
                 `pointer-events` suit l'opacité — invisible ne veut pas dire non cliquable. */}
             <button
               onClick={handleRemoveIcon}
-              className="opacity-100 md:opacity-0 md:group-hover:opacity-100 inline-flex items-center justify-center min-h-11 min-w-11 md:inline-block md:min-h-0 md:min-w-0 text-xs text-gray-400 hover:text-gray-600 transition-opacity px-1"
+              className="opacity-100 md:opacity-0 md:group-hover:opacity-100 inline-flex items-center justify-center min-h-11 min-w-11 md:inline-block md:min-h-0 md:min-w-0 text-xs text-[var(--text-muted)] hover:text-[var(--text)] transition-opacity px-1"
               title="Supprimer l'icône"
             >
               ✕
@@ -179,7 +179,7 @@ export default function Editor({
         ) : (
           <button
             onClick={() => setPickerOpen(true)}
-            className="inline-flex items-center min-h-11 md:inline-block md:min-h-0 text-sm text-gray-400 hover:text-gray-600 transition-colors"
+            className="inline-flex items-center min-h-11 md:inline-block md:min-h-0 text-sm text-[var(--text-muted)] hover:text-[var(--text)] transition-colors"
           >
             + Ajouter une icône
           </button>
@@ -201,7 +201,7 @@ export default function Editor({
           <button
             onClick={handleConvertToDatabase}
             disabled={converting}
-            className="flex items-center gap-1.5 min-h-11 md:min-h-0 text-sm text-gray-400 hover:text-gray-600 transition-colors disabled:opacity-50"
+            className="flex items-center gap-1.5 min-h-11 md:min-h-0 text-sm text-[var(--text-muted)] hover:text-[var(--text)] transition-colors disabled:opacity-50"
           >
             <Table2 size={14} />
             {converting ? "Conversion…" : "Convertir en database"}

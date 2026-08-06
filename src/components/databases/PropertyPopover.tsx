@@ -497,7 +497,7 @@ export default function PropertyPopover({
                           className={[
                             "text-[11px] px-2.5 py-2 md:px-1.5 md:py-0.5 rounded border transition-colors",
                             rule?.roles?.includes(id)
-                              ? "border-blue-400 text-blue-500 bg-blue-50"
+                              ? "border-blue-400 text-blue-500 bg-blue-500/10"
                               : "border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)]",
                           ].join(" ")}
                         >
@@ -512,7 +512,7 @@ export default function PropertyPopover({
                           className={[
                             "text-[11px] px-2.5 py-2 md:px-1.5 md:py-0.5 rounded border transition-colors",
                             rule?.userIds?.includes(m.userId)
-                              ? "border-blue-400 text-blue-500 bg-blue-50"
+                              ? "border-blue-400 text-blue-500 bg-blue-500/10"
                               : "border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)]",
                           ].join(" ")}
                         >
