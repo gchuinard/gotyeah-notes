@@ -62,7 +62,10 @@ export type OutgoingEmail = {
 
 export type MailResult =
   | { ok: true }
-  | { ok: false; reason: "disabled" | "http" | "network"; status?: number };
+  // `throttled` n'est PAS produit par sendEmail : c'est l'appelant qui l'émet
+  // quand il décide de ne pas envoyer (plafond par destinataire). Il vit ici
+  // pour que le type reste la liste exhaustive de ce qui peut arriver à un envoi.
+  | { ok: false; reason: "disabled" | "http" | "network" | "throttled"; status?: number };
 
 /**
  * Envoie un email. Ne lève jamais.

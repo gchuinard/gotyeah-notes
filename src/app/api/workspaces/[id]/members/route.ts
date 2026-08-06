@@ -8,12 +8,14 @@ import { notifyInvitation } from "@/lib/invitationEmail";
 import { issueMagicLink, INVITE_LINK_TTL_MINUTES } from "@/lib/magicLink";
 import { appBaseUrl } from "@/lib/mailer";
 import type { MailResult } from "@/lib/mailer";
+import { createHash } from "node:crypto";
 import {
   tooManyFailures,
   recordFailure,
   clearFailures,
   retryAfterSeconds,
   INVITE_BUDGET,
+  RECIPIENT_BUDGET,
 } from "@/lib/rateLimit";
 
 /**
@@ -24,6 +26,32 @@ import {
 const rateLimitKey = (userId: string) => `members:${userId}`;
 /** Famille distincte : inviter est un SUCCÈS, pas un échec (cf. INVITE_BUDGET). */
 const inviteLimitKey = (userId: string) => `invites:${userId}`;
+
+/**
+ * Plafond par DESTINATAIRE — combien de messages UNE adresse peut recevoir,
+ * tous acteurs confondus. `invites:` borne l'émetteur ; celui-ci borne la cible.
+ *
+ * ⚠️ L'adresse est HACHÉE dans la clé : ces compteurs vivent en mémoire du
+ * processus, mais rien n'oblige à y stocker en clair l'adresse de quelqu'un qui
+ * n'a rien demandé — c'est la même règle que « pas d'email dans les journaux ».
+ */
+const recipientKey = (email: string) =>
+  `to:${createHash("sha256").update(email).digest("hex").slice(0, 32)}`;
+
+/**
+ * Le plafond retient l'EMAIL, jamais l'écriture, et ne change PAS le code HTTP.
+ *
+ * ⚠️ Les deux points sont load-bearing. Refuser l'invitation punirait un admin
+ * pour un abus qu'il ne commet pas (c'est la cible qui est saturée, pas lui). Et
+ * répondre 429 ferait de la route un oracle : « cette adresse a déjà été visée
+ * récemment » est une information sur un tiers.
+ */
+function recipientAllowed(email: string): boolean {
+  const key = recipientKey(email);
+  if (tooManyFailures(key, Date.now(), RECIPIENT_BUDGET)) return false;
+  recordFailure(key, Date.now(), RECIPIENT_BUDGET);
+  return true;
+}
 
 const addMemberSchema = z.object({
   // .trim() AVANT .email() : zod valide avant que normalizeEmail passe, donc un
@@ -207,7 +235,9 @@ export async function POST(
     recordFailure(inviteKey, Date.now(), INVITE_BUDGET);
     // Email d'INFORMATION : l'accès est déjà ouvert, rien à faire. Sans lui,
     // on peut devenir membre d'un espace sans jamais l'apprendre.
-    const mail = await notifyInvitation(email, "member", mailCtx);
+    const mail = recipientAllowed(email)
+      ? await notifyInvitation(email, "member", mailCtx)
+      : ({ ok: false, reason: "throttled" } as const);
     return NextResponse.json({ status: "member", ...toMember(created), ...mailStatus(mail) });
   }
 
@@ -240,7 +270,9 @@ export async function POST(
   const loginUrl =
     token && base ? `${base}/api/auth/magic/consume?token=${encodeURIComponent(token)}` : undefined;
 
-  const mail = await notifyInvitation(email, "invited", { ...mailCtx, loginUrl });
+  const mail = recipientAllowed(email)
+    ? await notifyInvitation(email, "invited", { ...mailCtx, loginUrl })
+    : ({ ok: false, reason: "throttled" } as const);
   // Ni l'adresse invitée ni le résultat détaillé : l'acteur et l'espace suffisent
   // à corréler, la ligne d'invitation est en base.
   console.info(
