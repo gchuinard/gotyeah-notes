@@ -50,6 +50,14 @@ type EmailContext = {
   role: string;
   /** Origine publique de l'app. Vide = email sans bouton (cf. appBaseUrl). */
   url: string;
+  /**
+   * Un compte vient d'être créé pour cette adresse dans l'IdP. Change le texte,
+   * et ce n'est pas cosmétique : la personne va recevoir un SECOND message
+   * (émis par Keycloak) pour définir son mot de passe. Sans cette phrase, elle
+   * clique « Ouvrir GotYeah Notes », se retrouve devant un écran de connexion
+   * sans identifiants, et conclut que le lien est cassé.
+   */
+  idpAccountCreated?: boolean;
 };
 
 function layout(heading: string, body: string, url: string, footer: string): string {
@@ -99,25 +107,29 @@ const FOOTER_ADDED =
   "Tu reçois ce message parce qu'un administrateur t'a ajouté à cet espace. Si c'est une erreur, signale-le-lui : l'accès est déjà actif.";
 
 /** Email à une adresse SANS compte : la connexion créera le compte et l'accès. */
+const MARCHE_A_SUIVRE_NOUVEAU =
+  "Un compte GotYeah vient d'être créé pour toi : tu vas recevoir un SECOND message, « Update Your Account », qui te permettra de choisir ton mot de passe. Commence par celui-là — ensuite seulement, reviens ici.";
+const MARCHE_A_SUIVRE_EXISTANT =
+  "Connecte-toi avec ton compte GotYeah : ton accès sera créé automatiquement, il n'y a rien à accepter.";
+
 export function invitationEmail(ctx: EmailContext): Omit<OutgoingEmail, "to"> {
   const who = escapeHtml(ctx.inviterName);
   const where = escapeHtml(ctx.workspaceName);
   const what = roleLabel(ctx.role);
+  const marche = ctx.idpAccountCreated ? MARCHE_A_SUIVRE_NOUVEAU : MARCHE_A_SUIVRE_EXISTANT;
 
   return {
     subject: `${ctx.inviterName} t'invite sur l'espace « ${ctx.workspaceName} »`,
     html: layout(
       "Tu es invité",
       paragraph(`<strong>${who}</strong> t'a invité à rejoindre l'espace <strong>${where}</strong> sur GotYeah Notes, avec le rôle <strong>${what}</strong>.`) +
-        paragraph(
-          "Connecte-toi avec ton compte GotYeah : ton accès sera créé automatiquement, il n'y a rien à accepter."
-        ),
+        paragraph(escapeHtml(marche)),
       ctx.url,
       FOOTER_INVITE
     ),
     text: `${ctx.inviterName} t'a invité à rejoindre l'espace « ${ctx.workspaceName} » sur GotYeah Notes, avec le rôle ${what}.
 
-Connecte-toi avec ton compte GotYeah : ton accès sera créé automatiquement, il n'y a rien à accepter.
+${marche}
 ${ctx.url || ""}
 
 ${FOOTER_INVITE}`,

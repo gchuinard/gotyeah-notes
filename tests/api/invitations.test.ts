@@ -494,3 +494,28 @@ describe("L'ajout d'un membre CONSOMME l'invitation qui visait la même adresse"
     expect(bloque.status).toBe(429);
   });
 });
+
+describe("Provisioning IdP — l'invitation ne promet plus une connexion impossible", () => {
+  it("la réponse dit si le compte IdP a été créé, sans jamais bloquer l'invitation", async () => {
+    // KEYCLOAK_ADMIN_* sont vides dans vitest.config : on est dans le mode
+    // historique, où l'admin crée le compte à la main. Ça doit se DIRE — c'est
+    // précisément ce qui manquait quand un invité recevait « connecte-toi »
+    // sans pouvoir se connecter.
+    const res = await addMember(
+      post({ email: `idp-${Date.now()}@x.tld`, role: "viewer" }),
+      withId(workspaceId)
+    );
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.idpAccount).toBe("disabled");
+    // L'invitation existe quoi qu'il arrive côté IdP.
+    expect(body.status).toBe("invited");
+  });
+
+  it("l'ajout d'un compte EXISTANT ne provisionne rien (il a déjà une identité)", async () => {
+    const u = await mkUser(`deja-${Date.now()}@x.tld`);
+    const res = await addMember(post({ email: u.email, role: "viewer" }), withId(workspaceId));
+    expect(res.status).toBe(200);
+    expect((await res.json()).idpAccount).toBeUndefined();
+  });
+});

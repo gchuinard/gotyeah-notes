@@ -23,6 +23,10 @@ export default defineConfig({
       // un test qui oublierait de mocker le mailer ne peut donc pas appeler
       // Brevo depuis la CI.
       BREVO_API_KEY: "",
+      // Provisioning IdP OFF : ensureInvitedUser sort sur `disabled` AVANT tout
+      // fetch. Un test ne crée pas de compte dans un Keycloak réel.
+      KEYCLOAK_ADMIN_CLIENT_ID: "",
+      KEYCLOAK_ADMIN_CLIENT_SECRET: "",
     },
   },
 });
