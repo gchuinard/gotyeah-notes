@@ -26,6 +26,10 @@ const env = {
   // les adresses fabriquées par les specs. Même rôle que le BREVO_API_KEY: ""
   // de vitest.config.ts — un test ne sort pas de la machine.
   BREVO_API_KEY: "",
+  // Idem pour le provisioning IdP : les specs inventent des adresses, elles ne
+  // doivent pas fabriquer des comptes dans le Keycloak de production.
+  KEYCLOAK_ADMIN_CLIENT_ID: "",
+  KEYCLOAK_ADMIN_CLIENT_SECRET: "",
   AUTH_SECRET: process.env.AUTH_SECRET ?? "e2e-secret-placeholder-0123456789-abcdefghij",
 };
 

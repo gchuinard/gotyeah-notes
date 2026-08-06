@@ -5,6 +5,7 @@ import { getSession } from "@/lib/session";
 import { getMembership, hasRole } from "@/lib/workspace";
 import { normalizeEmail } from "@/lib/oidc";
 import { notifyInvitation } from "@/lib/invitationEmail";
+import { ensureInvitedUser } from "@/lib/keycloak";
 import type { MailResult } from "@/lib/mailer";
 import {
   tooManyFailures,
@@ -227,14 +228,34 @@ export async function POST(
     select: { id: true, email: true, role: true, createdAt: true },
   });
   recordFailure(inviteKey, Date.now(), INVITE_BUDGET);
-  const mail = await notifyInvitation(email, "invited", mailCtx);
+
+  // Provisioning IdP — APRÈS l'écriture, comme l'email : l'invitation est la
+  // source de vérité, un Keycloak injoignable ne doit pas l'annuler. Réservé à
+  // la branche « invited » : un compte notes existant a forcément déjà une
+  // identité, l'IdP est le seul chemin de connexion.
+  const idp = await ensureInvitedUser(email, email.split("@")[0]);
+
+  // Le texte de l'email DÉPEND du résultat : promettre « connecte-toi » à
+  // quelqu'un qui n'a pas encore de mot de passe était exactement le parcours
+  // cassé que ce lot répare.
+  const mail = await notifyInvitation(email, "invited", {
+    ...mailCtx,
+    idpAccountCreated: idp.status === "created",
+  });
   // Ni l'adresse invitée ni le résultat détaillé : l'acteur et l'espace suffisent
   // à corréler, la ligne d'invitation est en base.
   console.info(
-    `[member-invited] actor=${user.id} workspace=${workspaceId} role=${parsed.data.role} mail=${mail.ok ? "sent" : mail.reason}`
+    `[member-invited] actor=${user.id} workspace=${workspaceId} role=${parsed.data.role} mail=${mail.ok ? "sent" : mail.reason} idp=${idp.status}`
   );
   return NextResponse.json(
-    { status: "invited", ...invitation, ...mailStatus(mail) },
+    {
+      status: "invited",
+      ...invitation,
+      ...mailStatus(mail),
+      // Champ ADDITIF : dit à l'admin s'il doit encore créer le compte IdP à la
+      // main. « disabled » = provisioning non configuré, le mode historique.
+      idpAccount: idp.status,
+    },
     { status: 201 }
   );
 }

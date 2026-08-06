@@ -74,6 +74,16 @@ services:
       MAIL_FROM_NAME: "${MAIL_FROM_NAME:-GotYeah Notes}"
       # Origine publique des liens d'email. Vide = repli sur OIDC_REDIRECT_URI.
       APP_BASE_URL: "${APP_BASE_URL:-}"
+      # Provisioning des invités dans Keycloak (cf. lib/keycloak.ts). Vides =
+      # désactivé, le compte IdP se crée alors à la main. ⚠️ Le client doit
+      # porter le SEUL rôle manage-users, jamais realm-admin : ce secret vit
+      # dans une application web exposée.
+      KEYCLOAK_ADMIN_CLIENT_ID: "${KEYCLOAK_ADMIN_CLIENT_ID:-}"
+      KEYCLOAK_ADMIN_CLIENT_SECRET: "${KEYCLOAK_ADMIN_CLIENT_SECRET:-}"
+      # ⚠️ /admin/* est protégé par Cloudflare Access côté public (302 vers un
+      # écran de connexion). On joint donc Keycloak par le réseau partagé.
+      # Seule la BASE est surchargée : le realm reste dérivé d'OIDC_ISSUER.
+      KEYCLOAK_INTERNAL_URL: "${KEYCLOAK_INTERNAL_URL:-}"
     # Reached by Nginx Proxy Manager over the shared external network, as
     # gotyeah_notes:3000 (no host port published — same convention as the other
     # apps on this Pi). Add `ports: ["30001:3000"]` if you need direct access.

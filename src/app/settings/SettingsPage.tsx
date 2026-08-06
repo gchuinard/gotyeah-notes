@@ -277,21 +277,33 @@ function expiryLabel(createdAt: string): string {
  * serait doublement faux.
  */
 function mailNotice(
-  body: { emailSent?: boolean; emailReason?: string; status?: string },
+  body: { emailSent?: boolean; emailReason?: string; status?: string; idpAccount?: string },
   to: string
 ): string {
   const acquis = body.status === "member" ? `${to} a rejoint l'espace` : "Invitation enregistrée";
-  if (body.emailSent) return `${acquis}. Email envoyé.`;
-  if (body.emailReason === "disabled") {
-    return `${acquis}. L'envoi d'email n'est pas configuré sur cette instance : préviens ${to} toi-même.`;
-  }
-  // « http » = Brevo a refusé (expéditeur non vérifié, clé invalide…). Réessayer
-  // à l'identique redonnera la même erreur : ne promettons pas le contraire.
-  const suite =
-    body.emailReason === "http"
-      ? "Brevo a refusé l'envoi (expéditeur ou clé à vérifier) — préviens la personne toi-même en attendant."
-      : "l'email n'est pas parti (réseau). Tu peux réessayer.";
-  return `${acquis}, mais ${suite}`;
+
+  let envoi: string;
+  if (body.emailSent) envoi = "Email envoyé.";
+  else if (body.emailReason === "disabled") {
+    envoi = `L'envoi d'email n'est pas configuré sur cette instance : préviens ${to} toi-même.`;
+  } else if (body.emailReason === "http") {
+    // Brevo a refusé (expéditeur non vérifié, clé invalide…). Réessayer à
+    // l'identique redonnera la même erreur : ne promettons pas le contraire.
+    envoi = "Brevo a refusé l'envoi (expéditeur ou clé à vérifier) — préviens la personne toi-même.";
+  } else envoi = "L'email n'est pas parti (réseau). Tu peux réessayer.";
+
+  // Sans compte sur l'IdP, l'invité reçoit un message qui l'invite à se
+  // connecter… sans pouvoir. C'est le point qui doit remonter à l'admin.
+  const idp =
+    body.idpAccount === "created"
+      ? " Un compte GotYeah a été créé : elle recevra un second message pour choisir son mot de passe."
+      : body.idpAccount === "failed"
+        ? " ⚠️ En revanche son compte GotYeah n'a PAS pu être créé — crée-le dans Keycloak, sinon elle ne pourra pas se connecter."
+        : body.idpAccount === "disabled"
+          ? " Si elle n'a pas encore de compte GotYeah, pense à le lui créer dans Keycloak."
+          : "";
+
+  return `${acquis}. ${envoi}${idp}`;
 }
 
 /** Membres de l'ESPACE ACTIF : liste, ajout par email (compte existant), rôle, retrait. */
@@ -366,7 +378,7 @@ function MembersSection({ user }: { user: SessionUser }) {
         setError((body as { error?: string }).error ?? `Erreur ${res.status}`);
         return;
       }
-      setNotice(mailNotice(body as { emailSent?: boolean }, inv.email));
+      setNotice(mailNotice(body as Parameters<typeof mailNotice>[0], inv.email));
       mutateInvitations();
     } catch {
       setError("Impossible de renvoyer l'invitation.");
@@ -394,7 +406,7 @@ function MembersSection({ user }: { user: SessionUser }) {
       }
       setEmail("");
       setRole("viewer");
-      setNotice(mailNotice(body as { emailSent?: boolean }, trimmed));
+      setNotice(mailNotice(body as Parameters<typeof mailNotice>[0], trimmed));
       // 201 = pas encore de compte : la personne apparaît dans « invitations en
       // attente », pas dans les membres. On rafraîchit les deux listes plutôt que
       // de deviner laquelle a bougé.
