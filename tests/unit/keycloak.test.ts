@@ -128,6 +128,25 @@ describe("Création d'un compte", () => {
     expect(createUrl).toBe("https://login.example.tld/admin/realms/gotyeah/users");
   });
 
+  it("KEYCLOAK_INTERNAL_URL détourne les appels du proxy — mais JAMAIS le realm", async () => {
+    // Sur cette instance, /admin/* est protégé par Cloudflare Access et répond
+    // 302 : le provisioning échouerait avec un diagnostic trompeur. On joint
+    // donc Keycloak en interne. Le realm, lui, reste celui de l'issuer —
+    // provisionner ailleurs que là où l'on authentifie ne se verrait qu'au
+    // moment où l'invité, compte créé, ne pourrait pas se connecter.
+    vi.stubEnv("KEYCLOAK_INTERNAL_URL", "http://login-keycloak:8080/");
+    const fetchMock = nominal();
+    await ensureInvitedUser("neuf@b.tld", "neuf");
+
+    const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+    expect(urls.every((u) => u.startsWith("http://login-keycloak:8080/"))).toBe(true);
+    // Le slash final de la variable ne doit pas produire un « //realms ».
+    expect(urls[0]).toBe(
+      "http://login-keycloak:8080/realms/gotyeah/protocol/openid-connect/token"
+    );
+    expect(urls.every((u) => u.includes("/gotyeah/") || u.includes("realms/gotyeah"))).toBe(true);
+  });
+
   it("une création concurrente (409) n'est pas une erreur : l'état visé est atteint", async () => {
     configured(TOKEN_OK, json([]), json({}, 409));
     expect(await ensureInvitedUser("course@b.tld", "course")).toEqual({ status: "existing" });

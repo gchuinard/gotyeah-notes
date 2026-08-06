@@ -48,19 +48,28 @@ export function keycloakAdminEnabled(): boolean {
 }
 
 /**
- * L'issuer vaut `https://host/realms/<realm>` : l'API admin vit à côté, sur
- * `https://host/admin/realms/<realm>`. On la DÉRIVE plutôt que d'ajouter une
- * variable — deux réglages pour un même serveur finiraient par diverger, et un
- * provisioning pointant un autre realm que celui qui authentifie serait invisible
- * jusqu'au jour où personne ne peut se connecter.
+ * L'issuer vaut `https://host/realms/<realm>` ; l'API admin vit à côté, sur
+ * `https://host/admin/realms/<realm>`.
+ *
+ * ⚠️ Mais `/admin/*` est très souvent FERMÉ côté public — sur cette instance,
+ * Cloudflare Access le protège et répond 302 vers un écran de connexion, ce qui
+ * donnerait un provisioning cassé au diagnostic trompeur (ni 401 ni 403 : une
+ * redirection). `KEYCLOAK_INTERNAL_URL` permet donc de joindre Keycloak par le
+ * réseau interne (`http://login-keycloak:8080`), sans traverser le proxy.
+ *
+ * ⚠️ Seule la BASE est surchargeable : le realm reste dérivé de `OIDC_ISSUER`.
+ * Deux réglages pour un même realm finiraient par diverger, et provisionner dans
+ * un realm différent de celui qui authentifie ne se verrait qu'au moment où
+ * l'invité, compte créé, ne pourrait pas se connecter.
  */
 function endpoints(): { token: string; admin: string } | null {
   const issuer = env("OIDC_ISSUER").replace(/\/$/, "");
   const m = /^(https?:\/\/[^/]+(?:\/[^/]+)*?)\/realms\/([^/]+)$/.exec(issuer);
   if (!m) return null;
-  const [, base, realm] = m;
+  const [, publicBase, realm] = m;
+  const base = env("KEYCLOAK_INTERNAL_URL").replace(/\/$/, "") || publicBase;
   return {
-    token: `${issuer}/protocol/openid-connect/token`,
+    token: `${base}/realms/${realm}/protocol/openid-connect/token`,
     admin: `${base}/admin/realms/${realm}`,
   };
 }
