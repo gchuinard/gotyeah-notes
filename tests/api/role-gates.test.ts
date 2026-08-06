@@ -2,7 +2,13 @@ import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 
-vi.mock("@/lib/session", () => ({ getSession: vi.fn() }));
+// Mock PARTIEL : seul getSession est simulé. Le module exporte aussi hashToken
+// et createSession, dont dépendent des chemins réels (ex. les jetons de
+// connexion par email) — un mock total les remplacerait par undefined.
+vi.mock("@/lib/session", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/session")>()),
+  getSession: vi.fn(),
+}));
 
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
@@ -257,6 +263,10 @@ const DECLARED: Record<string, string[]> = {
   "auth/register/route.ts": ["POST"],
   "auth/oidc/login/route.ts": [],
   "auth/oidc/callback/route.ts": [],
+  // Connexion par lien email : routes PUBLIQUES, comme tout /api/auth. Leur
+  // garde n'est pas un rôle mais l'existence d'un accès pour l'adresse visée
+  // (compte ou invitation vivante), plus le rate-limit — cf. lib/magicLink.ts.
+  "auth/magic/route.ts": ["POST"],
   // Exemptés lecteur (matrice) : visite, switch d'espace, créer SON espace.
   "pages/[id]/visit/route.ts": ["POST"],
   "workspaces/[id]/switch/route.ts": ["POST"],

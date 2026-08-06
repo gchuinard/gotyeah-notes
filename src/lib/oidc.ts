@@ -10,8 +10,14 @@ const REDIRECT_URI = process.env.OIDC_REDIRECT_URI || "";
 
 export const OIDC_ALLOW_SIGNUP =
   (process.env.OIDC_ALLOW_SIGNUP || "true").toLowerCase() === "true";
+/**
+ * Libelle du bouton OIDC. Defaut generique et NON une marque : « GotYeah » ne
+ * dit rien a un invite exterieur, alors que « authentification unique » est le
+ * terme d'usage. Surchargeable par OIDC_BUTTON_LABEL pour une instance qui a,
+ * elle, un IdP reconnaissable de ses utilisateurs.
+ */
 export const OIDC_BUTTON_LABEL =
-  process.env.OIDC_BUTTON_LABEL || "Se connecter avec GotYeah";
+  process.env.OIDC_BUTTON_LABEL || "Authentification unique (SSO)";
 export const OIDC_TX_COOKIE = "oidc_tx";
 export const OIDC_TX_PATH = "/api/auth/oidc";
 export const OIDC_SCOPES = "openid email profile";
