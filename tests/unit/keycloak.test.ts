@@ -147,6 +147,52 @@ describe("Création d'un compte", () => {
     expect(urls.every((u) => u.includes("/gotyeah/") || u.includes("realms/gotyeah"))).toBe(true);
   });
 
+  it("l'email d'activation ramène l'invité DANS notes, pas sur la page de compte Keycloak", async () => {
+    vi.stubEnv("OIDC_CLIENT_ID", "notes");
+    vi.stubEnv("APP_BASE_URL", "https://notes.example.fr");
+    const fetchMock = nominal();
+    await ensureInvitedUser("neuf@b.tld", "neuf");
+
+    const url = String(fetchMock.mock.calls.find((c) => String(c[0]).includes("execute-actions-email"))![0]);
+    expect(url).toContain("client_id=notes");
+    // `/api/auth/oidc/login` et pas `/` : la session Keycloak vient d'être
+    // ouverte, donc le flux OIDC est silencieux et dépose l'invité connecté.
+    // Viser la racine imposerait un aller-retour par l'écran de connexion.
+    expect(decodeURIComponent(url)).toContain("redirect_uri=https://notes.example.fr/api/auth/oidc/login");
+  });
+
+  it("⚠️ un redirect_uri refusé par l'IdP ne prive PAS l'invité de son email", async () => {
+    // Les « Valid redirect URIs » vivent dans Keycloak, hors de ce dépôt : une
+    // divergence de config ne doit pas transformer un parcours perfectible en
+    // parcours impossible. On retente sans redirection.
+    vi.stubEnv("OIDC_CLIENT_ID", "notes");
+    vi.stubEnv("APP_BASE_URL", "https://notes.example.fr");
+    const fetchMock = configured(
+      TOKEN_OK,
+      json([]),
+      json({}, 201),
+      json([{ id: "u42" }]),
+      json({ error: "Invalid redirect uri" }, 400), // 1er essai AVEC redirect
+      json({}, 204) // 2e essai SANS
+    );
+    expect(await ensureInvitedUser("neuf@b.tld", "neuf")).toEqual({ status: "created" });
+
+    const envois = fetchMock.mock.calls
+      .map((c) => String(c[0]))
+      .filter((u) => u.includes("execute-actions-email"));
+    expect(envois).toHaveLength(2);
+    expect(envois[0]).toContain("redirect_uri");
+    expect(envois[1]).not.toContain("redirect_uri");
+  });
+
+  it("sans client_id configuré, aucune redirection n'est inventée", async () => {
+    vi.stubEnv("OIDC_CLIENT_ID", "");
+    const fetchMock = nominal();
+    await ensureInvitedUser("neuf@b.tld", "neuf");
+    const url = String(fetchMock.mock.calls.find((c) => String(c[0]).includes("execute-actions-email"))![0]);
+    expect(url).not.toContain("redirect_uri");
+  });
+
   it("une création concurrente (409) n'est pas une erreur : l'état visé est atteint", async () => {
     configured(TOKEN_OK, json([]), json({}, 409));
     expect(await ensureInvitedUser("course@b.tld", "course")).toEqual({ status: "existing" });

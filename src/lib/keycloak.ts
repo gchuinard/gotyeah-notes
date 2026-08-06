@@ -74,6 +74,33 @@ function endpoints(): { token: string; admin: string } | null {
   };
 }
 
+/**
+ * Où renvoyer l'invité une fois son mot de passe défini.
+ *
+ * Sans ça, Keycloak le laisse sur SA page de compte : il doit deviner qu'il faut
+ * revenir au premier email pour entrer dans l'application. On vise donc
+ * `/api/auth/oidc/login`, qui relance le flux OIDC — silencieux puisque la
+ * session Keycloak vient d'être ouverte — et le dépose CONNECTÉ dans notes.
+ * Viser `/` ferait un aller-retour de plus par l'écran de connexion.
+ *
+ * Renvoie null si l'app ne sait pas se nommer : on envoie alors l'email sans
+ * redirection plutôt que d'en fabriquer une fausse.
+ */
+function returnToApp(): { clientId: string; redirectUri: string } | null {
+  const clientId = env("OIDC_CLIENT_ID");
+  const base =
+    env("APP_BASE_URL").replace(/\/$/, "") ||
+    (() => {
+      try {
+        return new URL(env("OIDC_REDIRECT_URI")).origin;
+      } catch {
+        return "";
+      }
+    })();
+  if (!clientId || !base) return null;
+  return { clientId, redirectUri: `${base}/api/auth/oidc/login` };
+}
+
 export type ProvisionResult =
   | { status: "created" }
   | { status: "existing" }
@@ -199,16 +226,35 @@ export async function ensureInvitedUser(
 
     // 4. Email d'activation, émis par KEYCLOAK (pas par nous) : le jeton du lien
     //    est le sien, à durée limitée, et n'a jamais transité par notre code.
-    const mail = await fetch(
-      `${eps.admin}/users/${encodeURIComponent(id)}/execute-actions-email?lifespan=${ACTION_TOKEN_LIFESPAN_S}`,
-      {
-        method: "PUT",
-        headers: auth,
-        body: JSON.stringify(REQUIRED_ACTIONS),
-        signal: AbortSignal.timeout(TIMEOUT_MS),
-        cache: "no-store",
+    const back = returnToApp();
+    const sendActivation = (withReturn: boolean) => {
+      const qs = new URLSearchParams({ lifespan: String(ACTION_TOKEN_LIFESPAN_S) });
+      if (withReturn && back) {
+        qs.set("client_id", back.clientId);
+        qs.set("redirect_uri", back.redirectUri);
       }
-    );
+      return fetch(
+        `${eps.admin}/users/${encodeURIComponent(id)}/execute-actions-email?${qs.toString()}`,
+        {
+          method: "PUT",
+          headers: auth,
+          body: JSON.stringify(REQUIRED_ACTIONS),
+          signal: AbortSignal.timeout(TIMEOUT_MS),
+          cache: "no-store",
+        }
+      );
+    };
+
+    let mail = await sendActivation(true);
+    // ⚠️ REPLI OBLIGATOIRE. Keycloak REFUSE (400) un `redirect_uri` absent des
+    // « Valid redirect URIs » du client — un réglage qui vit dans l'IdP, hors de
+    // ce dépôt, et que personne ne pense à revoir. Sans ce repli, une simple
+    // divergence de configuration priverait l'invité de TOUT email : on aurait
+    // troqué un parcours perfectible contre un parcours impossible.
+    if (!mail.ok && back) {
+      console.error(`[idp-activation-no-redirect] status=${mail.status}`);
+      mail = await sendActivation(false);
+    }
     // Le compte EXISTE même si l'email n'est pas parti : on le dit, plutôt que
     // de laisser croire à un échec total (l'admin n'aurait plus qu'à renvoyer le
     // lien depuis Keycloak).
