@@ -322,7 +322,7 @@ applyViewConfig(records: ParsedRecord[], config: ViewConfig, properties: ParsedD
 - **Pas de state global** (Zustand, Redux). SWR + useState local suffisent.
 - **Optimistic updates** partout : mutate le cache SWR avant le fetch, rollback en cas d'erreur.
 - **Portals** : les dropdowns/popovers utilisent `createPortal` vers `document.body` (le `overflow` des conteneurs couperait sinon les éléments absolus).
-- **Drag-and-drop** : PointerSensor avec `activationConstraint: { distance: 6 }` partout (sidebar, table, kanban).
+- **Drag-and-drop** : **`MouseSensor` (`distance: 6`) + `TouchSensor` (`delay: 250, tolerance: 6`)**, partout (sidebar, table, kanban, backlog, options select). ⚠️ **Plus de `PointerSensor`** (convention d'avant le 06/08) : au doigt, le navigateur revendiquait le geste pour le défilement et émettait `pointercancel`, donc le drag ne s'armait quasiment jamais — ni fiable, ni franchement désactivé. Le `delay` est ce qui distingue un appui long (« je déplace ») d'un glissement (« je scrolle »). **Exception : les onglets de vues de `DatabaseShell` gardent `MouseSensor` SEUL** — leurs listeners couvrent tout l'onglet dans une bande `overflow-x-auto`, les rendre draggables au doigt interdirait d'atteindre les vues 4 et 5. ⚠️ Pas de `touch-none` sur les lignes de l'arbre de la sidebar : elles couvrent presque toute la surface, `touch-action: none` y interdirait de faire défiler la liste (le `TouchSensor` pose lui-même son listener non-passif une fois le drag armé).
 
 ## Autosave
 

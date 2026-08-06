@@ -6,7 +6,8 @@ import {
   DragEndEvent,
   DragStartEvent,
   DragOverlay,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   useSensor,
   useSensors,
   closestCorners,
@@ -195,15 +196,24 @@ function BacklogRow({
       style={style}
       {...attributes}
       className={[
-        "group flex items-center gap-2 pl-1.5 pr-1 py-1.5 rounded-md border border-transparent bg-[var(--bg)]",
+        // Sous md, méta et actions passent à la ligne plutôt que d'écraser le
+        // titre : tout est `shrink-0` à droite, un titre `min-w-0` finirait
+        // rogné à zéro dès trois badges.
+        "group flex flex-wrap md:flex-nowrap items-center gap-2 pl-1.5 pr-1 py-1.5 rounded-md border border-transparent bg-[var(--bg)]",
         isDragging ? "opacity-40" : "hover:bg-[var(--surface)] hover:border-[var(--border)]",
       ].join(" ")}
     >
       {!readOnly && (
+        // La poignée est la seule cible du drag → `touch-none`, sinon le
+        // navigateur garde la main sur le geste et le drag ne s'arme pas. Et
+        // elle doit être VISIBLE sous md : masquée derrière un survol qui
+        // n'existe pas au doigt, affecter une issue à un sprint devenait
+        // impossible sur mobile.
         <span
           {...(isEditingTitle ? {} : listeners)}
           className={[
-            "shrink-0 text-[var(--text-muted)] opacity-0 group-hover:opacity-100 transition-opacity",
+            "shrink-0 text-[var(--text-muted)] transition-opacity touch-none",
+            "opacity-100 md:opacity-0 md:group-hover:opacity-100",
             isEditingTitle ? "" : "cursor-grab active:cursor-grabbing",
           ].join(" ")}
           title="Déplacer"
@@ -222,7 +232,8 @@ function BacklogRow({
             if (e.key === "Enter") { e.preventDefault(); commitTitle(); }
             if (e.key === "Escape") { e.preventDefault(); setIsEditingTitle(false); }
           }}
-          className="flex-1 min-w-0 text-sm bg-transparent outline outline-1 outline-[var(--accent)] rounded px-1 text-[var(--text)]"
+          // iOS Safari zoome sur tout champ sous 16px et ne dézoome pas au blur.
+          className="flex-1 min-w-0 text-base sm:text-sm bg-transparent outline outline-1 outline-[var(--accent)] rounded px-1 text-[var(--text)]"
         />
       ) : (
         <button
@@ -398,11 +409,12 @@ export function SprintLane({
           : "border-[var(--border)]",
       ].join(" ")}
     >
-      {/* Header */}
-      <div className="flex items-center gap-2 px-2 py-2">
+      {/* Header — huit éléments sur une ligne ne tiennent pas sous md ; ils
+          passent à la ligne au lieu de déborder la lane. */}
+      <div className="flex flex-wrap md:flex-nowrap items-center gap-2 px-2 py-2">
         <button
           onClick={onToggleCollapse}
-          className="shrink-0 p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)]"
+          className="shrink-0 p-2 md:p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)]"
           title={collapsed ? "Déplier" : "Replier"}
         >
           {collapsed ? <ChevronRight size={15} /> : <ChevronDown size={15} />}
@@ -418,7 +430,7 @@ export function SprintLane({
               if (e.key === "Enter") { e.preventDefault(); commitRename(); }
               if (e.key === "Escape") { e.preventDefault(); setIsRenaming(false); setNameValue(sprint.name); }
             }}
-            className="text-sm font-semibold bg-transparent outline outline-1 outline-[var(--accent)] rounded px-1 text-[var(--text)] min-w-0"
+            className="text-base sm:text-sm font-semibold bg-transparent outline outline-1 outline-[var(--accent)] rounded px-1 text-[var(--text)] min-w-0"
             style={{ width: Math.max(80, nameValue.length * 8) + "px" }}
           />
         ) : (
@@ -458,7 +470,7 @@ export function SprintLane({
         {!collapsed && !readOnly && (
           <button
             onClick={() => onAddRecord(lane)}
-            className="shrink-0 flex items-center gap-1 pl-1 pr-1.5 py-0.5 text-xs text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] rounded-md transition-colors"
+            className="shrink-0 flex items-center gap-1 pl-1 pr-1.5 py-2 md:py-0.5 text-xs text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] rounded-md transition-colors"
             title="Créer une issue"
           >
             <Plus size={13} />
@@ -470,7 +482,7 @@ export function SprintLane({
           <button
             ref={menuBtnRef}
             onClick={(e) => { e.stopPropagation(); setMenuOpen(true); }}
-            className="shrink-0 p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)]"
+            className="shrink-0 p-2 md:p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)]"
             title="Options du sprint"
           >
             <MoreHorizontal size={15} />
@@ -572,7 +584,10 @@ function EpicsPanel({
     ].join(" ");
 
   return (
-    <div className="w-56 shrink-0 border-r border-[var(--border)] overflow-auto p-3">
+    // Sous md le panneau passe AU-DESSUS des lanes : en colonne latérale il
+    // laissait 150px aux issues sur un écran de 375px. Hauteur bornée pour qu'il
+    // ne pousse pas le backlog hors de l'écran.
+    <div className="w-full md:w-56 shrink-0 max-h-40 md:max-h-none border-b md:border-b-0 md:border-r border-[var(--border)] overflow-auto p-3">
       <div className="flex items-center gap-1.5 px-1 mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
         <Layers size={13} /> Épics
       </div>
@@ -625,14 +640,16 @@ function SprintEditModal({
     onClose();
   };
 
-  const field = "text-sm bg-[var(--surface)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-[var(--text)] outline-none focus:border-[var(--accent)]";
+  // iOS Safari zoome sur tout champ sous 16px et ne dézoome pas au blur : les
+  // quatre champs du formulaire passent en 16px sous sm.
+  const field = "text-base sm:text-sm bg-[var(--surface)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-[var(--text)] outline-none focus:border-[var(--accent)]";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-0 bg-black/30" onMouseDown={onClose}>
       <form
         onMouseDown={(e) => e.stopPropagation()}
         onSubmit={submit}
-        className="bg-[var(--bg)] border border-[var(--border)] rounded-xl shadow-xl p-4 w-[360px] flex flex-col gap-3"
+        className="bg-[var(--bg)] border border-[var(--border)] rounded-xl shadow-xl p-4 w-[360px] max-w-full flex flex-col gap-3"
       >
         <h3 className="text-sm font-semibold text-[var(--text)]">Modifier le sprint</h3>
         <div className="flex flex-col gap-1">
@@ -696,8 +713,13 @@ export default function BacklogView({
   const pendingTitles = useRef<Map<string, string>>(new Map());
   const newRecordTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // ⚠️ PointerSensor + distance ne s'arme quasiment jamais au doigt (le
+  // navigateur revendique le geste pour le scroll et émet `pointercancel`). Le
+  // `delay` distingue l'appui long du glissement — et ce drag n'est pas
+  // cosmétique : c'est le SEUL geste qui affecte une issue à un sprint.
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
+    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 6 } })
   );
 
   // ── Propriétés câblées (template scrum) ────────────────────────────────────
@@ -1158,7 +1180,7 @@ export default function BacklogView({
     : null;
 
   return (
-    <div className="flex h-full">
+    <div className="flex flex-col md:flex-row h-full min-h-0">
       {epicProp && (
         <EpicsPanel
           epicProp={epicProp}
@@ -1170,14 +1192,16 @@ export default function BacklogView({
         />
       )}
 
-      <div className="flex-1 overflow-auto">
+      {/* `min-w-0`/`min-h-0` : un enfant flex ne rétrécit pas sous la largeur de
+          son contenu sans ça — c'est la cause du débordement horizontal. */}
+      <div className="flex-1 min-w-0 min-h-0 overflow-auto">
         <DndContext
           sensors={sensors}
           collisionDetection={closestCorners}
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
         >
-          <div className="p-4 flex flex-col gap-3 max-w-3xl mx-auto">
+          <div className="p-3 md:p-4 flex flex-col gap-3 max-w-3xl mx-auto">
             {!readOnly && (
               <div className="flex items-center justify-end">
                 <button

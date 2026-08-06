@@ -18,6 +18,16 @@ export function withStopPropagation(action: () => void) {
  * carte, en remplacement de l'ancien menu ⋯. Partagé par KanbanView (carte) et
  * BacklogView (ligne d'issue). La duplication est immédiate ; la confirmation de
  * suppression reste gérée par l'appelant (useDialog().confirm).
+ *
+ * ⚠️ `opacity-0` ne désactive PAS les clics : la version « masquée au survol »
+ * restait tapable au doigt, et un appui sur le bord d'une carte déclenchait
+ * « Dupliquer » — immédiat, sans confirmation, donc création de données. D'où
+ * les deux mesures ci-dessous, indissociables :
+ *   1. sous md il n'y a pas de survol → les actions sont VISIBLES (on tape ce
+ *      qu'on voit) ;
+ *   2. à partir de md, `pointer-events-none` accompagne l'opacité pour que la
+ *      branche invisible cesse d'être une cible — le survol (ou le focus
+ *      clavier) rend l'un et l'autre en même temps.
  */
 export default function CardActions({
   onDuplicate,
@@ -41,7 +51,10 @@ export default function CardActions({
       onClick={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
       className={[
-        "flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity",
+        "flex items-center gap-0.5 transition-opacity",
+        "opacity-100 md:opacity-0 md:pointer-events-none",
+        "md:group-hover:opacity-100 md:group-hover:pointer-events-auto",
+        "md:focus-within:opacity-100 md:focus-within:pointer-events-auto",
         className,
       ].join(" ")}
     >
@@ -51,7 +64,9 @@ export default function CardActions({
         title="Dupliquer"
         onClick={withStopPropagation(onDuplicate)}
         onPointerDown={(e) => e.stopPropagation()}
-        className="p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)]"
+        // Le padding est la seule variable d'ajustement : l'icône fait 14px, et
+        // la pilule du calendrier (24px de haut) interdit une cible plus large.
+        className="p-1.5 md:p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)]"
       >
         <Copy size={14} />
       </button>
@@ -62,7 +77,7 @@ export default function CardActions({
           title="Supprimer"
           onClick={withStopPropagation(onDelete)}
           onPointerDown={(e) => e.stopPropagation()}
-          className="p-0.5 rounded text-[var(--text-muted)] hover:text-red-500 hover:bg-[var(--surface-hover)]"
+          className="p-1.5 md:p-0.5 rounded text-[var(--text-muted)] hover:text-red-500 hover:bg-[var(--surface-hover)]"
         >
           <Trash2 size={14} />
         </button>

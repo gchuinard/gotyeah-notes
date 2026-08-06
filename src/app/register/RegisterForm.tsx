@@ -37,13 +37,16 @@ function PasswordInput({
         placeholder={placeholder}
         required={required}
         autoFocus={autoFocus}
-        className="w-full border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] rounded-lg px-3 py-2 pr-10 text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 transition-colors"
+        className="w-full border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] rounded-lg px-3 py-2 pr-12 md:pr-10 text-base sm:text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 transition-colors"
       />
+      {/* Cible tactile pleine hauteur sous md ; au-dessus, on retrouve exactement
+          l'icône flottante d'origine (mêmes offsets, largeur au contenu). */}
       <button
         type="button"
         onClick={onToggleShow}
         tabIndex={-1}
-        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text)]"
+        aria-label={show ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+        className="absolute right-0 top-0 bottom-0 flex w-11 items-center justify-center text-[var(--text-muted)] hover:text-[var(--text)] md:right-2.5 md:top-1/2 md:bottom-auto md:w-auto md:-translate-y-1/2"
       >
         {show ? <EyeOff size={15} /> : <Eye size={15} />}
       </button>
@@ -69,8 +72,10 @@ export default function RegisterForm() {
   const passwordsMatch = confirm.length > 0 && password === confirm;
   const canSubmit = allMet && passwordsMatch && !loading;
 
+  // text-base sous sm : iOS Safari zoome sur tout champ < 16px et ne dézoome
+  // jamais au blur.
   const inputClass =
-    "border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 transition-colors";
+    "border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] rounded-lg px-3 py-2 text-base sm:text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 transition-colors";
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -93,7 +98,7 @@ export default function RegisterForm() {
   };
 
   return (
-    <div className="flex items-center justify-center min-h-screen w-full bg-[var(--bg)] py-10">
+    <div className="flex items-center justify-center min-h-dvh w-full bg-[var(--bg)] py-10">
       <div className="w-full max-w-sm px-6">
         <h1 className="text-2xl font-bold text-center text-[var(--text)] mb-8">
           📝 Notes
@@ -217,7 +222,7 @@ export default function RegisterForm() {
           <button
             type="submit"
             disabled={!canSubmit}
-            className="bg-blue-500 hover:bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-colors mt-1"
+            className="bg-blue-500 hover:bg-blue-600 text-white rounded-lg px-4 py-2.5 md:py-2 text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-colors mt-1"
           >
             {loading ? "Création…" : "Créer un compte"}
           </button>

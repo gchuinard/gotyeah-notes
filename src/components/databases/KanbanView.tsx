@@ -6,7 +6,8 @@ import {
   DragEndEvent,
   DragStartEvent,
   DragOverlay,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   useSensor,
   useSensors,
   closestCorners,
@@ -303,7 +304,11 @@ function KanbanCard({
         ].join(" ")}
       >
         {/* Case de sélection : visible au survol OU quand la carte est cochée.
-            Contrôle distinct du clic d'ouverture / du drag (stopPropagation). */}
+            Contrôle distinct du clic d'ouverture / du drag (stopPropagation).
+            ⚠️ Sous md, l'état masqué est VISIBLE : sans survol, la case restait
+            invisible mais tapable — on basculait une sélection sans avoir vu de
+            case. Au-dessus de md, `pointer-events-none` va de pair avec
+            l'opacité pour que l'invisible cesse d'être une cible. */}
         {!isEditing && !readOnly && (
           <SelectCheckbox
             selected={selected}
@@ -311,7 +316,9 @@ function KanbanCard({
             label="Sélectionner la carte"
             className={[
               "grid absolute top-1 left-1 z-10",
-              selected ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+              selected
+                ? "opacity-100"
+                : "opacity-100 md:opacity-0 md:pointer-events-none md:group-hover:opacity-100 md:group-hover:pointer-events-auto",
             ].join(" ")}
           />
         )}
@@ -335,16 +342,20 @@ function KanbanCard({
               if (e.key === "Enter") { e.preventDefault(); commitTitle(); }
               if (e.key === "Escape") { e.preventDefault(); setIsEditingTitle(false); }
             }}
-            className="w-full text-sm font-semibold bg-transparent outline outline-1 outline-[var(--accent)] rounded px-1 text-[var(--text)]"
+            // iOS Safari zoome sur tout champ sous 16px et ne dézoome pas au blur.
+            className="w-full text-base sm:text-sm font-semibold bg-transparent outline outline-1 outline-[var(--accent)] rounded px-1 text-[var(--text)]"
             onClick={(e) => e.stopPropagation()}
           />
         ) : (
           // Simple clic sur le titre → édition inline (n'ouvre PAS le panneau).
           // En lecture seule, le clic remonte à la carte → ouvre le panneau.
           <p
+            // Gouttières réservées aux deux affordances désormais toujours
+            // visibles sous md (case de sélection à gauche, actions à droite) :
+            // sans elles, le titre passerait dessous.
             className={[
-              "text-sm font-semibold text-[var(--text)] leading-snug break-words pr-12",
-              readOnly ? "" : "pl-5 cursor-text",
+              "text-sm font-semibold text-[var(--text)] leading-snug break-words pr-14 md:pr-12",
+              readOnly ? "" : "pl-7 md:pl-5 cursor-text",
             ].join(" ")}
             onClick={readOnly ? undefined : (e) => {
               e.stopPropagation();
@@ -464,7 +475,11 @@ export function KanbanColView({
   };
 
   return (
-    <div className="w-64 shrink-0 flex flex-col gap-2">
+    // Sous md la colonne prend presque tout l'écran et s'aligne sur le scroll-snap
+    // du board : sans ça, on lit en permanence deux demi-colonnes. `max-w` évite
+    // qu'une tablette de 760px hérite d'une colonne de 640px.
+    // `snap-start` est inerte au-dessus de md, le board y repassant en `snap-none`.
+    <div className="w-[85vw] max-w-[18rem] md:w-64 md:max-w-none shrink-0 snap-start flex flex-col gap-2">
       <div className="flex items-center gap-2 px-1 min-h-[28px]">
         {col.option ? (
           isRenamingCol ? (
@@ -481,7 +496,7 @@ export function KanbanColView({
                   setColNameValue(col.label);
                 }
               }}
-              className="text-sm font-medium bg-transparent outline outline-1 outline-[var(--accent)] rounded px-1 text-[var(--text)] min-w-0 max-w-[160px]"
+              className="text-base sm:text-sm font-medium bg-transparent outline outline-1 outline-[var(--accent)] rounded px-1 text-[var(--text)] min-w-0 max-w-[160px]"
               style={{ width: Math.max(60, colNameValue.length * 8) + "px" }}
             />
           ) : (
@@ -519,7 +534,7 @@ export function KanbanColView({
           shouldShowKanbanAddButton(createOnlyInUnassigned, col.optionId) && (
           <button
             onClick={() => onAddRecord(col)}
-            className="shrink-0 flex items-center gap-1 pl-1 pr-1.5 py-0.5 text-xs text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] rounded-md transition-colors"
+            className="shrink-0 flex items-center gap-1 pl-1 pr-1.5 py-2 md:py-0.5 text-xs text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] rounded-md transition-colors"
             title="Nouvel enregistrement"
           >
             <Plus size={13} />
@@ -599,7 +614,7 @@ function SprintBoardHeader({
   // sont des mutations → on n'affiche que le libellé du scope courant.
   if (readOnly) {
     return (
-      <div className="flex items-center gap-2 px-4 py-2 border-b border-[var(--border)] shrink-0">
+      <div className="flex flex-wrap md:flex-nowrap items-center gap-2 px-4 py-2 border-b border-[var(--border)] shrink-0">
         <span className="px-2.5 py-1 text-sm rounded-md bg-[var(--surface)] border border-[var(--border)] text-[var(--text)]">
           {label}
         </span>
@@ -608,7 +623,7 @@ function SprintBoardHeader({
   }
 
   return (
-    <div className="flex items-center gap-2 px-4 py-2 border-b border-[var(--border)] shrink-0">
+    <div className="flex flex-wrap md:flex-nowrap items-center gap-2 px-4 py-2 border-b border-[var(--border)] shrink-0">
       <button
         ref={btnRef}
         onClick={() => setOpen((o) => !o)}
@@ -715,8 +730,14 @@ export default function KanbanView({
   const newRecordTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dragJustEndedRef = useRef(false);
 
+  // ⚠️ PointerSensor + distance ne s'arme quasiment jamais au doigt : le
+  // navigateur revendique le geste pour le scroll et émet `pointercancel`. Le
+  // `delay` du TouchSensor est ce qui distingue l'appui long (« je déplace ») du
+  // glissement (« je scrolle ») — c'est la carte ENTIÈRE qui porte les
+  // listeners ici, donc pas de `touch-none` : il gèlerait le scroll du board.
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
+    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 6 } })
   );
 
   const groupByPropId = (view.config as { groupByPropertyId?: string }).groupByPropertyId;
@@ -1283,7 +1304,9 @@ export default function KanbanView({
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
         >
-          <div className="flex gap-4 p-4 overflow-x-auto flex-1">
+          {/* `scroll-px-4` conserve la gouttière du board une fois la colonne
+              accrochée (sans lui, le padding gauche disparaît sous le snap). */}
+          <div className="flex gap-4 p-4 overflow-x-auto flex-1 snap-x snap-mandatory scroll-px-4 md:snap-none md:scroll-px-0">
             {columns.map((col) => (
               <KanbanColView
                 key={col.id}

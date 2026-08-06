@@ -7,7 +7,12 @@ import { Check } from "lucide-react";
  * est portée par la coche, pas par la forme (pattern galerie photo / iOS).
  *
  * `role="checkbox"` + `aria-checked` conservent l'accessibilité. La cible tappable
- * fait 24px (`h-6 w-6`) même si le rond visuel n'en fait que 16 → confort mobile.
+ * fait 24px (`h-6 w-6`) même si le rond visuel n'en fait que 16, et passe à 32px
+ * sous md — 24px au doigt, c'est le rond qu'on rate et la carte qu'on ouvre.
+ * ⚠️ Écrit en `max-md:` et non « mobile en base + restauration en `md:` » : le
+ * composant reçoit parfois un `absolute` par `className`, et un `relative`/une
+ * taille de base réécrits ici se retrouveraient à lutter contre l'appelant.
+ * `h-6 w-6` reste donc la valeur de base — celle du desktop, au pixel près.
  * `stopPropagation` (click + pointerdown) empêche l'ouverture de la carte et le drag
  * du parent, comme la checkbox d'origine.
  *
@@ -36,7 +41,10 @@ export function SelectCheckbox({
         onToggle();
       }}
       onPointerDown={(e) => e.stopPropagation()}
-      className={["group/sel place-items-center h-6 w-6 cursor-pointer rounded-full", className].join(" ")}
+      className={[
+        "group/sel place-items-center h-6 w-6 max-md:h-8 max-md:w-8 cursor-pointer rounded-full",
+        className,
+      ].join(" ")}
     >
       <span
         aria-hidden

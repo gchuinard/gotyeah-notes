@@ -1,7 +1,7 @@
 "use client";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Trash2, Plus, GripVertical, Lock, ChevronDown } from "lucide-react";
-import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { DndContext, closestCenter, MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, arrayMove, useSortable } from "@dnd-kit/sortable";
 import type { ParsedDatabaseProperty, SelectOption } from "@/lib/db";
 import Portal from "@/components/databases/portal";
@@ -91,13 +91,17 @@ function OptionRow({
           ].join(" ")}
         />
       )}
-      {/* Name + delete */}
+      {/* Name + delete.
+          Sans survol, poignée et corbeille resteraient invisibles au doigt : on
+          les montre en base et on rend le survol au desktop. `pointer-events` suit
+          l'opacité — un bouton transparent reste cliquable, donc tapable par
+          accident au beau milieu du champ de saisie. */}
       <div className="flex items-center gap-1.5">
         <span
           {...attributes}
           {...listeners}
           title="Glisser pour réordonner"
-          className="opacity-0 group-hover/opt:opacity-100 cursor-grab active:cursor-grabbing text-[var(--text-muted)] transition-opacity shrink-0 touch-none"
+          className="opacity-100 md:opacity-0 md:group-hover/opt:opacity-100 md:pointer-events-none md:group-hover/opt:pointer-events-auto cursor-grab active:cursor-grabbing text-[var(--text-muted)] transition-opacity shrink-0 touch-none p-2 -m-2 md:p-0 md:m-0"
         >
           <GripVertical size={12} />
         </span>
@@ -105,20 +109,22 @@ function OptionRow({
           ref={inputRef}
           value={option.name}
           onChange={(e) => onChange({ ...option, name: e.target.value })}
-          className="flex-1 text-sm bg-transparent text-[var(--text)] outline-none min-w-0"
+          className="flex-1 text-base sm:text-sm bg-transparent text-[var(--text)] outline-none min-w-0"
           placeholder="Option sans nom"
         />
         <button
           type="button"
           onClick={onDelete}
-          className="opacity-0 group-hover/opt:opacity-100 text-[var(--text-muted)] hover:text-red-500 transition-opacity shrink-0"
+          className="opacity-100 md:opacity-0 md:group-hover/opt:opacity-100 md:pointer-events-none md:group-hover/opt:pointer-events-auto text-[var(--text-muted)] hover:text-red-500 transition-opacity shrink-0 p-2.5 -my-2.5 md:p-0 md:my-0"
         >
           <Trash2 size={12} />
         </button>
       </div>
 
-      {/* Color swatches — 8 dots, 1 click to change */}
-      <div className="flex gap-1 mt-1">
+      {/* Color swatches — 8 dots, 1 click to change.
+          `flex-wrap` : à 32px la rangée dépasse la largeur d'un popover étroit ;
+          sans lui, les dernières couleurs sortiraient du panneau. */}
+      <div className="flex flex-wrap gap-1 mt-2 md:mt-1">
         {COLORS.map((color) => (
           <button
             key={color}
@@ -126,7 +132,7 @@ function OptionRow({
             onClick={() => onChange({ ...option, color })}
             title={color}
             className={[
-              "w-5 h-5 rounded-full shrink-0 cursor-pointer transition-all",
+              "w-8 h-8 md:w-5 md:h-5 rounded-full shrink-0 cursor-pointer transition-all",
               SWATCH_BG[color] ?? "bg-gray-300",
               option.color === color
                 ? "ring-2 ring-offset-1 ring-gray-600 scale-110"
@@ -193,11 +199,17 @@ export default function PropertyPopover({
   }, [property, onPropertyUpdated]);
 
   // ── PATCH options (called after every option change) ─────────────────────
+  // Au doigt, le PointerSensor perdait le geste : le navigateur le revendique pour
+  // le scroll et émet `pointercancel`. Le délai du TouchSensor distingue l'appui
+  // long (déplacer) du glissement (faire défiler la liste d'options).
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 6 } })
+  );
+
   // Écriture optimiste : en cas de refus serveur (ex. 400 « option référencée »),
   // on RESTAURE le dernier état réellement enregistré — sinon l'UI afficherait une
   // option supprimée qui existe toujours en base.
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
-
   const saveOptions = useCallback(async (nextOptions: SelectOption[]) => {
     setSaving(true);
     setOptionsError(null);
@@ -382,7 +394,7 @@ export default function PropertyPopover({
             if (e.key === "Enter") { e.preventDefault(); saveName(name); }
             if (e.key === "Escape") onClose();
           }}
-          className="w-full text-sm bg-[var(--surface)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-[var(--text)] outline-none focus:border-[var(--accent)]"
+          className="w-full text-base sm:text-sm bg-[var(--surface)] border border-[var(--border)] rounded-md px-2.5 py-2.5 sm:py-1.5 text-[var(--text)] outline-none focus:border-[var(--accent)]"
           placeholder="Nom de la propriété"
         />
       </div>
@@ -430,7 +442,7 @@ export default function PropertyPopover({
           <button
             type="button"
             onClick={handleAddOption}
-            className="w-full flex items-center gap-1.5 px-3 py-1.5 text-sm text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"
+            className="w-full flex items-center gap-1.5 px-3 py-3 md:py-1.5 text-sm text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"
           >
             <Plus size={13} />
             Ajouter une option
@@ -444,7 +456,7 @@ export default function PropertyPopover({
         <div className="border-t border-[var(--border)] mt-1 pt-1 px-2 pb-1">
           <button
             onClick={() => setRulesOpen((v) => !v)}
-            className="w-full flex items-center gap-2 px-1 py-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--text)] transition-colors"
+            className="w-full flex items-center gap-2 px-1 py-3 md:py-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--text)] transition-colors"
           >
             <Lock size={12} />
             Qui peut mettre une carte ici
@@ -483,7 +495,7 @@ export default function PropertyPopover({
                           disabled={saving}
                           onClick={() => toggleRuleRole(opt.id, id)}
                           className={[
-                            "text-[11px] px-1.5 py-0.5 rounded border transition-colors",
+                            "text-[11px] px-2.5 py-2 md:px-1.5 md:py-0.5 rounded border transition-colors",
                             rule?.roles?.includes(id)
                               ? "border-blue-400 text-blue-500 bg-blue-50"
                               : "border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)]",
@@ -498,7 +510,7 @@ export default function PropertyPopover({
                           disabled={saving}
                           onClick={() => toggleRuleUser(opt.id, m.userId)}
                           className={[
-                            "text-[11px] px-1.5 py-0.5 rounded border transition-colors",
+                            "text-[11px] px-2.5 py-2 md:px-1.5 md:py-0.5 rounded border transition-colors",
                             rule?.userIds?.includes(m.userId)
                               ? "border-blue-400 text-blue-500 bg-blue-50"
                               : "border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)]",
@@ -528,14 +540,14 @@ export default function PropertyPopover({
             <button
               type="button"
               onClick={() => setConfirmDelete(false)}
-              className="text-xs px-2 py-1 rounded text-[var(--text-muted)] hover:bg-[var(--surface-hover)]"
+              className="text-xs px-3 py-2.5 md:px-2 md:py-1 rounded text-[var(--text-muted)] hover:bg-[var(--surface-hover)]"
             >
               Non
             </button>
             <button
               type="button"
               onClick={handleDelete}
-              className="text-xs px-2 py-1 rounded bg-red-100 text-red-600 hover:bg-red-200"
+              className="text-xs px-3 py-2.5 md:px-2 md:py-1 rounded bg-red-100 text-red-600 hover:bg-red-200"
             >
               Oui
             </button>
@@ -544,7 +556,7 @@ export default function PropertyPopover({
           <button
             type="button"
             onClick={() => setConfirmDelete(true)}
-            className="w-full flex items-center gap-2 px-1 py-1.5 text-sm text-red-500 hover:bg-red-50 rounded"
+            className="w-full flex items-center gap-2 px-1 py-3 md:py-1.5 text-sm text-red-500 hover:bg-red-50 rounded"
           >
             <Trash2 size={13} />
             Supprimer la propriété

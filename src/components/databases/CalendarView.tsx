@@ -155,8 +155,14 @@ function RecordPill({
         {display}
       </button>
       {onDuplicate && (
+        // ⚠️ Seule vue où l'on RETIRE l'action sous md au lieu de la montrer. Ce
+        // conteneur couvre tout le bord droit de la pilule : masqué, il faisait
+        // dupliquer au moindre appui (le bug qu'on ferme ici) ; montré, il mange
+        // 28px sur une case de jour qui en fait 60. Dans les deux cas la pilule
+        // est perdue — on garde donc la lecture, la duplication reste offerte
+        // par les quatre autres vues.
         <CardActions
-          className="absolute inset-y-0 right-0.5 z-10"
+          className="hidden md:flex absolute inset-y-0 right-0.5 z-10"
           onDuplicate={() => onDuplicate(record)}
         />
       )}
@@ -194,7 +200,7 @@ function CalendarCell({
     <div
       onClick={readOnly ? undefined : () => onCellClick(date)}
       className={[
-        "min-h-[100px] border border-[var(--border)] p-1 flex flex-col gap-0.5 select-none",
+        "min-h-[76px] sm:min-h-[100px] border border-[var(--border)] p-0.5 sm:p-1 flex flex-col gap-0.5 select-none",
         readOnly ? "" : "cursor-pointer hover:bg-[var(--surface-hover)] transition-colors",
         isToday ? "bg-[color-mix(in_srgb,var(--accent)_12%,transparent)]" : "",
       ].join(" ")}
@@ -202,7 +208,7 @@ function CalendarCell({
       {/* Day number */}
       <span
         className={[
-          "text-xs font-medium self-start leading-5 w-6 h-6 flex items-center justify-center rounded-full",
+          "text-xs font-medium self-start leading-5 w-5 h-5 sm:w-6 sm:h-6 flex items-center justify-center rounded-full",
           isToday
             ? "bg-[var(--accent)] text-white"
             : isCurrentMonth
@@ -423,22 +429,22 @@ export default function CalendarView({
     <>
       <div className="flex flex-col h-full overflow-hidden">
         {/* Month navigation header */}
-        <div className="flex items-center gap-2 px-4 py-2 shrink-0 border-b border-[var(--border)]">
+        <div className="flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-2 shrink-0 border-b border-[var(--border)]">
           <button
             onClick={prevMonth}
-            className="p-1.5 rounded hover:bg-[var(--surface-hover)] text-[var(--text-muted)] hover:text-[var(--text)] transition-colors"
+            className="p-2.5 sm:p-1.5 rounded hover:bg-[var(--surface-hover)] text-[var(--text-muted)] hover:text-[var(--text)] transition-colors"
             title="Mois précédent"
           >
             <ChevronLeft size={16} />
           </button>
 
-          <span className="text-sm font-semibold text-[var(--text)] capitalize min-w-[140px] text-center">
+          <span className="text-sm font-semibold text-[var(--text)] capitalize min-w-[112px] sm:min-w-[140px] text-center">
             {MONTH_FMT.format(new Date(year, month))}
           </span>
 
           <button
             onClick={nextMonth}
-            className="p-1.5 rounded hover:bg-[var(--surface-hover)] text-[var(--text-muted)] hover:text-[var(--text)] transition-colors"
+            className="p-2.5 sm:p-1.5 rounded hover:bg-[var(--surface-hover)] text-[var(--text-muted)] hover:text-[var(--text)] transition-colors"
             title="Mois suivant"
           >
             <ChevronRight size={16} />
@@ -454,13 +460,19 @@ export default function CalendarView({
 
         {/* Calendar grid */}
         <div className="flex-1 overflow-auto">
-          <div className="min-w-[560px]">
+          {/* Sois lucide : sous ~500px, 7 colonnes lisibles sont géométriquement
+              impossibles (≈53px par jour, moins les bordures). Le compromis
+              retenu est un plancher de 480px dans un conteneur défilant : la vue
+              redevient CONSULTABLE au prix d'un scroll horizontal, elle n'est
+              pas confortable et ne peut pas l'être sans changer de forme (une
+              vue agenda, explicitement écartée). */}
+          <div className="min-w-[480px] sm:min-w-[560px]">
             {/* Day headers */}
             <div className="grid grid-cols-7 border-b border-[var(--border)]">
               {DAY_HEADERS.map((d) => (
                 <div
                   key={d}
-                  className="px-2 py-1.5 text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide text-center border-r border-[var(--border)] last:border-r-0"
+                  className="px-1 py-1 sm:px-2 sm:py-1.5 text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide text-center border-r border-[var(--border)] last:border-r-0"
                 >
                   {d}
                 </div>

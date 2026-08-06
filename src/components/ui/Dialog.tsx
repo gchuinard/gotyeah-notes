@@ -96,12 +96,14 @@ export default function Dialog({ request, onSettle }: Props) {
         if (e.target === e.currentTarget) onSettle(false);
       }}
     >
+      {/* `max-h` + scroll : clavier virtuel ouvert, un dialogue plus haut que la
+          fenêtre laissait ses boutons hors d'atteinte, sans aucun scroll possible. */}
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={request.message ? messageId : undefined}
-        className="bg-[var(--bg)] border border-[var(--border)] rounded-xl shadow-xl w-80 max-w-full p-5 flex flex-col gap-4"
+        className="bg-[var(--bg)] border border-[var(--border)] rounded-xl shadow-xl w-full sm:w-80 max-w-full max-h-[calc(100dvh-2rem)] overflow-y-auto p-5 flex flex-col gap-4"
       >
         <h2 id={titleId} className="text-sm font-semibold text-[var(--text)]">
           {request.title}
@@ -113,13 +115,16 @@ export default function Dialog({ request, onSettle }: Props) {
           </p>
         )}
 
-        <div className="flex justify-end gap-2">
+        {/* `flex-col-reverse` au doigt : le bouton SÛR (Annuler, premier dans le
+            DOM pour le focus et la tabulation) se retrouve en bas, sous le pouce,
+            et le destructif s'éloigne de la zone où l'on tape par réflexe. */}
+        <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
           {isConfirm && (
             <button
               ref={cancelRef}
               type="button"
               onClick={() => onSettle(false)}
-              className="px-3 py-1.5 text-sm rounded hover:bg-[var(--surface-hover)] text-[var(--text-muted)]"
+              className="px-3 py-1.5 min-h-[44px] sm:min-h-0 text-sm rounded hover:bg-[var(--surface-hover)] text-[var(--text-muted)]"
             >
               {request.cancelLabel ?? "Annuler"}
             </button>
@@ -129,7 +134,7 @@ export default function Dialog({ request, onSettle }: Props) {
             type="button"
             onClick={() => onSettle(true)}
             className={[
-              "px-3 py-1.5 text-sm rounded text-white transition-opacity",
+              "px-3 py-1.5 min-h-[44px] sm:min-h-0 text-sm rounded text-white transition-opacity",
               isDanger ? "bg-red-500 hover:bg-red-600" : "bg-[var(--accent)] hover:opacity-90",
             ].join(" ")}
           >

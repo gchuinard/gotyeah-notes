@@ -75,14 +75,19 @@ export default function AddPropertyModal({ databaseId, onCreated, onClose }: Pro
   return (
     // Overlay
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/30"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4 sm:p-0"
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="bg-[var(--bg)] border border-[var(--border)] rounded-xl shadow-xl w-80 p-5">
+      {/* `max-h` + scroll : le clavier virtuel s'ouvre sur le champ Nom (autofocus)
+          et laissait sinon les boutons hors d'atteinte, sans scroll possible. */}
+      <div className="bg-[var(--bg)] border border-[var(--border)] rounded-xl shadow-xl w-full sm:w-80 max-h-[calc(100dvh-2rem)] overflow-y-auto p-5">
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <span className="text-sm font-semibold text-[var(--text)]">Nouvelle propriété</span>
-          <button onClick={onClose} className="text-[var(--text-muted)] hover:text-[var(--text)]">
+          <button
+            onClick={onClose}
+            className="text-[var(--text-muted)] hover:text-[var(--text)] p-2 -m-2 md:p-0 md:m-0"
+          >
             <X size={16} />
           </button>
         </div>
@@ -96,7 +101,7 @@ export default function AddPropertyModal({ databaseId, onCreated, onClose }: Pro
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Nom de la propriété"
-              className="w-full text-sm bg-[var(--surface)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-[var(--text)] outline-none focus:border-[var(--accent)]"
+              className="w-full text-base sm:text-sm bg-[var(--surface)] border border-[var(--border)] rounded-md px-2.5 py-2.5 sm:py-1.5 text-[var(--text)] outline-none focus:border-[var(--accent)]"
             />
           </div>
 
@@ -106,7 +111,7 @@ export default function AddPropertyModal({ databaseId, onCreated, onClose }: Pro
             <select
               value={type}
               onChange={(e) => setType(e.target.value as PropertyType)}
-              className="w-full text-sm bg-[var(--surface)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-[var(--text)] outline-none focus:border-[var(--accent)]"
+              className="w-full text-base sm:text-sm bg-[var(--surface)] border border-[var(--border)] rounded-md px-2.5 py-2.5 sm:py-1.5 text-[var(--text)] outline-none focus:border-[var(--accent)]"
             >
               {TYPE_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -119,18 +124,20 @@ export default function AddPropertyModal({ databaseId, onCreated, onClose }: Pro
           )}
 
           {/* Actions */}
-          <div className="flex justify-end gap-2 pt-1">
+          {/* `flex-col-reverse` au doigt : Annuler (premier dans le DOM) passe en
+              bas, sous le pouce, et l'action principale s'éloigne du bord. */}
+          <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 pt-1">
             <button
               type="button"
               onClick={onClose}
-              className="text-sm px-3 py-1.5 rounded-md text-[var(--text-muted)] hover:bg-[var(--surface-hover)]"
+              className="text-sm px-3 py-1.5 min-h-[44px] sm:min-h-0 rounded-md text-[var(--text-muted)] hover:bg-[var(--surface-hover)]"
             >
               Annuler
             </button>
             <button
               type="submit"
               disabled={saving}
-              className="text-sm px-3 py-1.5 rounded-md bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-50"
+              className="text-sm px-3 py-1.5 min-h-[44px] sm:min-h-0 rounded-md bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-50"
             >
               {saving ? "Création…" : "Créer"}
             </button>

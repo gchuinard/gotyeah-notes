@@ -146,10 +146,10 @@ export default function TemplatesManager() {
       setForm((f) => f && { ...f, columns: f.columns.map((c, j) => (j === i ? { ...c, ...patch } : c)) });
 
     return (
-      <div className="max-w-2xl mx-auto px-8 py-8 text-[var(--text)]">
+      <div className="max-w-2xl mx-auto px-4 py-6 sm:px-8 sm:py-8 text-[var(--text)]">
         <button
           onClick={() => setForm(null)}
-          className="flex items-center gap-1 text-sm text-[var(--text-muted)] hover:text-[var(--text)] mb-4"
+          className="flex items-center gap-1 text-sm text-[var(--text-muted)] hover:text-[var(--text)] mb-4 py-2 md:py-0"
         >
           <ArrowLeft size={15} /> Retour
         </button>
@@ -173,11 +173,12 @@ export default function TemplatesManager() {
                 value={s.label}
                 onChange={(e) => setSection(i, e.target.value)}
                 placeholder="Libellé de section"
-                className="flex-1 px-3 py-1.5 rounded border border-[var(--border)] bg-[var(--surface)] outline-none text-sm"
+                className="flex-1 min-w-0 px-3 py-1.5 rounded border border-[var(--border)] bg-[var(--surface)] outline-none text-base sm:text-sm"
               />
               <button
                 onClick={() => setForm({ ...form, sections: form.sections.filter((_, j) => j !== i) })}
-                className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text)]"
+                aria-label="Supprimer la section"
+                className="shrink-0 flex h-10 w-10 items-center justify-center text-[var(--text-muted)] hover:text-[var(--text)] md:h-auto md:w-auto md:p-1.5"
               >
                 <X size={15} />
               </button>
@@ -185,7 +186,7 @@ export default function TemplatesManager() {
           ))}
           <button
             onClick={() => setForm({ ...form, sections: [...form.sections, { label: "" }] })}
-            className="flex items-center gap-1 text-sm text-[var(--text-muted)] hover:text-[var(--text)] mt-1"
+            className="flex items-center gap-1 text-sm text-[var(--text-muted)] hover:text-[var(--text)] mt-1 py-2 md:py-0"
           >
             <Plus size={14} /> Ajouter une section
           </button>
@@ -198,17 +199,20 @@ export default function TemplatesManager() {
             Pour select/multiselect, options séparées par des virgules.
           </p>
           {form.columns.map((c, i) => (
-            <div key={i} className="flex items-center gap-2 mb-1.5">
+            // La ligne dépassait la largeur d'un mobile sans conteneur scrollable
+            // au-dessus : le document débordait et le × sortait de l'écran. On
+            // renvoie les options sur leur propre ligne au lieu de comprimer.
+            <div key={i} className="flex flex-wrap items-center gap-2 mb-1.5">
               <input
                 value={c.name}
                 onChange={(e) => setCol(i, { name: e.target.value })}
                 placeholder="Nom"
-                className="w-36 px-2 py-1.5 rounded border border-[var(--border)] bg-[var(--surface)] outline-none text-sm"
+                className="w-36 px-2 py-1.5 rounded border border-[var(--border)] bg-[var(--surface)] outline-none text-base sm:text-sm"
               />
               <select
                 value={c.type}
                 onChange={(e) => setCol(i, { type: e.target.value })}
-                className="px-2 py-1.5 rounded border border-[var(--border)] bg-[var(--surface)] outline-none text-sm"
+                className="min-w-0 px-2 py-1.5 rounded border border-[var(--border)] bg-[var(--surface)] outline-none text-base sm:text-sm"
               >
                 {COLUMN_TYPES.map((t) => (
                   <option key={t} value={t}>{t}</option>
@@ -219,12 +223,13 @@ export default function TemplatesManager() {
                   value={c.optionsCsv}
                   onChange={(e) => setCol(i, { optionsCsv: e.target.value })}
                   placeholder="Option A, Option B…"
-                  className="flex-1 px-2 py-1.5 rounded border border-[var(--border)] bg-[var(--surface)] outline-none text-sm"
+                  className="grow min-w-0 order-1 basis-full sm:order-none sm:basis-0 px-2 py-1.5 rounded border border-[var(--border)] bg-[var(--surface)] outline-none text-base sm:text-sm"
                 />
               )}
               <button
                 onClick={() => setForm({ ...form, columns: form.columns.filter((_, j) => j !== i) })}
-                className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text)]"
+                aria-label="Supprimer la colonne"
+                className="shrink-0 flex h-10 w-10 items-center justify-center text-[var(--text-muted)] hover:text-[var(--text)] md:h-auto md:w-auto md:p-1.5"
               >
                 <X size={15} />
               </button>
@@ -232,7 +237,7 @@ export default function TemplatesManager() {
           ))}
           <button
             onClick={() => setForm({ ...form, columns: [...form.columns, { name: "", type: "text", optionsCsv: "" }] })}
-            className="flex items-center gap-1 text-sm text-[var(--text-muted)] hover:text-[var(--text)] mt-1"
+            className="flex items-center gap-1 text-sm text-[var(--text-muted)] hover:text-[var(--text)] mt-1 py-2 md:py-0"
           >
             <Plus size={14} /> Ajouter une colonne
           </button>
@@ -244,7 +249,7 @@ export default function TemplatesManager() {
           <select
             value={form.kanbanGroupProperty}
             onChange={(e) => setForm({ ...form, kanbanGroupProperty: e.target.value })}
-            className="px-2 py-1.5 rounded border border-[var(--border)] bg-[var(--surface)] outline-none text-sm"
+            className="max-w-full px-2 py-1.5 rounded border border-[var(--border)] bg-[var(--surface)] outline-none text-base sm:text-sm"
           >
             <option value="">Aucune vue kanban</option>
             {form.columns
@@ -259,13 +264,13 @@ export default function TemplatesManager() {
           <button
             onClick={save}
             disabled={saving}
-            className="px-4 py-2 rounded bg-[var(--accent)] text-white text-sm disabled:opacity-50"
+            className="px-4 py-2.5 md:py-2 rounded bg-[var(--accent)] text-white text-sm disabled:opacity-50"
           >
             {saving ? "Enregistrement…" : "Enregistrer"}
           </button>
           <button
             onClick={() => setForm(null)}
-            className="px-4 py-2 rounded border border-[var(--border)] text-sm"
+            className="px-4 py-2.5 md:py-2 rounded border border-[var(--border)] text-sm"
           >
             Annuler
           </button>
@@ -276,14 +281,14 @@ export default function TemplatesManager() {
 
   // ── Liste ──────────────────────────────────────────────────────────────────
   return (
-    <div className="max-w-2xl mx-auto px-8 py-8 text-[var(--text)]">
-      <div className="flex items-center justify-between mb-6">
+    <div className="max-w-2xl mx-auto px-4 py-6 sm:px-8 sm:py-8 text-[var(--text)]">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <h1 className="text-2xl font-bold">Modèles</h1>
         {/* Créer / modifier un modèle = éditeur ; supprimer = admin (définitif). */}
         {!isViewer && (
           <button
             onClick={startNew}
-            className="flex items-center gap-1 px-3 py-1.5 rounded bg-[var(--accent)] text-white text-sm"
+            className="flex items-center gap-1 px-3 py-2.5 md:py-1.5 rounded bg-[var(--accent)] text-white text-sm"
           >
             <Plus size={15} /> Nouveau modèle
           </button>
@@ -310,7 +315,7 @@ export default function TemplatesManager() {
             {!t.builtin && !isViewer && (
               <button
                 onClick={() => startEdit(t)}
-                className="text-sm text-[var(--text-muted)] hover:text-[var(--text)]"
+                className="shrink-0 py-2 md:py-0 text-sm text-[var(--text-muted)] hover:text-[var(--text)]"
               >
                 Éditer
               </button>
@@ -318,7 +323,7 @@ export default function TemplatesManager() {
             {!t.builtin && isAdmin && (
               <button
                 onClick={() => remove(t.id)}
-                className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text)]"
+                className="shrink-0 flex h-10 w-10 items-center justify-center text-[var(--text-muted)] hover:text-[var(--text)] md:h-auto md:w-auto md:p-1.5"
                 title="Supprimer le modèle (définitif)"
               >
                 <Trash2 size={15} />
@@ -327,7 +332,7 @@ export default function TemplatesManager() {
             {t.builtin && !isViewer && (
               <button
                 onClick={() => startEdit(t)}
-                className="text-sm text-[var(--text-muted)] hover:text-[var(--text)]"
+                className="shrink-0 py-2 md:py-0 text-sm text-[var(--text-muted)] hover:text-[var(--text)]"
                 title="Voir (lecture seule — enregistrer créera une copie)"
               >
                 Voir

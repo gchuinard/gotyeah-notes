@@ -247,6 +247,10 @@ export function CellDisplay({
 }
 
 // ─── Text / URL / Email / Title editor ───────────────────────────────────────
+//
+// ⚠️ Tous les éditeurs inline sont en `text-base sm:text-sm` : iOS Safari zoome
+// sur tout champ dont la police fait moins de 16px, et ne dézoome PAS au blur —
+// on se retrouve coincé dans une page agrandie après la première saisie.
 
 function TextInput({
   initialValue,
@@ -277,7 +281,7 @@ function TextInput({
         if (e.key === "Enter") { e.preventDefault(); commit(); }
         if (e.key === "Escape") { e.preventDefault(); onCancel(); }
       }}
-      className="w-full bg-transparent outline outline-1 outline-[var(--accent)] rounded px-1 text-sm text-[var(--text)]"
+      className="w-full bg-transparent outline outline-1 outline-[var(--accent)] rounded px-1 py-1 sm:py-0 text-base sm:text-sm text-[var(--text)]"
     />
   );
 }
@@ -317,7 +321,7 @@ function NumberInput({
         if (e.key === "Enter") { e.preventDefault(); commit(); }
         if (e.key === "Escape") { e.preventDefault(); onCancel(); }
       }}
-      className="w-full bg-transparent outline outline-1 outline-[var(--accent)] rounded px-1 text-sm text-[var(--text)]"
+      className="w-full bg-transparent outline outline-1 outline-[var(--accent)] rounded px-1 py-1 sm:py-0 text-base sm:text-sm text-[var(--text)]"
     />
   );
 }
@@ -356,7 +360,7 @@ function DateInput({
         if (e.key === "Enter") { e.preventDefault(); commit(); }
         if (e.key === "Escape") { e.preventDefault(); onCancel(); }
       }}
-      className="w-full bg-transparent outline outline-1 outline-[var(--accent)] rounded px-1 text-sm text-[var(--text)]"
+      className="w-full bg-transparent outline outline-1 outline-[var(--accent)] rounded px-1 py-1 sm:py-0 text-base sm:text-sm text-[var(--text)]"
     />
   );
 }
@@ -388,7 +392,7 @@ function SelectDropdown({
   return (
     <Portal anchor={triggerRef} onClose={onClose}>
       <button
-        className="w-full text-left px-3 py-1.5 text-sm hover:bg-[var(--surface-hover)] text-[var(--text-muted)]"
+        className="w-full text-left px-3 py-2.5 md:py-1.5 text-sm hover:bg-[var(--surface-hover)] text-[var(--text-muted)]"
         onMouseDown={(e) => { e.preventDefault(); onSelect(null); }}
       >
         Aucune
@@ -396,7 +400,7 @@ function SelectDropdown({
       {options.map((opt) => (
         <button
           key={opt.id}
-          className="w-full text-left px-3 py-1.5 text-sm hover:bg-[var(--surface-hover)] flex items-center gap-2"
+          className="w-full text-left px-3 py-2.5 md:py-1.5 text-sm hover:bg-[var(--surface-hover)] flex items-center gap-2"
           onMouseDown={(e) => { e.preventDefault(); onSelect(opt.id); }}
         >
           <SelectBadge option={opt} />
@@ -450,7 +454,7 @@ function MultiSelectDropdown({
       {options.map((opt) => (
         <button
           key={opt.id}
-          className="w-full text-left px-3 py-1.5 text-sm hover:bg-[var(--surface-hover)] flex items-center gap-2"
+          className="w-full text-left px-3 py-2.5 md:py-1.5 text-sm hover:bg-[var(--surface-hover)] flex items-center gap-2"
           onMouseDown={(e) => { e.preventDefault(); toggle(opt.id); }}
         >
           <span
@@ -523,7 +527,7 @@ function UserDropdown({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Rechercher un membre…"
-          className="w-full text-sm bg-[var(--surface)] border border-[var(--border)] rounded-md px-2 py-1 text-[var(--text)] outline-none focus:border-[var(--accent)]"
+          className="w-full text-base sm:text-sm bg-[var(--surface)] border border-[var(--border)] rounded-md px-2 py-2 sm:py-1 text-[var(--text)] outline-none focus:border-[var(--accent)]"
           onMouseDown={(e) => e.stopPropagation()}
         />
       </div>
@@ -533,7 +537,7 @@ function UserDropdown({
       {visible.map((m) => (
         <button
           key={m.userId}
-          className="w-full text-left px-3 py-1.5 text-sm hover:bg-[var(--surface-hover)] flex items-center gap-2"
+          className="w-full text-left px-3 py-2.5 md:py-1.5 text-sm hover:bg-[var(--surface-hover)] flex items-center gap-2"
           onMouseDown={(e) => { e.preventDefault(); toggle(m.userId); }}
         >
           <span
@@ -606,7 +610,7 @@ export default function Cell({
     const checked = (record.properties[property.id] as boolean | undefined) ?? false;
     return (
       <div
-        className="cursor-pointer flex items-center"
+        className="cursor-pointer flex items-center min-h-[32px] md:min-h-0"
         onClick={() => onSave(!checked)}
       >
         {checked ? (
