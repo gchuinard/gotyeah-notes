@@ -86,6 +86,22 @@ export function recordRecipientSend(email: string, now = Date.now()): void {
   recordFailure(recipientKey(email), now, RECIPIENT_BUDGET);
 }
 
+/**
+ * Rend un jeton consommé d'avance quand l'envoi n'a finalement PAS eu lieu.
+ *
+ * ⚠️ Pourquoi consommer avant plutôt qu'après : entre le test et l'écriture, une
+ * seconde requête concurrente passait le test à son tour, et deux emails
+ * partaient pour un seul jeton. Réserver puis rendre ferme cette fenêtre sans
+ * faire payer à l'adresse une action qui n'a rien envoyé.
+ *
+ * Ne descend jamais sous zéro, et ne ressuscite pas une fenêtre expirée.
+ */
+export function releaseRecipientSend(email: string, now = Date.now()): void {
+  const b = buckets.get(recipientKey(email));
+  if (!b || b.resetAt <= now) return;
+  b.count = Math.max(0, b.count - 1);
+}
+
 type Bucket = { count: number; resetAt: number };
 const buckets = new Map<string, Bucket>();
 

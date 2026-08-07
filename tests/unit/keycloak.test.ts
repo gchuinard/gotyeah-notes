@@ -283,20 +283,43 @@ describe("Annuaire — une requête, croisement local", () => {
     expect(dir.truncated).toBe(false);
   });
 
-  it("⚠️ une page pleine est signalée TRONQUÉE, jamais rendue comme complète", async () => {
-    // Sinon une adresse simplement non lue passerait pour « aucun compte », et
-    // l'admin créerait un doublon d'identité dans un realm partagé.
-    const rows = Array.from({ length: 500 }, (_, i) => ({ id: `u${i}`, email: `u${i}@b.tld` }));
-    configured(TOKEN_OK, json(rows));
-    const dir = await listIdpAccounts();
-    expect(dir.ok && dir.truncated).toBe(true);
+  it("une seule requête quand le realm tient dans une page", async () => {
+    const fetchMock = configured(TOKEN_OK, json([{ id: "u1", email: "a@b.tld" }]));
+    await listIdpAccounts();
+    // jeton + listing, et rien d'autre : surtout pas un lookup PAR MEMBRE.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("une seule requête, quel que soit le nombre de membres à afficher", async () => {
-    const fetchMock = configured(TOKEN_OK, json([]));
-    await listIdpAccounts();
-    // jeton + listing, et rien d'autre : pas de lookup par membre.
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+  it("⚠️ PAGINE au-delà d'une page : la queue du realm ne doit pas rester invisible", async () => {
+    // Une lecture bornée à une seule page faisait un cul-de-sac permanent — les
+    // derniers comptes n'étaient jamais lus, donc jamais autre chose que « non
+    // vérifié », et aucun rechargement n'y changeait rien.
+    const page = (n: number, prefix: string) =>
+      Array.from({ length: n }, (_, i) => ({ id: `${prefix}${i}`, email: `${prefix}${i}@b.tld` }));
+    const fetchMock = configured(TOKEN_OK, json(page(200, "a")), json(page(3, "b")));
+
+    const dir = await listIdpAccounts();
+    expect(dir.ok).toBe(true);
+    if (!dir.ok) return;
+    expect(dir.accounts.size).toBe(203);
+    expect(dir.accounts.has("b2@b.tld")).toBe(true);
+    expect(dir.truncated).toBe(false);
+
+    // La 2e page est bien demandée avec un offset, pas la même URL deux fois.
+    const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+    expect(urls[1]).toContain("first=0");
+    expect(urls[2]).toContain("first=200");
+  });
+
+  it("⚠️ au-delà du plafond dur, rend TRONQUÉ plutôt que de boucler", async () => {
+    // Sans garde-fou, un realm qui grossit ferait boucler l'écran. Et une
+    // adresse non lue passerait pour « aucun compte », donc l'admin créerait un
+    // doublon d'identité dans un realm partagé.
+    const pleine = Array.from({ length: 200 }, (_, i) => ({ id: `u${i}`, email: `u${i}@b.tld` }));
+    const dixPages = Array.from({ length: 10 }, () => json(pleine));
+    configured(TOKEN_OK, ...dixPages);
+    const dir = await listIdpAccounts();
+    expect(dir.ok && dir.truncated).toBe(true);
   });
 
   it("un IdP en erreur rend un échec explicite, pas un annuaire vide", async () => {
@@ -324,7 +347,7 @@ describe("Suspension — réversible, et jamais une suppression", () => {
 
   it("réactiver ne coupe aucune session", async () => {
     const fetchMock = configured(TOKEN_OK, json([{ id: "u1" }]), json({}, 204));
-    expect(await setIdpAccountEnabled("a@b.tld", true)).toEqual({ status: "resumed" });
+    expect(await setIdpAccountEnabled("a@b.tld", true)).toEqual({ status: "resumed", pending: false });
     expect(fetchMock.mock.calls.some((c) => String(c[0]).endsWith("/logout"))).toBe(false);
   });
 

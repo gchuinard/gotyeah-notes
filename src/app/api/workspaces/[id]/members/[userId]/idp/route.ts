@@ -17,6 +17,7 @@ import {
   recipientKey,
   recipientBlocked,
   recordRecipientSend,
+  releaseRecipientSend,
   INVITE_BUDGET,
 } from "@/lib/rateLimit";
 
@@ -141,20 +142,24 @@ export async function POST(
       );
     }
 
+    // ⚠️ On RÉSERVE le jeton avant l'appel, et on le REND si aucun email n'est
+    // finalement parti. Consommer seulement après laissait une fenêtre : deux
+    // requêtes concurrentes passaient toutes deux la vérification, et deux
+    // emails partaient pour un seul jeton. Et consommer sans rendre ferait payer
+    // à l'adresse un `existing` muet — or le compteur est partagé avec
+    // l'invitation, donc cinq clics sans effet bloqueraient ensuite les
+    // invitations légitimes vers cette personne.
+    recordRecipientSend(email);
+
     const result = await provisionIdpAccount({
       email,
       firstName: target.user.firstName,
       lastName: target.user.lastName,
     });
 
-    // ⚠️ On consomme APRÈS, et seulement si un email est VRAIMENT parti. Le
-    // consommer d'office ferait payer à l'adresse un `existing` qui n'envoie
-    // rien — et comme le budget est partagé avec l'invitation, cinq clics sans
-    // effet bloqueraient ensuite les invitations légitimes vers cette personne.
-    if (result.status === "created" || result.status === "resent") {
-      recordRecipientSend(email);
-      recordFailure(actorKey, Date.now(), INVITE_BUDGET);
-    }
+    const envoye = result.status === "created" || result.status === "resent";
+    if (envoye) recordFailure(actorKey, Date.now(), INVITE_BUDGET);
+    else releaseRecipientSend(email);
     console.info(
       `[idp-action] actor=${user.id} workspace=${workspaceId} target=${targetUserId} action=create status=${result.status}`
     );
@@ -184,5 +189,11 @@ export async function POST(
   console.info(
     `[idp-action] actor=${user.id} workspace=${workspaceId} target=${targetUserId} action=${action} status=${result.status}`
   );
+  // ⚠️ 200 même sur `failed`, et c'est délibéré : la requête a abouti, c'est le
+  // SYSTÈME TIERS qui n'a pas suivi, et le résultat peut être PARTIEL (compte
+  // créé mais activation non partie, compte désactivé mais sessions non
+  // coupées). Un code d'erreur HTTP écraserait cette nuance en « rien ne s'est
+  // passé », alors que c'est justement ce qu'il ne faut pas laisser croire. Le
+  // `status` porte l'information, et l'écran la traduit.
   return NextResponse.json({ action, ...result });
 }

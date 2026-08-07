@@ -341,7 +341,7 @@ describe("POST /idp — suspension", () => {
   });
 
   it("réactiver ne demande aucune confirmation — l'action rend un accès", async () => {
-    mockSetEnabled.mockResolvedValue({ status: "resumed" });
+    mockSetEnabled.mockResolvedValue({ status: "resumed", pending: false });
     expect((await act(editorId, { action: "resume" })).status).toBe(200);
     expect(mockSetEnabled).toHaveBeenCalledWith(editorEmail, true);
   });
@@ -374,7 +374,7 @@ describe("POST /idp — plafonds d'envoi", () => {
   });
 
   it("suspendre et réactiver ne consomment AUCUN budget d'envoi (aucun email)", async () => {
-    mockSetEnabled.mockResolvedValue({ status: "resumed" });
+    mockSetEnabled.mockResolvedValue({ status: "resumed", pending: false });
     for (let i = 0; i < 8; i++) {
       expect((await act(editorId, { action: "resume" })).status).toBe(200);
     }

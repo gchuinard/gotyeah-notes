@@ -285,7 +285,13 @@ function mailNotice(
  * accès coupé qui ne l'est pas.
  */
 function idpNotice(
-  body: { status?: string; reason?: string; action?: string; sessionsCut?: boolean },
+  body: {
+    status?: string;
+    reason?: string;
+    action?: string;
+    sessionsCut?: boolean;
+    pending?: boolean;
+  },
   name: string
 ): string {
   switch (body.status) {
@@ -306,7 +312,12 @@ function idpNotice(
         "⚠️ Cela ne retire PAS de cet espace : la connexion par lien email reste possible. Pour couper l'accès à notes, utilise le retrait de l'espace."
       );
     case "resumed":
-      return `Accès SSO rétabli pour ${name}.`;
+      // ⚠️ Un compte réactivé qui n'a jamais eu de mot de passe ne peut toujours
+      // pas se connecter : dire « accès rétabli » tout court promettrait une
+      // connexion qui échouera, et l'admin chercherait la panne ailleurs.
+      return body.pending
+        ? `Compte SSO de ${name} réactivé — mais il n'a toujours aucun mot de passe : envoie-lui le lien pour en définir un.`
+        : `Accès SSO rétabli pour ${name}.`;
     case "absent":
       // ⚠️ Le message dépend de l'ACTION : « rien à suspendre » après un clic
       // sur « Réactiver » décrirait un geste que personne n'a fait.
@@ -391,7 +402,12 @@ function IdpControls({
           Réactiver
         </button>
       )}
-      {status === "active" && !isSelf && !confirming && (
+      {/* ⚠️ `pending` aussi, pas seulement `active` : une action en attente ne
+          veut PAS dire que le compte est inerte — il peut porter un mot de passe
+          et servir ailleurs. Le réserver à `active` interdisait de couper
+          quelqu'un dans l'état le plus ambigu, précisément celui où on veut
+          pouvoir agir. */}
+      {(status === "active" || status === "pending") && !isSelf && !confirming && (
         <button type="button" onClick={onAskSuspend} disabled={busy} className={`${link} text-red-500`}>
           Suspendre
         </button>
@@ -501,6 +517,7 @@ function MembersSection({ user }: { user: SessionUser }) {
         error?: string;
         action?: string;
         sessionsCut?: boolean;
+        pending?: boolean;
       };
       if (!res.ok) {
         setError(body.error ?? `Erreur ${res.status}`);
