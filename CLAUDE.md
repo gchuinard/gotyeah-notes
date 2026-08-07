@@ -149,7 +149,8 @@ src/
 │   │                                #   DialogProvider > WorkspaceProvider > AppShell
 │   ├── page.tsx                     # "/" → redirect /login si pas de session, sinon écran d'accueil
 │   ├── login/ · register/           # page.tsx (Server) + LoginForm/RegisterForm (Client)
-│   ├── settings/                    # SettingsPage.tsx — Profil (identité + lien « Gérer mes
+│   ├── settings/                    # SettingsPage.tsx — Profil (identité MODIFIABLE via
+│   │                                #   PATCH /api/me, sauf l'email ; + lien « Gérer mes
 │   │                                #   moyens de connexion » vers la console de compte de l'IdP :
 │   │                                #   mot de passe et CLÉS D'ACCÈS y vivent, pas dans notes)
 │   │                                #   · Membres (espace actif : liste,
@@ -161,6 +162,9 @@ src/
 │   │                                #   branche DatabaseShell (si database) OU EditorClient
 │   ├── globals.css                  # Thèmes (data-theme), mapping --bn-colors-* de BlockNote
 │   └── api/                         # 37 route handlers → voir « Conventions des routes API »
+│       ├── me/route.ts              # PATCH profil de l'utilisateur COURANT (displayName,
+│       │                            #   firstName, lastName). Aucun gate de rôle : on ne
+│       │                            #   modifie que soi-même. ⚠️ L'EMAIL n'y est PAS modifiable
 │       ├── auth/                    # PUBLIC : login/logout/register + oidc/login|callback
 │       ├── workspaces/              # GET/POST, [id] DELETE (admin), [id]/switch POST
 │       │   ├── [id]/idp/route.ts    # GET état des comptes SSO des membres (ADMIN). UNE requête à
@@ -343,6 +347,7 @@ applyViewConfig(records: ParsedRecord[], config: ViewConfig, properties: ParsedD
 - **Accès** : helpers `check*Access` de `lib/workspace.ts` → **404** si pas d'accès. Ils ne couvrent que les entités de database (`checkDatabaseAccess`, `checkPropertyAccess`, `checkRecordAccess`, `checkViewAccess`, `checkSprintAccess`). Pour **page / section / workspace / trash / search : pas de helper** (ne cherche pas un `checkPageAccess`, il n'existe pas) → `getMembership()` + contrôle de confidentialité (`isPageAccessible`, ou `visibility === "private" && ownerId !== user.id`), 404 également.
 - **404, jamais 403 pour l'ACCÈS à une ressource** (ne pas leaker l'existence : non-membre ou page privée d'autrui → 404). Les 403 du projet sont fonctionnels : **rôle insuffisant** (`{ error: "Rôle insuffisant" }` — le membre voit déjà la ressource en lecture, l'action est refusée ; **ordre obligatoire : check d'accès → 404 PUIS check de rôle → 403**), fonctionnalité désactivée (`/api/auth/login|register`) et refus anti-CSRF du proxy (`Origin` cross-site sur une mutation).
 - **Corbeille (soft delete)** : `DELETE /api/pages/[id]` et `DELETE /api/records/[id]` estampent `trashedAt` — ils ne suppriment PAS. `?permanent=1` = suppression définitive depuis la corbeille. Les `check*Access` masquent le trashé par défaut → passer `includeTrashed = true` (3e arg) pour le cycle de vie corbeille. Toutes les lectures (arbre, search, records, recent) filtrent `trashedAt: null`.
+- **`PATCH /api/me` — l'EMAIL n'est PAS modifiable, et ce n'est pas un oubli.** C'est la clé de liaison avec l'IdP : le callback OIDC retrouve le compte par `email`, et le claim d'invitation repose dessus. Le laisser changer depuis notes ferait qu'à la connexion suivante la personne serait soit **refusée** (`OIDC_ALLOW_SIGNUP=false`, aucune invitation vivante), soit **provisionnée comme un NOUVEAU compte** — sans ses memberships, ses pages privées possédées ni son historique. Un changement d'adresse part de l'IdP. La route est par ailleurs **sans gate de rôle** (on ne modifie que soi-même, l'id vient de la session — même famille que `visit` et `switch`), et **refuse un compte de service** en 409 : le pont MCP passe par `getSession()` comme tout le monde, la garde ne peut donc pas reposer sur l'absence d'UI.
 - **Rattachement inter-workspace** : une route qui reçoit un id de rattachement (`parentId`/`sectionId` de `POST /api/pages`) doit vérifier qu'il appartient bien au `workspaceId` contrôlé — le rôle est vérifié sur CE workspace, sinon on écrirait dans l'arborescence d'un espace où l'on n'est que lecteur. Même réflexe que `patchNotesPageId` et les propriétés `relation`.
 - **Validation** : zod, schema en haut du fichier. Exceptions : `POST /api/upload` lit un `FormData` (pas de JSON), `/api/auth/*` et `POST /api/pages` valident à la main.
 - **JSON fields** : JAMAIS de `JSON.parse/stringify` direct dans les routes → toujours les helpers `parse*/serialize*` de `lib/db.ts`. (Seul `templates/*` sérialise `columns`/`sections` à la main — pas de helper dédié pour `Template`.)
