@@ -8,26 +8,28 @@ datasource db {
 }
 
 model User {
-  id              String                @id @default(cuid())
-  email           String                @unique
-  firstName       String
-  lastName        String
-  displayName     String
-  passwordHash    String
+  id                 String                @id @default(cuid())
+  email              String                @unique
+  firstName          String
+  lastName           String
+  displayName        String
+  passwordHash       String
   /// Compte de SERVICE (le pont MCP incarne « IA »), pas un humain.
   /// Un compte de service voit les pages privées des espaces où il est MEMBRE :
   /// sans ça, un board posé sur une page privée lui répond 404 et l'automatisation
   /// est muette. L'exemption s'arrête là — elle ne franchit aucune frontière
   /// d'espace, et aucune route de l'API n'expose ce champ en écriture.
-  isService       Boolean               @default(false)
-  createdAt       DateTime              @default(now())
-  sessions        Session[]
-  memberships     Membership[]
-  sentInvitations WorkspaceInvitation[] @relation("InvitationAuthor")
-  pageVisits      PageVisit[]
-  ownedPages      Page[]                @relation("PageOwner")
-  records         Record[]
-  recordRevisions RecordRevision[]
+  isService          Boolean               @default(false)
+  createdAt          DateTime              @default(now())
+  sessions           Session[]
+  memberships        Membership[]
+  sentInvitations    WorkspaceInvitation[] @relation("InvitationAuthor")
+  pageVisits         PageVisit[]
+  ownedPages         Page[]                @relation("PageOwner")
+  records            Record[]
+  recordRevisions    RecordRevision[]
+  notifications      Notification[]        @relation("NotificationRecipient")
+  notificationsActed Notification[]        @relation("NotificationActor")
 }
 
 model Session {
@@ -67,20 +69,30 @@ model Membership {
 /// casserait @@unique([userId, workspaceId]), getMembership et les 5 check*Access.
 /// Table séparée = zéro impact sur le chemin d'autorisation existant.
 model WorkspaceInvitation {
-  id          String    @id @default(cuid())
+  id            String         @id @default(cuid())
   /// Email NORMALISÉ (normalizeEmail) — sinon une invitation en casse mixte ne
   /// matcherait jamais la connexion qui la réclame.
-  email       String
-  workspaceId String
-  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  role        String // "admin" | "editor" | "viewer" — jamais de @default : cf. Membership
+  email         String
+  workspaceId   String
+  workspace     Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  role          String // "admin" | "editor" | "viewer" — jamais de @default : cf. Membership
   /// L'admin émetteur. SetNull comme Record.createdBy : supprimer un compte ne
   /// doit ni détruire l'invitation ni bloquer la suppression. ⚠️ C'est aussi le
   /// fil qui rattache l'invitation à une AUTORITÉ : perdre son rôle admin révoque
   /// ses invitations en attente (lib/workspace.ts > updateMemberRole/removeMember).
-  invitedBy   String?
-  inviter     User?     @relation("InvitationAuthor", fields: [invitedBy], references: [id], onDelete: SetNull)
-  createdAt   DateTime  @default(now())
+  invitedBy     String?
+  inviter       User?          @relation("InvitationAuthor", fields: [invitedBy], references: [id], onDelete: SetNull)
+  createdAt     DateTime       @default(now())
+  /// Refus EXPLICITE de la personne visée. null = jamais refusée.
+  /// ⚠️ Une invitation refusée n'est PAS supprimée : sans cette trace, l'admin
+  /// voit « en attente » s'évanouir sans savoir si c'est un refus ou une
+  /// expiration, et rien ne l'empêche de relancer quelqu'un qui a dit non.
+  /// ⚠️ `hasPendingInvitation` DOIT l'exclure : sinon une invitation refusée
+  /// continuerait de servir de laissez-passer au provisioning avec
+  /// OIDC_ALLOW_SIGNUP=false — c'est de la sécurité, pas du confort.
+  /// ⚠️ Ré-inviter (upsert sur la même ligne) doit la remettre à null.
+  declinedAt    DateTime?
+  notifications Notification[]
 
   @@unique([workspaceId, email])
   @@index([email]) // le claim interroge par email seul, à chaque connexion
@@ -99,6 +111,7 @@ model Workspace {
   sections       Section[]
   templates      Template[]
   activeSessions Session[]             @relation("CurrentSession")
+  notifications  Notification[]
 }
 
 // Modèle réutilisable (façon Jira) : colonnes + regroupement kanban + sections de
@@ -357,4 +370,65 @@ model LoginToken {
 
   @@index([email])
   @@index([expiresAt]) // purge des jetons expirés
+}
+
+/// Notification in-app (cloche de l'en-tête). C'est un MESSAGE, JAMAIS une
+/// AUTORISATION : l'autorité d'une invitation reste WorkspaceInvitation, celle
+/// d'un accès reste Membership. Une notification purgée, non lue ou jamais
+/// affichée ne doit donc RIEN changer aux droits — sans cette règle, la purge
+/// paresseuse révoquerait des accès en silence.
+///
+/// Append-only comme RecordRevision : pas d'updatedAt, pas de trashedAt. Une
+/// notification est un FAIT daté ; seul readAt bouge.
+model Notification {
+  id           String               @id @default(cuid())
+  userId       String
+  user         User                 @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  /// "workspace_invitation" | "workspace_joined" | "invitation_declined"
+  /// | "role_changed" | "membership_removed" — String, jamais un enum (cf.
+  /// Membership.role, Sprint.state). Un type INCONNU doit dégrader en ligne
+  /// générique, jamais planter : un retour arrière du code laisse en base des
+  /// lignes déjà écrites.
+  type         String
+  /// Cascade : supprimer un espace ne doit pas laisser des notifications qui
+  /// afficheraient « Espace inconnu ». ⚠️ Sa présence ne PROUVE aucune
+  /// appartenance — une invitation vise justement un espace dont on n'est pas
+  /// encore membre.
+  workspaceId  String?
+  workspace    Workspace?           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  /// SetNull comme RecordRevision.actorId : supprimer un compte ne détruit pas
+  /// la trace, l'acteur devient « Utilisateur inconnu ».
+  actorId      String?
+  actor        User?                @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+  /// SEULE vraie relation vers une cible, parce que c'est la seule qui porte un
+  /// BOUTON qui donne un accès. Cascade : révoquer, consommer ou purger
+  /// l'invitation fait disparaître la carte — un « Accepter » ne survit jamais
+  /// à l'invitation qui le justifie.
+  invitationId String?
+  invitation   WorkspaceInvitation? @relation(fields: [invitationId], references: [id], onDelete: Cascade)
+  /// Instantané JSON des LIBELLÉS à l'émission (workspaceName…) + références
+  /// LIBRES. Repli d'affichage quand la cible a disparu. JAMAIS de donnée
+  /// d'autorisation : le rôle offert vit sur l'invitation, qui change au
+  /// ré-invite. Parsé par lib/notifications.ts, jamais de JSON.parse en route.
+  payload      String               @default("{}")
+  /// null = non lu — même grammaire que trashedAt: null = actif. Une date
+  /// plutôt qu'un booléen : « tout marquer lu » = un updateMany, et on sait
+  /// quand ; un booléen exigerait une 2e colonne pour la même question.
+  readAt       DateTime?
+  createdAt    DateTime             @default(now())
+
+  /// Ré-inviter fait un UPSERT sur la MÊME ligne d'invitation : sans cette clé,
+  /// chaque relance empilerait une carte « Accepter » de plus. Les NULL restent
+  /// distincts en SQLite, donc les notifications sans invitation ne sont pas
+  /// contraintes.
+  @@unique([userId, invitationId])
+  /// Requête CHAUDE : le compteur de non-lus, sondé sur toutes les pages.
+  @@index([userId, readAt])
+  /// Liste du panneau, du plus récent au plus ancien (cf. RecordRevision).
+  @@index([userId, createdAt])
+  /// Balayage de purge global — cf. @@index([expiresAt]) de Session.
+  @@index([createdAt])
+  @@index([workspaceId])
+  @@index([actorId])
+  @@index([invitationId])
 }
