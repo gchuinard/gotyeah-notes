@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import useSWR, { mutate as globalMutate } from "swr";
 import {
   ArrowLeft, User, Users, HardDrive, Palette,
-  Eye, EyeOff, Check, Trash2, UserPlus, Clock, X, Bot, Send,
+  Check, Trash2, UserPlus, Clock, X, Bot, Send,
   KeyRound, ShieldOff, ShieldCheck,
 } from "lucide-react";
 import type { SessionUser } from "@/lib/session";
@@ -40,12 +40,6 @@ const NAV = [
 
 type Section = (typeof NAV)[number]["id"];
 
-const PASSWORD_CRITERIA = [
-  { label: "8 caractères minimum", test: (p: string) => p.length >= 8 },
-  { label: "Une majuscule",        test: (p: string) => /[A-Z]/.test(p) },
-  { label: "Un chiffre",           test: (p: string) => /[0-9]/.test(p) },
-  { label: "Un caractère spécial", test: (p: string) => /[^A-Za-z0-9]/.test(p) },
-];
 
 // ─── Shared UI ───────────────────────────────────────────────────────────────
 
@@ -84,56 +78,13 @@ function SaveButton({ label = "Enregistrer" }: { label?: string }) {
   );
 }
 
-function PasswordField({ label, show, onToggle, value, onChange }: {
-  label: string;
-  show: boolean;
-  onToggle: () => void;
-  value: string;
-  onChange: (v: string) => void;
-}) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <Label>{label}</Label>
-      <div className="relative">
-        <input
-          type={show ? "text" : "password"}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className={`${fieldClass} pr-12 md:pr-10`}
-        />
-        {/* Cible tactile pleine hauteur sous md ; au-dessus, on retrouve exactement
-            l'icône flottante d'origine (mêmes offsets, largeur au contenu). */}
-        <button
-          type="button"
-          onClick={onToggle}
-          tabIndex={-1}
-          aria-label={show ? "Masquer le mot de passe" : "Afficher le mot de passe"}
-          className="absolute right-0 top-0 bottom-0 flex w-11 items-center justify-center text-[var(--text-muted)] hover:text-[var(--text)] md:right-2.5 md:top-1/2 md:bottom-auto md:w-auto md:-translate-y-1/2"
-        >
-          {show ? <EyeOff size={15} /> : <Eye size={15} />}
-        </button>
-      </div>
-    </div>
-  );
-}
-
 // ─── Sections ────────────────────────────────────────────────────────────────
 
-function ProfileSection({ user }: { user: SessionUser }) {
+function ProfileSection({ user, accountUrl }: { user: SessionUser; accountUrl: string }) {
   const [firstName, setFirstName]     = useState("");
   const [lastName, setLastName]       = useState("");
   const [displayName, setDisplayName] = useState(user.displayName);
   const [email, setEmail]             = useState(user.email);
-
-  const [currentPw, setCurrentPw]     = useState("");
-  const [newPw, setNewPw]             = useState("");
-  const [confirmPw, setConfirmPw]     = useState("");
-  const [showCurrent, setShowCurrent] = useState(false);
-  const [showNew, setShowNew]         = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
-
-  const criteria = PASSWORD_CRITERIA.map((c) => ({ ...c, met: c.test(newPw) }));
-  const passwordsMatch = confirmPw.length > 0 && newPw === confirmPw;
 
   return (
     <div className="max-w-lg">
@@ -175,56 +126,36 @@ function ProfileSection({ user }: { user: SessionUser }) {
         <SaveButton />
       </div>
 
-      <Divider />
-
-      {/* Mot de passe */}
-      <h3 className="text-base font-semibold text-[var(--text)] mb-4">
-        Changer le mot de passe
-      </h3>
-      <div className="flex flex-col gap-4">
-        <PasswordField label="Mot de passe actuel" show={showCurrent} onToggle={() => setShowCurrent((v) => !v)} value={currentPw} onChange={setCurrentPw} />
-        <div className="flex flex-col gap-2">
-          <PasswordField label="Nouveau mot de passe" show={showNew} onToggle={() => setShowNew((v) => !v)} value={newPw} onChange={setNewPw} />
-          {newPw.length > 0 && (
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-              {criteria.map((c) => (
-                <div key={c.label} className={`flex items-center gap-1.5 text-xs transition-colors ${c.met ? "text-green-500" : "text-[var(--text-muted)]"}`}>
-                  {c.met
-                    ? <Check size={12} className="shrink-0" />
-                    : <span className="shrink-0 w-3 h-3 rounded-full border border-current inline-block" />}
-                  {c.label}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <div className="flex items-center gap-2">
-            <Label>Confirmer le nouveau mot de passe</Label>
-            {confirmPw.length > 0 && (
-              <Check size={13} className={passwordsMatch ? "text-green-500" : "text-[var(--text-muted)]"} />
-            )}
-          </div>
-          <div className="relative">
-            <input
-              type={showConfirm ? "text" : "password"}
-              value={confirmPw}
-              onChange={(e) => setConfirmPw(e.target.value)}
-              className={`${fieldClass} pr-12 md:pr-10`}
-            />
-            <button
-              type="button"
-              onClick={() => setShowConfirm((v) => !v)}
-              tabIndex={-1}
-              aria-label={showConfirm ? "Masquer le mot de passe" : "Afficher le mot de passe"}
-              className="absolute right-0 top-0 bottom-0 flex w-11 items-center justify-center text-[var(--text-muted)] hover:text-[var(--text)] md:right-2.5 md:top-1/2 md:bottom-auto md:w-auto md:-translate-y-1/2"
-            >
-              {showConfirm ? <EyeOff size={15} /> : <Eye size={15} />}
-            </button>
-          </div>
-        </div>
-        <SaveButton label="Changer le mot de passe" />
-      </div>
+      {/* Connexion — remplace un formulaire de mot de passe qui ne menait nulle
+          part : aucune route ne l'implémentait, et LEGACY_LOGIN=off supprime de
+          toute façon le login par mot de passe de notes. Proposer de changer un
+          secret qui ne sert pas ici, avec un bouton inerte, était un mensonge
+          d'écran doublé d'une impasse. */}
+      {accountUrl && (
+        <>
+          <Divider />
+          <h3 className="text-base font-semibold text-[var(--text)] mb-2">Connexion</h3>
+          <p className="text-xs text-[var(--text-muted)] mb-3">
+            Ton mot de passe et tes clés d&apos;accès sont gérés par le fournisseur
+            d&apos;identité, pas par notes. Une clé d&apos;accès (Windows Hello, Touch ID,
+            clé de sécurité) remplace le mot de passe à la connexion.
+          </p>
+          <a
+            href={accountUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 text-sm text-blue-500 hover:underline"
+          >
+            <KeyRound size={14} />
+            Gérer mes moyens de connexion
+          </a>
+          <p className="text-xs text-[var(--text-muted)] mt-3">
+            ⚠️ Garde un mot de passe en plus de ta clé d&apos;accès : une clé Windows Hello
+            est liée à cet ordinateur et n&apos;est pas sauvegardée ailleurs — sans second
+            moyen, un PC perdu ferme l&apos;accès.
+          </p>
+        </>
+      )}
     </div>
   );
 }
@@ -1097,7 +1028,7 @@ function AppearanceSection() {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-export default function SettingsPage({ user }: { user: SessionUser }) {
+export default function SettingsPage({ user, accountUrl }: { user: SessionUser; accountUrl: string }) {
   const [active, setActive] = useState<Section>("profile");
   const { workspaces } = useWorkspace();
 
@@ -1145,7 +1076,7 @@ export default function SettingsPage({ user }: { user: SessionUser }) {
       {/* min-h-0 : en flex-col, sans lui le contenu pousse le conteneur et le
           défilement interne disparaît. */}
       <main className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 md:p-8">
-        {effectiveActive === "profile"    && <ProfileSection user={user} />}
+        {effectiveActive === "profile"    && <ProfileSection user={user} accountUrl={accountUrl} />}
         {effectiveActive === "users"      && <MembersSection user={user} />}
         {effectiveActive === "storage"    && <StorageSection />}
         {effectiveActive === "appearance" && <AppearanceSection />}
