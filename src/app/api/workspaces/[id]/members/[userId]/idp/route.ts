@@ -15,8 +15,9 @@ import {
   recordFailure,
   retryAfterSeconds,
   recipientKey,
+  recipientBlocked,
+  recordRecipientSend,
   INVITE_BUDGET,
-  RECIPIENT_BUDGET,
 } from "@/lib/rateLimit";
 
 /**
@@ -133,11 +134,10 @@ export async function POST(
     // dont l'activation ne part pas produit un compte sans mot de passe, donc
     // exactement le cul-de-sac que `resent` sert à réparer. Et il n'y a pas
     // d'oracle à craindre — l'admin voit déjà ce membre et son adresse.
-    const rk = recipientKey(email);
-    if (tooManyFailures(rk, Date.now(), RECIPIENT_BUDGET)) {
+    if (recipientBlocked(email)) {
       return NextResponse.json(
         { error: "Trop d'envois vers cette adresse. Réessaie plus tard." },
-        { status: 429, headers: { "Retry-After": String(retryAfterSeconds(rk)) } }
+        { status: 429, headers: { "Retry-After": String(retryAfterSeconds(recipientKey(email))) } }
       );
     }
 
@@ -152,7 +152,7 @@ export async function POST(
     // rien — et comme le budget est partagé avec l'invitation, cinq clics sans
     // effet bloqueraient ensuite les invitations légitimes vers cette personne.
     if (result.status === "created" || result.status === "resent") {
-      recordFailure(rk, Date.now(), RECIPIENT_BUDGET);
+      recordRecipientSend(email);
       recordFailure(actorKey, Date.now(), INVITE_BUDGET);
     }
     console.info(

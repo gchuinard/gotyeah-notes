@@ -84,6 +84,13 @@ const jsonReq = (url: string, method: string, body: unknown) =>
   });
 
 beforeAll(async () => {
+  // ⚠️ Sans ça, le cas POST /idp passerait à VIDE : la route refuse déjà tout le
+  // monde en 403 quand IDP_ADMIN_EMAILS est absente, donc le test ne prouverait
+  // rien sur le gate de RÔLE. En autorisant l'identité utilisée par `as()`, un
+  // gate `hasRole` supprimé ferait tomber la réponse en 409 (IdP non configuré)
+  // et le test échouerait — ce qu'on attend d'un garde.
+  vi.stubEnv("IDP_ADMIN_EMAILS", "x@x.tld");
+
   const seeded = await seedUserWithWorkspace(`roles-admin-${Date.now()}@x.tld`);
   adminId = seeded.user.id;
   workspaceId = seeded.workspace.id;
@@ -124,6 +131,7 @@ beforeAll(async () => {
   otherRecordId = (await prisma.record.create({ data: { databaseId: otherDb.id, title: "O" } })).id;
 });
 afterAll(async () => {
+  vi.unstubAllEnvs();
   await prisma.$disconnect();
 });
 

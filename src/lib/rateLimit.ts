@@ -66,10 +66,24 @@ export const recipientKey = (email: string) =>
  * bouton re-cliquable rouvrirait le canal que ce budget vient de fermer.
  */
 export function recipientAllowed(email: string, now = Date.now()): boolean {
-  const key = recipientKey(email);
-  if (tooManyFailures(key, now, RECIPIENT_BUDGET)) return false;
-  recordFailure(key, now, RECIPIENT_BUDGET);
+  if (recipientBlocked(email, now)) return false;
+  recordRecipientSend(email, now);
   return true;
+}
+
+/**
+ * Les deux moitiés de `recipientAllowed`, séparées pour les portes qui ne
+ * savent qu'APRÈS coup si un email est réellement parti (le provisioning IdP
+ * délègue l'envoi à Keycloak, et certains chemins n'envoient rien). Consommer
+ * d'avance ferait payer à une adresse des actions muettes, et bloquerait
+ * ensuite les invitations légitimes vers elle — le compteur est partagé.
+ */
+export function recipientBlocked(email: string, now = Date.now()): boolean {
+  return tooManyFailures(recipientKey(email), now, RECIPIENT_BUDGET);
+}
+
+export function recordRecipientSend(email: string, now = Date.now()): void {
+  recordFailure(recipientKey(email), now, RECIPIENT_BUDGET);
 }
 
 type Bucket = { count: number; resetAt: number };

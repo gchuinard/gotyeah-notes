@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
-  ensureInvitedUser,
   provisionIdpAccount,
   listIdpAccounts,
   setIdpAccountEnabled,
@@ -56,7 +55,7 @@ describe("Désactivation — aucune configuration, aucune surface", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     expect(keycloakAdminEnabled()).toBe(false);
-    expect(await ensureInvitedUser("a@b.tld", "a")).toEqual({ status: "disabled" });
+    expect(await provisionIdpAccount({ email:"a@b.tld", firstName: "a", lastName: "" })).toEqual({ status: "disabled" });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -67,7 +66,7 @@ describe("Désactivation — aucune configuration, aucune surface", () => {
     vi.stubEnv("KEYCLOAK_ADMIN_CLIENT_ID", "x");
     vi.stubEnv("KEYCLOAK_ADMIN_CLIENT_SECRET", "y");
     vi.stubGlobal("fetch", vi.fn());
-    expect(await ensureInvitedUser("a@b.tld", "a")).toEqual({
+    expect(await provisionIdpAccount({ email:"a@b.tld", firstName: "a", lastName: "" })).toEqual({
       status: "failed",
       reason: "issuer_malformed",
     });
@@ -79,7 +78,7 @@ describe("Compte déjà présent dans l'IdP", () => {
     // Renvoyer un lien « choisis ton mot de passe » à quelqu'un qui en a déjà un
     // ressemblerait à une prise de contrôle de compte.
     const fetchMock = configured(TOKEN_OK, json([{ id: "u1" }]));
-    expect(await ensureInvitedUser("connu@b.tld", "connu")).toEqual({ status: "existing" });
+    expect(await provisionIdpAccount({ email:"connu@b.tld", firstName: "connu", lastName: "" })).toEqual({ status: "existing" });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const urls = fetchMock.mock.calls.map((c) => String(c[0]));
@@ -88,7 +87,7 @@ describe("Compte déjà présent dans l'IdP", () => {
 
   it("la recherche est EXACTE : « a@b.tld » ne doit pas matcher « a@b.tld.evil »", async () => {
     const fetchMock = configured(TOKEN_OK, json([{ id: "u1" }]));
-    await ensureInvitedUser("a@b.tld", "a");
+    await provisionIdpAccount({ email:"a@b.tld", firstName: "a", lastName: "" });
     const lookup = String(fetchMock.mock.calls[1][0]);
     expect(lookup).toContain("exact=true");
     expect(lookup).toContain(encodeURIComponent("a@b.tld"));
@@ -107,7 +106,7 @@ describe("Création d'un compte", () => {
 
   it("crée le compte puis déclenche l'email d'activation", async () => {
     const fetchMock = nominal();
-    expect(await ensureInvitedUser("neuf@b.tld", "neuf")).toEqual({ status: "created" });
+    expect(await provisionIdpAccount({ email:"neuf@b.tld", firstName: "neuf", lastName: "" })).toEqual({ status: "created" });
     const urls = fetchMock.mock.calls.map((c) => String(c[0]));
     expect(urls.some((u) => u.includes("execute-actions-email"))).toBe(true);
   });
@@ -119,7 +118,7 @@ describe("Création d'un compte", () => {
     // d'invitation sur email_verified. Et un mot de passe posé ici rendrait le
     // compte utilisable sans que personne n'ait prouvé posséder l'adresse.
     const fetchMock = nominal();
-    await ensureInvitedUser("neuf@b.tld", "neuf");
+    await provisionIdpAccount({ email:"neuf@b.tld", firstName: "neuf", lastName: "" });
 
     const createCall = fetchMock.mock.calls.find(
       (c) => c[1]?.method === "POST" && String(c[0]).endsWith("/users")
@@ -135,7 +134,7 @@ describe("Création d'un compte", () => {
 
   it("l'URL d'admin est dérivée de l'issuer, même hôte et même realm", async () => {
     const fetchMock = nominal();
-    await ensureInvitedUser("neuf@b.tld", "neuf");
+    await provisionIdpAccount({ email:"neuf@b.tld", firstName: "neuf", lastName: "" });
     const createUrl = String(
       fetchMock.mock.calls.find((c) => c[1]?.method === "POST" && String(c[0]).endsWith("/users"))![0]
     );
@@ -150,7 +149,7 @@ describe("Création d'un compte", () => {
     // moment où l'invité, compte créé, ne pourrait pas se connecter.
     vi.stubEnv("KEYCLOAK_INTERNAL_URL", "http://login-keycloak:8080/");
     const fetchMock = nominal();
-    await ensureInvitedUser("neuf@b.tld", "neuf");
+    await provisionIdpAccount({ email:"neuf@b.tld", firstName: "neuf", lastName: "" });
 
     const urls = fetchMock.mock.calls.map((c) => String(c[0]));
     expect(urls.every((u) => u.startsWith("http://login-keycloak:8080/"))).toBe(true);
@@ -163,13 +162,13 @@ describe("Création d'un compte", () => {
 
   it("une création concurrente (409) n'est pas une erreur : l'état visé est atteint", async () => {
     configured(TOKEN_OK, json([]), json({}, 409));
-    expect(await ensureInvitedUser("course@b.tld", "course")).toEqual({ status: "existing" });
+    expect(await provisionIdpAccount({ email:"course@b.tld", firstName: "course", lastName: "" })).toEqual({ status: "existing" });
   });
 
   it("si l'email d'activation échoue, on le DIT — le compte existe pourtant", async () => {
     // L'admin doit savoir qu'il lui reste à renvoyer le lien depuis Keycloak.
     configured(TOKEN_OK, json([]), json({}, 201), json([{ id: "u42" }]), json({}, 500));
-    expect(await ensureInvitedUser("neuf@b.tld", "neuf")).toEqual({
+    expect(await provisionIdpAccount({ email:"neuf@b.tld", firstName: "neuf", lastName: "" })).toEqual({
       status: "failed",
       reason: "activation_500",
     });
@@ -177,7 +176,7 @@ describe("Création d'un compte", () => {
 });
 
 describe("Compte présent mais JAMAIS activé — sortie de cul-de-sac", () => {
-  it("⚠️ relance l'activation quand UPDATE_PASSWORD est encore pendant", async () => {
+  it("⚠️ relance l'activation quand UPDATE_PASSWORD est pendant ET qu'aucun mot de passe n'existe", async () => {
     // Le scénario : la création a réussi, l'email d'activation a échoué. Le
     // compte existe SANS mot de passe. Avec l'ancienne logique, tout appel
     // suivant le trouvait « existing » et sortait avant l'envoi — plus jamais
@@ -185,6 +184,7 @@ describe("Compte présent mais JAMAIS activé — sortie de cul-de-sac", () => {
     const fetchMock = configured(
       TOKEN_OK,
       json([{ id: "u1", requiredActions: ["UPDATE_PASSWORD"], emailVerified: false }]),
+      json([]), // /credentials : aucun mot de passe
       json({}, 204)
     );
     expect(await provisionIdpAccount({ email: "bloque@b.tld", firstName: "A", lastName: "B" })).toEqual({
@@ -205,6 +205,38 @@ describe("Compte présent mais JAMAIS activé — sortie de cul-de-sac", () => {
       status: "existing",
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("⚠️ UPDATE_PASSWORD pendant mais mot de passe EXISTANT ⇒ aucun envoi", async () => {
+    // Keycloak pose aussi UPDATE_PASSWORD sur un compte VIVANT : mot de passe
+    // temporaire, « Required user actions » posée à la main, politique
+    // d'expiration. Sans cette lecture des credentials, on expédiait un
+    // « choisis ton mot de passe » à quelqu'un qui en a un — exactement ce que
+    // la branche `existing` refuse, et dans un realm partagé.
+    const fetchMock = configured(
+      TOKEN_OK,
+      json([{ id: "u1", requiredActions: ["UPDATE_PASSWORD"] }]),
+      json([{ type: "password", createdDate: 1 }])
+    );
+    expect(await provisionIdpAccount({ email: "vivant@b.tld", firstName: "A", lastName: "B" })).toEqual({
+      status: "existing",
+    });
+    const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.includes("execute-actions-email"))).toBe(false);
+  });
+
+  it("credentials illisibles ⇒ on n'envoie PAS : on ne devine pas sur ce sujet", async () => {
+    const fetchMock = configured(
+      TOKEN_OK,
+      json([{ id: "u1", requiredActions: ["UPDATE_PASSWORD"] }]),
+      json({}, 403)
+    );
+    expect(await provisionIdpAccount({ email: "flou@b.tld", firstName: "A", lastName: "B" })).toEqual({
+      status: "existing",
+    });
+    expect(
+      fetchMock.mock.calls.map((c) => String(c[0])).some((u) => u.includes("execute-actions-email"))
+    ).toBe(false);
   });
 
   it("le prénom et le nom sont envoyés SÉPARÉMENT", async () => {
@@ -278,7 +310,10 @@ describe("Suspension — réversible, et jamais une suppression", () => {
     // `enabled: false` bloque les NOUVELLES connexions ; sans le logout, une
     // session déjà ouverte survivrait jusqu'à son expiration.
     const fetchMock = configured(TOKEN_OK, json([{ id: "u1" }]), json({}, 204), json({}, 204));
-    expect(await setIdpAccountEnabled("a@b.tld", false)).toEqual({ status: "suspended" });
+    expect(await setIdpAccountEnabled("a@b.tld", false)).toEqual({
+      status: "suspended",
+      sessionsCut: true,
+    });
 
     const put = fetchMock.mock.calls.find((c) => c[1]?.method === "PUT")!;
     expect(JSON.parse(put[1].body)).toEqual({ enabled: false });
@@ -291,6 +326,17 @@ describe("Suspension — réversible, et jamais une suppression", () => {
     const fetchMock = configured(TOKEN_OK, json([{ id: "u1" }]), json({}, 204));
     expect(await setIdpAccountEnabled("a@b.tld", true)).toEqual({ status: "resumed" });
     expect(fetchMock.mock.calls.some((c) => String(c[0]).endsWith("/logout"))).toBe(false);
+  });
+
+  it("⚠️ un logout raté est RAPPORTÉ, pas avalé : la suspension est partielle", async () => {
+    // Le compte est bien désactivé (le PUT a réussi), mais les sessions
+    // ouvertes survivent. Annoncer « sessions coupées » ferait croire à un
+    // offboarding terminé alors que la personne travaille encore.
+    configured(TOKEN_OK, json([{ id: "u1" }]), json({}, 204), json({}, 502));
+    expect(await setIdpAccountEnabled("a@b.tld", false)).toEqual({
+      status: "suspended",
+      sessionsCut: false,
+    });
   });
 
   it("suspendre une adresse sans compte rend « absent » — et ne crée rien", async () => {
@@ -310,7 +356,7 @@ describe("Suspension — réversible, et jamais une suppression", () => {
 describe("Pannes — jamais d'exception, l'invitation est déjà en base", () => {
   it("jeton refusé", async () => {
     configured(json({ error: "invalid_client" }, 401));
-    expect(await ensureInvitedUser("a@b.tld", "a")).toEqual({ status: "failed", reason: "token" });
+    expect(await provisionIdpAccount({ email:"a@b.tld", firstName: "a", lastName: "" })).toEqual({ status: "failed", reason: "token" });
   });
 
   it("réseau coupé", async () => {
@@ -318,13 +364,13 @@ describe("Pannes — jamais d'exception, l'invitation est déjà en base", () =>
     vi.stubEnv("KEYCLOAK_ADMIN_CLIENT_ID", "x");
     vi.stubEnv("KEYCLOAK_ADMIN_CLIENT_SECRET", "y");
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("ECONNREFUSED")));
-    const r = await ensureInvitedUser("a@b.tld", "a");
+    const r = await provisionIdpAccount({ email:"a@b.tld", firstName: "a", lastName: "" });
     expect(r.status).toBe("failed");
   });
 
   it("lookup en erreur", async () => {
     configured(TOKEN_OK, json({}, 403));
-    expect(await ensureInvitedUser("a@b.tld", "a")).toEqual({
+    expect(await provisionIdpAccount({ email:"a@b.tld", firstName: "a", lastName: "" })).toEqual({
       status: "failed",
       reason: "lookup_403",
     });

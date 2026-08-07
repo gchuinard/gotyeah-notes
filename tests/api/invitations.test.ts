@@ -601,8 +601,13 @@ describe("Plafond par DESTINATAIRE — une adresse ne se fait pas noyer", () => 
       // hors de la ligne d'import (appel de recipientAllowed, ou usage explicite
       // de recipientKey avec RECIPIENT_BUDGET).
       const horsImport = src.replace(/import\s+\{[^}]*\}\s+from\s+"[^"]*";/g, "");
+      // L'import seul ne prouve rien : on exige un APPEL, hors ligne d'import.
       expect(horsImport, `${f} ne consomme pas le budget destinataire`).toMatch(
-        /recipientAllowed\(|recipientKey\(/
+        /recipientAllowed\(|recordRecipientSend\(/
+      );
+      // …et une VÉRIFICATION avant d'agir (recipientAllowed fait les deux).
+      expect(horsImport, `${f} ne vérifie pas le budget destinataire`).toMatch(
+        /recipientAllowed\(|recipientBlocked\(/
       );
     }
   });

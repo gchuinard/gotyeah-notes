@@ -272,9 +272,16 @@ type IdpState = {
   accounts: { userId: string; status: IdpMemberStatus; service: boolean }[];
 };
 
+/**
+ * ⚠️ `pending` ne dit PAS « jamais activé », parce que l'annuaire ne permet pas
+ * de le savoir : Keycloak pose aussi UPDATE_PASSWORD sur un compte vivant (mot
+ * de passe temporaire, expiration). Le libellé décrit donc ce qui est réellement
+ * observé — une action en attente — et c'est le serveur qui refuse d'envoyer un
+ * lien si un mot de passe existe déjà.
+ */
 const IDP_LABELS: Record<IdpMemberStatus, string> = {
   none: "aucun compte SSO",
-  pending: "compte SSO en attente d'activation",
+  pending: "action en attente côté SSO",
   active: "compte SSO actif",
   suspended: "compte SSO suspendu",
   unknown: "état SSO non vérifié",
@@ -346,20 +353,35 @@ function mailNotice(
  * ne retire pas de l'espace. Les confondre sous un « OK » ferait croire à un
  * accès coupé qui ne l'est pas.
  */
-function idpNotice(body: { status?: string; reason?: string }, name: string): string {
+function idpNotice(
+  body: { status?: string; reason?: string; action?: string; sessionsCut?: boolean },
+  name: string
+): string {
   switch (body.status) {
     case "created":
       return `Compte SSO créé pour ${name} — un email vient de partir pour choisir un mot de passe.`;
     case "resent":
-      return `Le compte de ${name} existait sans mot de passe : le lien d'activation a été renvoyé.`;
+      return `Le compte de ${name} n'avait pas de mot de passe : le lien pour en définir un a été renvoyé.`;
     case "existing":
-      return `${name} a déjà un compte SSO actif. Aucun email envoyé — proposer un nouveau mot de passe à quelqu'un qui en a un ressemblerait à une prise de contrôle.`;
+      // ⚠️ Ne dit PAS « actif » : `existing` couvre aussi un compte suspendu, et
+      // un 409 de création concurrente. Rien ici n'a lu `enabled`.
+      return `${name} a déjà un compte SSO. Aucun email envoyé — proposer un nouveau mot de passe à quelqu'un qui en a un ressemblerait à une prise de contrôle.`;
     case "suspended":
-      return `Accès SSO suspendu pour ${name}, sur tous les sites de l'IdP. ⚠️ Cela ne retire PAS de cet espace : la connexion par lien email reste possible. Pour couper l'accès à notes, utilise le retrait de l'espace.`;
+      return (
+        `Accès SSO suspendu pour ${name}, sur tous les sites de l'IdP. ` +
+        (body.sessionsCut === false
+          ? "⚠️ En revanche ses sessions DÉJÀ ouvertes n'ont pas pu être coupées : il peut continuer à travailler jusqu'à leur expiration. Vérifie dans Keycloak. "
+          : "") +
+        "⚠️ Cela ne retire PAS de cet espace : la connexion par lien email reste possible. Pour couper l'accès à notes, utilise le retrait de l'espace."
+      );
     case "resumed":
       return `Accès SSO rétabli pour ${name}.`;
     case "absent":
-      return `${name} n'a pas de compte SSO : il n'y a rien à suspendre.`;
+      // ⚠️ Le message dépend de l'ACTION : « rien à suspendre » après un clic
+      // sur « Réactiver » décrirait un geste que personne n'a fait.
+      return body.action === "resume"
+        ? `${name} n'a aucun compte SSO à réactiver — l'état affiché était périmé.`
+        : `${name} n'a pas de compte SSO : il n'y a rien à suspendre.`;
     case "disabled":
       return "La gestion des comptes SSO n'est pas configurée sur cette instance.";
     default:
@@ -430,7 +452,7 @@ function IdpControls({
       )}
       {status === "pending" && (
         <button type="button" onClick={onProvision} disabled={busy} className={`${link} text-blue-500`}>
-          Renvoyer l&apos;activation
+          Envoyer le lien de mot de passe
         </button>
       )}
       {status === "suspended" && (
@@ -546,6 +568,8 @@ function MembersSection({ user }: { user: SessionUser }) {
         status?: string;
         reason?: string;
         error?: string;
+        action?: string;
+        sessionsCut?: boolean;
       };
       if (!res.ok) {
         setError(body.error ?? `Erreur ${res.status}`);
@@ -642,6 +666,10 @@ function MembersSection({ user }: { user: SessionUser }) {
       // de deviner laquelle a bougé.
       mutate();
       mutateInvitations();
+      // ⚠️ Et la troisième : l'état SSO est indexé par userId, donc un membre
+      // qui vient d'arriver n'y figure pas et s'affiche « non vérifié », sans
+      // aucun bouton — bloqué là jusqu'à un rechargement complet de la page.
+      mutateIdp();
     } catch {
       setError("Impossible d'ajouter le membre.");
     } finally {
@@ -804,6 +832,16 @@ function MembersSection({ user }: { user: SessionUser }) {
 
       {/* On ne se tait PAS sur ce qu'on ignore : sans ces deux avertissements,
           un état absent se lirait comme un état vérifié. */}
+      {/* L'état exact de la prod tant qu'IDP_ADMIN_EMAILS n'est pas posée. Sans
+          ce message, l'écran est muet et le déployeur cherche une panne. */}
+      {idp?.configured && !idp.allowed && (
+        <p className="text-xs text-[var(--text-muted)] mb-3">
+          La gestion des comptes SSO est réservée aux administrateurs de l&apos;instance
+          (variable <code>IDP_ADMIN_EMAILS</code>). Le rôle admin d&apos;un espace ne suffit pas :
+          il peut être obtenu par n&apos;importe qui, alors que l&apos;action porte sur l&apos;IdP
+          partagé par tous les sites.
+        </p>
+      )}
       {idp?.configured && idp.allowed && !idp.available && (
         <p className="text-xs text-amber-500 mb-3">
           L&apos;IdP n&apos;a pas répondu : l&apos;état des comptes SSO n&apos;est pas affiché.

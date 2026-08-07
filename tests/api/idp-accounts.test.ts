@@ -117,7 +117,7 @@ beforeEach(() => {
   instanceConfigured(adminEmail);
   mockList.mockResolvedValue(directory([]));
   mockProvision.mockResolvedValue({ status: "created" });
-  mockSetEnabled.mockResolvedValue({ status: "suspended" });
+  mockSetEnabled.mockResolvedValue({ status: "suspended", sessionsCut: true });
 });
 
 afterEach(() => vi.unstubAllEnvs());
@@ -225,10 +225,17 @@ describe("GET /idp — lecture d'état, admin de l'espace ET de l'instance", () 
   });
 
   it("croise les membres par email et distingue actif / en attente / suspendu", async () => {
+    // `pending` pilote le bouton central du lot : il doit être produit ici, pas
+    // seulement supposé.
+    const viewer = await prisma.membership.findFirst({
+      where: { workspaceId, userId: viewerId },
+      select: { user: { select: { email: true } } },
+    });
     mockList.mockResolvedValue(
       directory([
         [adminEmail, { enabled: true, emailVerified: true, pending: false }],
         [editorEmail, { enabled: false, emailVerified: true, pending: false }],
+        [viewer!.user.email, { enabled: true, emailVerified: false, pending: true }],
       ])
     );
     as(adminId, adminEmail);
@@ -238,7 +245,14 @@ describe("GET /idp — lecture d'état, admin de l'espace ET de l'instance", () 
     );
     expect(byId[adminId]).toBe("active");
     expect(byId[editorId]).toBe("suspended");
-    expect(byId[viewerId]).toBe("none");
+    expect(byId[viewerId]).toBe("pending");
+  });
+
+  it("un membre absent de l'annuaire COMPLET vaut « aucun compte »", async () => {
+    mockList.mockResolvedValue(directory([]));
+    as(adminId, adminEmail);
+    const body = await (await idpGET(get(""), P({ id: workspaceId }))).json();
+    expect(body.accounts.find((a: { userId: string }) => a.userId === editorId).status).toBe("none");
   });
 
   it("⚠️ annuaire tronqué : « non vérifié », JAMAIS « aucun compte »", async () => {
@@ -283,6 +297,22 @@ describe("POST /idp — gardes avant toute action", () => {
 
   it("400 sur une action inconnue", async () => {
     expect((await act(editorId, { action: "delete" })).status).toBe(400);
+  });
+
+  it("⚠️ provisionne l'identité DU MEMBRE VISÉ, prénom et nom séparés", async () => {
+    // Aucune assertion n'inspectait les ARGUMENTS : le lot aurait pu créer une
+    // identité pour l'acteur, ou coller le displayName entier dans le prénom,
+    // sans qu'un test bronche — dans un realm partagé par tous les sites.
+    const m = await prisma.membership.findFirst({
+      where: { workspaceId, userId: editorId },
+      select: { user: { select: { email: true, firstName: true, lastName: true } } },
+    });
+    await act(editorId, { action: "create" });
+    expect(mockProvision).toHaveBeenCalledWith({
+      email: m!.user.email,
+      firstName: m!.user.firstName,
+      lastName: m!.user.lastName,
+    });
   });
 });
 

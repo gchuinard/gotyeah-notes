@@ -149,7 +149,11 @@ export type IdpDirectory =
   | { ok: false; reason: string };
 
 export type EnableResult =
-  | { status: "suspended" }
+  // ⚠️ `sessionsCut` n'est pas décoratif : `enabled:false` bloque les NOUVELLES
+  // connexions, mais les sessions ouvertes survivent jusqu'au logout. Si ce
+  // second appel échoue, la suspension est PARTIELLE — l'annoncer complète
+  // ferait croire un offboarding terminé alors que la personne travaille encore.
+  | { status: "suspended"; sessionsCut: boolean }
   | { status: "resumed" }
   /** Aucun compte IdP pour cette adresse : il n'y a rien à suspendre. */
   | { status: "absent" }
@@ -166,12 +170,17 @@ type KcUser = {
 };
 
 /**
- * « Jamais activé » se lit sur `requiredActions`, pas sur `emailVerified`.
- * Keycloak retire UPDATE_PASSWORD de la liste dès que la personne a défini son
- * mot de passe : sa présence prouve qu'elle ne l'a jamais fait. `emailVerified`
- * seul ne suffirait pas — un compte peut être utilisable avec une adresse non
- * vérifiée, et on relancerait alors une activation à quelqu'un qui n'en a pas
- * besoin, ce qui ressemble à une prise de contrôle.
+ * Une action est-elle en attente sur ce compte ? Se lit sur `requiredActions`,
+ * pas sur `emailVerified` — un compte peut être parfaitement utilisable avec une
+ * adresse non vérifiée.
+ *
+ * ⚠️ NE PROUVE PAS que le compte n'a jamais servi. Keycloak pose aussi
+ * UPDATE_PASSWORD sur un compte VIVANT : mot de passe temporaire, « Required
+ * user actions » posée à la main dans la console, politique d'expiration. C'est
+ * pourquoi l'état s'appelle « action en attente » et non « jamais activé », et
+ * pourquoi l'envoi d'un lien est gardé par `hasPasswordCredential` — sans quoi
+ * on expédierait un « choisis ton mot de passe » à quelqu'un qui en a un, dans
+ * un realm partagé. C'est exactement ce que la branche `existing` interdit.
  */
 const isPending = (u: KcUser): boolean =>
   Array.isArray(u.requiredActions) && u.requiredActions.includes("UPDATE_PASSWORD");
@@ -288,6 +297,21 @@ async function findByEmail(
   return { ok: true, user: Array.isArray(rows) && rows.length > 0 ? rows[0] : null };
 }
 
+/**
+ * Un mot de passe existe-t-il déjà pour ce compte ?
+ *
+ * ⚠️ `requiredActions` ne le dit PAS (cf. `isPending`) : seul le credential
+ * tranche. `null` = on n'a pas pu savoir — et sur une supposition, on n'envoie
+ * rien. `GET /users/{id}/credentials` ne rend que des métadonnées (type, date),
+ * jamais de secret, et relève du `view-users` que le client porte déjà.
+ */
+async function hasPasswordCredential(ctx: AdminContext, id: string): Promise<boolean | null> {
+  const res = await call(`${ctx.admin}/users/${encodeURIComponent(id)}/credentials`, ctx);
+  if (!res.ok) return null;
+  const rows = (await res.json()) as { type?: string }[];
+  return Array.isArray(rows) && rows.some((c) => c.type === "password");
+}
+
 /** Déclenche l'email d'activation. Le jeton du lien est celui de KEYCLOAK. */
 async function sendActivation(ctx: AdminContext, id: string): Promise<number | null> {
   const res = await call(
@@ -335,6 +359,14 @@ export async function provisionIdpAccount(input: {
 
     if (found.user) {
       if (!isPending(found.user) || !found.user.id) return { status: "existing" };
+      // ⚠️ UPDATE_PASSWORD pendant ne prouve pas que le compte n'a jamais servi :
+      // un mot de passe temporaire ou une politique d'expiration le posent sur
+      // un compte vivant. Envoyer là un « choisis ton mot de passe » ressemble à
+      // une prise de contrôle — précisément ce que `existing` refuse. Inconnu
+      // (null) ⇒ on n'envoie pas non plus : on ne devine pas sur ce sujet.
+      if ((await hasPasswordCredential(ctx, found.user.id)) !== false) {
+        return { status: "existing" };
+      }
       const failed = await sendActivation(ctx, found.user.id);
       return failed
         ? { status: "failed", reason: `activation_${failed}` }
@@ -376,17 +408,6 @@ export async function provisionIdpAccount(input: {
   } catch (err) {
     return { status: "failed", reason: err instanceof Error ? err.name : "unknown" };
   }
-}
-
-/**
- * Compatibilité : le parcours d'invitation historique ne connaît qu'un
- * `displayName`. Conservé pour ne pas figer l'appelant sur la forme éclatée.
- */
-export async function ensureInvitedUser(
-  email: string,
-  displayName: string
-): Promise<ProvisionResult> {
-  return provisionIdpAccount({ email, firstName: displayName, lastName: "" });
 }
 
 /**
@@ -457,16 +478,27 @@ export async function setIdpAccountEnabled(
     });
     if (!res.ok) return { status: "failed", reason: `update_${res.status}` };
 
+    if (enabled) return { status: "resumed" };
+
     // Keycloak refuse les NOUVELLES connexions dès `enabled: false`, mais les
     // sessions déjà ouvertes survivraient jusqu'à leur expiration : suspendre
     // sans couper laisserait la personne travailler encore des heures.
-    if (!enabled) {
-      await call(`${ctx.admin}/users/${encodeURIComponent(found.user.id)}/logout`, ctx, {
-        method: "POST",
-      }).catch(() => undefined);
-    }
+    //
+    // ⚠️ L'échec est RAPPORTÉ, pas avalé. Le compte est bien désactivé (le PUT a
+    // réussi), donc ce n'est pas un échec global — mais annoncer « sessions
+    // coupées » sans l'avoir fait transformerait un offboarding partiel en
+    // offboarding réputé terminé.
+    const cut = await call(
+      `${ctx.admin}/users/${encodeURIComponent(found.user.id)}/logout`,
+      ctx,
+      { method: "POST" }
+    ).then(
+      (r) => r.ok,
+      () => false
+    );
+    if (!cut) console.error(`[idp-logout-failed] compte désactivé, sessions non coupées`);
 
-    return { status: enabled ? "resumed" : "suspended" };
+    return { status: "suspended", sessionsCut: cut };
   } catch (err) {
     return { status: "failed", reason: err instanceof Error ? err.name : "unknown" };
   }
