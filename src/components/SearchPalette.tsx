@@ -144,7 +144,7 @@ export default function SearchPalette() {
                   onMouseEnter={() => setSelected(i)}
                   className={`flex items-start gap-3 px-4 py-2 cursor-pointer text-sm transition-colors ${
                     i === selected
-                      ? "bg-blue-50 text-blue-700"
+                      ? "bg-[var(--surface-active)] text-[var(--text)]"
                       : "hover:bg-[var(--surface-hover)] text-[var(--text)]"
                   }`}
                 >
