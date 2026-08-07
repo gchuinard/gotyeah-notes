@@ -48,9 +48,17 @@ type Section = (typeof NAV)[number]["id"];
 const fieldClass =
   "border border-[var(--border)] bg-[var(--bg)] text-[var(--text)] rounded-lg px-3 py-2 text-base sm:text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 transition-colors w-full";
 
-function Label({ children }: { children: React.ReactNode }) {
+/**
+ * `htmlFor` est OPTIONNEL par rétrocompatibilité, mais il devrait être fourni :
+ * sans lui, le libellé n'est associé à aucun champ et un lecteur d'écran ne
+ * l'annonce pas — cliquer dessus ne donne pas non plus le focus. Les champs du
+ * Profil le passent ; les autres écrans restent à reprendre.
+ */
+function Label({ children, htmlFor }: { children: React.ReactNode; htmlFor?: string }) {
   return (
-    <label className="text-sm font-medium text-[var(--text)]">{children}</label>
+    <label htmlFor={htmlFor} className="text-sm font-medium text-[var(--text)]">
+      {children}
+    </label>
   );
 }
 
@@ -67,11 +75,21 @@ function Divider() {
   return <hr className="border-[var(--border)] my-6" />;
 }
 
-function SaveButton({ label = "Enregistrer" }: { label?: string }) {
+function SaveButton({
+  label = "Enregistrer",
+  onClick,
+  disabled,
+}: {
+  label?: string;
+  onClick?: () => void;
+  disabled?: boolean;
+}) {
   return (
     <button
       type="button"
-      className="mt-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg px-4 py-2.5 md:py-2 text-sm font-medium transition-colors"
+      onClick={onClick}
+      disabled={disabled}
+      className="mt-2 self-start bg-blue-500 hover:bg-blue-600 disabled:opacity-50 disabled:hover:bg-blue-500 text-white rounded-lg px-4 py-2.5 md:py-2 text-sm font-medium transition-colors"
     >
       {label}
     </button>
@@ -80,50 +98,116 @@ function SaveButton({ label = "Enregistrer" }: { label?: string }) {
 
 // ─── Sections ────────────────────────────────────────────────────────────────
 
-function ProfileSection({ user, accountUrl }: { user: SessionUser; accountUrl: string }) {
-  const [firstName, setFirstName]     = useState("");
-  const [lastName, setLastName]       = useState("");
+function ProfileSection({
+  user,
+  accountUrl,
+  firstName: initialFirstName,
+  lastName: initialLastName,
+}: {
+  user: SessionUser;
+  accountUrl: string;
+  firstName: string;
+  lastName: string;
+}) {
+  const router = useRouter();
+  const [firstName, setFirstName]     = useState(initialFirstName);
+  const [lastName, setLastName]       = useState(initialLastName);
   const [displayName, setDisplayName] = useState(user.displayName);
-  const [email, setEmail]             = useState(user.email);
+  const [saving, setSaving] = useState(false);
+  const [error, setError]   = useState<string | null>(null);
+  const [saved, setSaved]   = useState(false);
+
+  const dirty =
+    firstName !== initialFirstName ||
+    lastName !== initialLastName ||
+    displayName !== user.displayName;
+
+  const save = async () => {
+    setError(null);
+    setSaved(false);
+    setSaving(true);
+    try {
+      const res = await fetch("/api/me", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ firstName, lastName, displayName }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        setError(body.error ?? `Erreur ${res.status}`);
+        return;
+      }
+      setSaved(true);
+      // Le nom affiché vient du SSR (header, sidebar, avatar) : sans ce refresh,
+      // l'écran serait à jour et le reste de l'application non, jusqu'au prochain
+      // chargement complet.
+      router.refresh();
+    } catch {
+      setError("Impossible d'enregistrer (réseau).");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="max-w-lg">
       <SectionTitle title="Profil" description="Informations de votre compte." />
 
-      {/* Avatar */}
+      {/* Initiale, pas d'avatar : le modèle ne porte aucune image, et le bouton
+          « Changer la photo » qui vivait ici n'était branché sur rien. */}
       <div className="flex items-center gap-4 mb-6">
         <div className="w-16 h-16 rounded-full bg-blue-500/15 flex items-center justify-center text-xl font-bold text-blue-500">
           {user.displayName.charAt(0).toUpperCase()}
         </div>
-        <button
-          type="button"
-          className="text-sm text-blue-500 hover:underline"
-        >
-          Changer la photo
-        </button>
       </div>
 
       {/* Identité */}
       <div className="flex flex-col gap-4">
         <div className="grid grid-cols-2 gap-3">
           <div className="flex flex-col gap-1.5">
-            <Label>Prénom</Label>
-            <input type="text" value={firstName} onChange={(e) => setFirstName(e.target.value)} className={fieldClass} placeholder="Prénom" />
+            <Label htmlFor="profil-prenom">Prénom</Label>
+            <input id="profil-prenom" type="text" value={firstName} onChange={(e) => setFirstName(e.target.value)} className={fieldClass} placeholder="Prénom" />
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label>Nom</Label>
-            <input type="text" value={lastName} onChange={(e) => setLastName(e.target.value)} className={fieldClass} placeholder="Nom" />
+            <Label htmlFor="profil-nom">Nom</Label>
+            <input id="profil-nom" type="text" value={lastName} onChange={(e) => setLastName(e.target.value)} className={fieldClass} placeholder="Nom" />
           </div>
         </div>
         <div className="flex flex-col gap-1.5">
-          <Label>Pseudo / Nom affiché</Label>
-          <input type="text" value={displayName} onChange={(e) => setDisplayName(e.target.value)} className={fieldClass} />
+          <Label htmlFor="profil-pseudo">Pseudo / Nom affiché</Label>
+          <input id="profil-pseudo" type="text" value={displayName} onChange={(e) => setDisplayName(e.target.value)} className={fieldClass} />
+          <p className="text-xs text-[var(--text-muted)]">
+            Le seul nom visible par les autres : en-tête, barre latérale, assignés d&apos;une
+            carte, auteur d&apos;une modification.
+          </p>
         </div>
         <div className="flex flex-col gap-1.5">
-          <Label>Email</Label>
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={fieldClass} />
+          <Label htmlFor="profil-email">Email</Label>
+          {/* ⚠️ LECTURE SEULE À DESSEIN. L'email lie ce compte à l'IdP : le callback
+              OIDC retrouve la personne par son adresse. La changer ici la ferait,
+              à la connexion suivante, soit refuser, soit provisionner comme un
+              NOUVEAU compte — sans ses espaces, ses pages privées ni son
+              historique. Un changement d'adresse part de l'IdP. */}
+          <input
+            id="profil-email"
+            type="email"
+            value={user.email}
+            readOnly
+            aria-readonly="true"
+            className={`${fieldClass} opacity-60 cursor-not-allowed`}
+          />
+          <p className="text-xs text-[var(--text-muted)]">
+            Gérée par le fournisseur d&apos;identité — c&apos;est elle qui relie ce compte à
+            ta connexion. La modifier ici te ferait perdre l&apos;accès.
+          </p>
         </div>
-        <SaveButton />
+        {error && <p className="text-xs text-red-500">{error}</p>}
+        {saved && !dirty && <p className="text-xs text-emerald-500">Profil enregistré.</p>}
+        <SaveButton
+          onClick={save}
+          disabled={saving || !dirty || displayName.trim() === ""}
+          label={saving ? "Enregistrement…" : "Enregistrer"}
+        />
       </div>
 
       {/* Connexion — remplace un formulaire de mot de passe qui ne menait nulle
@@ -1045,7 +1129,17 @@ function AppearanceSection() {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-export default function SettingsPage({ user, accountUrl }: { user: SessionUser; accountUrl: string }) {
+export default function SettingsPage({
+  user,
+  accountUrl,
+  firstName,
+  lastName,
+}: {
+  user: SessionUser;
+  accountUrl: string;
+  firstName: string;
+  lastName: string;
+}) {
   const [active, setActive] = useState<Section>("profile");
   const { workspaces } = useWorkspace();
 
@@ -1093,7 +1187,7 @@ export default function SettingsPage({ user, accountUrl }: { user: SessionUser; 
       {/* min-h-0 : en flex-col, sans lui le contenu pousse le conteneur et le
           défilement interne disparaît. */}
       <main className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 md:p-8">
-        {effectiveActive === "profile"    && <ProfileSection user={user} accountUrl={accountUrl} />}
+        {effectiveActive === "profile"    && <ProfileSection user={user} accountUrl={accountUrl} firstName={firstName} lastName={lastName} />}
         {effectiveActive === "users"      && <MembersSection user={user} />}
         {effectiveActive === "storage"    && <StorageSection />}
         {effectiveActive === "appearance" && <AppearanceSection />}

@@ -277,10 +277,13 @@ const DECLARED: Record<string, string[]> = {
   // garde n'est pas un rôle mais l'existence d'un accès pour l'adresse visée
   // (compte ou invitation vivante), plus le rate-limit — cf. lib/magicLink.ts.
   "auth/magic/route.ts": ["POST"],
-  // Exemptés lecteur (matrice) : visite, switch d'espace, créer SON espace.
+  // Exemptés lecteur (matrice) : visite, switch d'espace, créer SON espace,
+  // et modifier SON PROPRE profil — aucun de ces gestes ne touche au contenu
+  // d'un espace, donc aucun ne peut dépendre d'un rôle dans un espace.
   "pages/[id]/visit/route.ts": ["POST"],
   "workspaces/[id]/switch/route.ts": ["POST"],
   "workspaces/route.ts": ["POST"],
+  "me/route.ts": ["PATCH"],
   // Gatés — couverts par la table ci-dessus.
   "pages/route.ts": ["POST"],
   "pages/[id]/route.ts": ["PATCH", "DELETE"],
