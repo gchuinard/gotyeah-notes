@@ -129,47 +129,55 @@ afterAll(async () => {
 
 describe("⚠️ Escalade — le rôle admin d'un espace est AUTO-ATTRIBUABLE", () => {
   it("un lecteur ne peut PAS se fabriquer le droit de suspendre le SSO d'un tiers", async () => {
-    // Chaîne trouvée en revue adversariale, reproduite ici de bout en bout :
+    // Chaîne trouvée en revue adversariale. Depuis le 07/08 elle casse DEUX
+    // fois, et c'est voulu :
     //   1. POST /api/workspaces — aucun gate de rôle, le créateur devient admin
-    //   2. POST /members {email: victime} — Membership IMMÉDIATE, sans consentement
-    //   3. POST .../idp {suspend} — « admin de l'espace » et « cible membre »
-    //      sont alors tous deux satisfaits.
-    // Sans l'allowlist d'instance, l'étape 3 coupait la connexion Keycloak de la
-    // victime sur TOUS les sites du realm partagé.
+    //      (inchangé, exemption assumée) ;
+    //   2. POST /members ne crée PLUS de Membership immédiate : la victime est
+    //      seulement INVITÉE, donc elle n'est pas membre de l'espace piège —
+    //      le tremplin lui-même a disparu ;
+    //   3. et même si elle l'était, l'allowlist d'instance refuserait.
     const attaquant = await seedMember(workspaceId, "viewer");
     instanceConfigured(adminEmail); // l'attaquant n'y figure pas
     as(attaquant.user.id, attaquant.user.email);
 
-    // 1. Son propre espace — il en ressort admin.
     const wsRes = await workspacesPOST(post("/api/workspaces", { name: "piege" }));
     expect(wsRes.status).toBe(200);
     const ws = await wsRes.json();
 
-    // 2. La victime y est ajoutée de force (elle a déjà un compte notes).
+    // 2. La victime n'est plus ajoutée de force : on obtient une INVITATION.
     const addRes = await membersPOST(
       post(`/api/workspaces/${ws.id}/members`, { email: adminEmail, role: "viewer" }),
       P({ id: ws.id })
     );
-    expect(addRes.status).toBe(200);
-    expect((await addRes.json()).userId).toBe(adminId);
+    expect(addRes.status).toBe(201);
+    expect((await addRes.json()).status).toBe("invited");
+    expect(
+      await prisma.membership.findUnique({
+        where: { userId_workspaceId: { userId: adminId, workspaceId: ws.id } },
+      })
+    ).toBeNull();
 
-    // 3. La suspension DOIT être refusée — c'est tout l'objet de la garde.
+    // 3. La suspension est refusée. 404 : la cible n'est pas membre de cet
+    //    espace — la garde de périmètre suffit désormais, et l'allowlist reste
+    //    la seconde ligne.
     const res = await act(adminId, { action: "suspend", confirmEmail: adminEmail }, ws.id);
-    expect(res.status).toBe(403);
+    expect([403, 404]).toContain(res.status);
     expect(mockSetEnabled).not.toHaveBeenCalled();
   });
 
   it("`resume` est gardé comme `suspend` — rendre un accès est aussi une décision", async () => {
     // Sans ça, la seule action non protégée annulait une désactivation décidée
-    // ailleurs (offboarding d'un autre site du realm).
+    // ailleurs (offboarding d'un autre site du realm). On vise ici un membre
+    // RÉEL de l'espace de l'attaquant pour éprouver la garde d'autorité, et non
+    // la garde de périmètre.
     const attaquant = await seedMember(workspaceId, "viewer");
     as(attaquant.user.id, attaquant.user.email);
     const ws = await (await workspacesPOST(post("/api/workspaces", { name: "p2" }))).json();
-    await membersPOST(
-      post(`/api/workspaces/${ws.id}/members`, { email: adminEmail, role: "viewer" }),
-      P({ id: ws.id })
-    );
-    expect((await act(adminId, { action: "resume" }, ws.id)).status).toBe(403);
+
+    // L'attaquant est le seul membre de son espace : il se vise lui-même, ce qui
+    // laisse la seule garde d'allowlist décider.
+    expect((await act(attaquant.user.id, { action: "resume" }, ws.id)).status).toBe(403);
     expect(mockSetEnabled).not.toHaveBeenCalled();
   });
 

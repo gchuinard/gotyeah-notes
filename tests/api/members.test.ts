@@ -92,24 +92,36 @@ describe("GET /api/workspaces/[id]/members", () => {
 });
 
 describe("POST /api/workspaces/[id]/members (ajout par email)", () => {
-  it("admin ajoute un compte existant — email normalisé (casse), lecteur par défaut", async () => {
+  it("⚠️ un compte existant est INVITÉ, pas ajouté d'office (casse normalisée)", async () => {
+    // Changement de contrat du 07/08 : plus de Membership immédiate. La personne
+    // décide depuis sa cloche — et ce comportement était le tremplin de
+    // l'escalade trouvée sur les comptes SSO.
     as(adminId);
-    // La casse est normalisée serveur (normalizeEmail) ; le trim est fait côté
-    // client — zod .email() refuse un email non trimé, c'est voulu.
     const res = await membersPOST(
       jsonReq(`/api/workspaces/${workspaceId}/members`, "POST", {
         email: outsiderEmail.toUpperCase(),
       }),
       P({ id: workspaceId })
     );
-    expect(res.status).toBe(200);
-    const member = await res.json();
-    expect(member.userId).toBe(outsiderId);
-    expect(member.role).toBe("viewer");
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.status).toBe("invited");
+    expect(body.role).toBe("viewer");
+
+    // Rien n'est accordé tant qu'elle n'a pas accepté.
+    expect(
+      await prisma.membership.findUnique({
+        where: { userId_workspaceId: { userId: outsiderId, workspaceId } },
+      })
+    ).toBeNull();
   });
 
   it("déjà membre → 409", async () => {
     as(adminId);
+    // Il faut donc une VRAIE membership pour éprouver ce cas.
+    await prisma.membership.create({
+      data: { userId: outsiderId, workspaceId, role: "viewer" },
+    });
     const res = await membersPOST(
       jsonReq(`/api/workspaces/${workspaceId}/members`, "POST", { email: outsiderEmail }),
       P({ id: workspaceId })

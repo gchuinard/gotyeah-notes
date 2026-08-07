@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 import { getMembership, hasRole } from "@/lib/workspace";
+import { notify } from "@/lib/notify";
 import { normalizeEmail } from "@/lib/oidc";
 import { notifyInvitation } from "@/lib/invitationEmail";
 import { issueMagicLink, INVITE_LINK_TTL_MINUTES } from "@/lib/magicLink";
@@ -181,7 +182,16 @@ export async function POST(
     );
   }
 
-  // ─── Le compte existe : membership immédiate, comme avant ────────────────────
+  // ─── Le compte existe : on PROPOSE, on n'ajoute plus d'office ───────────────
+  // ⚠️ CHANGEMENT DE CONTRAT (07/08). Auparavant la Membership était créée
+  // immédiatement : l'espace apparaissait dans la barre latérale de quelqu'un
+  // qui n'avait rien demandé. Pire, ce comportement était le TREMPLIN de
+  // l'escalade trouvée sur les comptes SSO — « admin de cet espace » devenait
+  // auto-attribuable en fabriquant un espace et en y ajoutant de force sa cible.
+  //
+  // Désormais : une invitation en attente, plus une notification dans la cloche.
+  // La réponse ne dit plus jamais `member` — le pont MCP et l'écran Membres
+  // lisent ce champ, ils ont été mis à jour en conséquence.
   if (target) {
     const existing = await prisma.membership.findUnique({
       where: { userId_workspaceId: { userId: target.id, workspaceId } },
@@ -192,36 +202,54 @@ export async function POST(
       return NextResponse.json({ error: "Déjà membre de cet espace" }, { status: 409 });
     }
 
-    // role TOUJOURS explicite : Membership.role a @default("admin") en schéma —
-    // un create qui l'omettrait fabriquerait un admin silencieux.
-    //
-    // ⚠️ La membership CONSOMME l'invitation en attente sur la même adresse, dans
-    // la même transaction. Sans ça elle survit à l'ajout, et devient une porte
-    // dérobée : retirer le membre ne le retire plus vraiment, l'invitation
-    // orpheline le ré-admet à sa connexion suivante (removeMember ne supprime que
-    // les invitations ÉMISES PAR la personne, pas celles qui la VISENT). Elle
-    // laissait en prime une ligne fantôme dans « En attente », dont le bouton
-    // « Renvoyer » ne pouvait plus rendre qu'un 409.
-    const created = await prisma.$transaction(async (tx) => {
-      const membership = await tx.membership.create({
-        data: { userId: target.id, workspaceId, role: parsed.data.role },
-        select: memberSelect,
+    const invitation = await prisma.$transaction(async (tx) => {
+      const inv = await tx.workspaceInvitation.upsert({
+        where: { workspaceId_email: { workspaceId, email } },
+        create: { workspaceId, email, role: parsed.data.role, invitedBy: user.id },
+        // ⚠️ `declinedAt: null` remet un refus à zéro : ré-inviter est un geste
+        // délibéré, il rouvre la porte que la personne avait fermée. Sans ça,
+        // une invitation refusée resterait morte et le bouton « Renvoyer »
+        // n'aurait aucun effet visible.
+        update: {
+          role: parsed.data.role,
+          invitedBy: user.id,
+          createdAt: new Date(),
+          declinedAt: null,
+        },
+        select: { id: true, email: true, role: true, createdAt: true },
       });
-      await tx.workspaceInvitation.deleteMany({ where: { workspaceId, email } });
-      return membership;
+      await notify(tx, [
+        {
+          userId: target.id,
+          type: "workspace_invitation",
+          workspaceId,
+          actorId: user.id,
+          invitationId: inv.id,
+          payload: { workspaceName: mailCtx.workspaceName, actorName: mailCtx.inviterName },
+        },
+      ]);
+      return inv;
     });
-    clearFailures(rateKey);
-    // L'envoi qui suit consomme le budget d'invitation au MÊME titre que la
-    // branche « invited » : c'est l'EMAIL qu'on plafonne, pas l'écriture. Sans
-    // ça, la boucle ajouter/retirer offrait un canal d'envoi illimité vers
-    // l'adresse d'un tiers, depuis l'expéditeur vérifié de l'instance.
+
     recordFailure(inviteKey, Date.now(), INVITE_BUDGET);
-    // Email d'INFORMATION : l'accès est déjà ouvert, rien à faire. Sans lui,
-    // on peut devenir membre d'un espace sans jamais l'apprendre.
+    // L'email reste un simple RAPPEL : la cloche est le canal principal pour
+    // quelqu'un qui a déjà un compte, et il la verra à sa prochaine visite.
     const mail = recipientAllowed(email)
-      ? await notifyInvitation(email, "member", mailCtx)
+      ? await notifyInvitation(email, "invited", mailCtx)
       : ({ ok: false, reason: "throttled" } as const);
-    return NextResponse.json({ status: "member", ...toMember(created), ...mailStatus(mail) });
+    return NextResponse.json(
+      {
+        status: "invited",
+        id: invitation.id,
+        email: invitation.email,
+        role: invitation.role,
+        createdAt: invitation.createdAt,
+        /** Champ ADDITIF : la personne a un compte, elle verra la cloche. */
+        notified: true,
+        ...mailStatus(mail),
+      },
+      { status: 201 }
+    );
   }
 
   // ─── Pas de compte : PRÉ-AUTORISATION ────────────────────────────────────────
@@ -238,7 +266,13 @@ export async function POST(
     // chemin du bouton « Renvoyer » — d'où le rafraîchissement de createdAt, qui
     // vaut donc « dernière émission » et prolonge les INVITATION_TTL_DAYS.
     // Sans lui, relancer une invitation périmée enverrait un email déjà mort.
-    update: { role: parsed.data.role, invitedBy: user.id, createdAt: new Date() },
+    update: {
+      role: parsed.data.role,
+      invitedBy: user.id,
+      createdAt: new Date(),
+      // Ré-inviter rouvre une porte qu'un refus avait fermée.
+      declinedAt: null,
+    },
     select: { id: true, email: true, role: true, createdAt: true },
   });
   recordFailure(inviteKey, Date.now(), INVITE_BUDGET);

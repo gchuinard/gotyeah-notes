@@ -116,16 +116,25 @@ describe("POST /members — email sans compte", () => {
     expect(rows[0].role).toBe("admin");
   });
 
-  it("un compte existant devient membre immédiatement (non-régression)", async () => {
+  it("⚠️ un compte existant est INVITÉ, jamais ajouté d'office", async () => {
     const u = await mkUser(`direct-${Date.now()}@x.tld`);
     const res = await addMember(post({ email: u.email, role: "editor" }), withId(workspaceId));
 
-    expect(res.status).toBe(200);
-    expect((await res.json()).status).toBe("member");
-    const m = await prisma.membership.findUnique({
-      where: { userId_workspaceId: { userId: u.id, workspaceId } },
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.status).toBe("invited");
+    // Champ additif : la personne a un compte, elle verra la cloche.
+    expect(body.notified).toBe(true);
+    expect(
+      await prisma.membership.findUnique({
+        where: { userId_workspaceId: { userId: u.id, workspaceId } },
+      })
+    ).toBeNull();
+    // Et une notification actionnable l'attend.
+    const n = await prisma.notification.findFirst({
+      where: { userId: u.id, type: "workspace_invitation" },
     });
-    expect(m?.role).toBe("editor");
+    expect(n).not.toBeNull();
   });
 
   it("refuse un COMPTE DE SERVICE (409) : il verrait les pages privées de l'espace", async () => {
@@ -430,28 +439,36 @@ describe("Renvoyer une invitation = la ré-émettre", () => {
 });
 
 describe("L'ajout d'un membre CONSOMME l'invitation qui visait la même adresse", () => {
-  it("aucune ligne fantôme ne survit à la membership", async () => {
-    // État atteignable : invitation posée, puis la personne obtient un compte par
-    // un chemin qui ne réclame pas (register), puis l'admin l'ajoute à la main.
+  it("ré-inviter une adresse déjà invitée met à jour la MÊME ligne", async () => {
+    // L'invitation n'est plus consommée par un ajout (il n'y en a plus), mais
+    // l'upsert reste le garde-fou contre les lignes fantômes en double.
     const email = `fantome-${Date.now()}@x.tld`;
     await prisma.workspaceInvitation.create({
       data: { workspaceId, email, role: "admin", invitedBy: admin.id },
     });
-    const user = await mkUser(email);
+    await mkUser(email);
 
     const res = await addMember(post({ email, role: "viewer" }), withId(workspaceId));
-    expect(res.status).toBe(200);
-    expect((await res.json()).status).toBe("member");
+    expect(res.status).toBe(201);
 
-    // L'invitation est consommée : plus de ligne « En attente » dont le bouton
-    // « Renvoyer » ne pourrait rendre qu'un 409.
-    expect(await prisma.workspaceInvitation.findFirst({ where: { workspaceId, email } })).toBeNull();
-    // Et le rôle appliqué est celui de l'AJOUT (viewer), pas celui de
-    // l'invitation périmée (admin).
-    const m = await prisma.membership.findUnique({
-      where: { userId_workspaceId: { userId: user.id, workspaceId } },
+    const rows = await prisma.workspaceInvitation.findMany({ where: { workspaceId, email } });
+    expect(rows).toHaveLength(1);
+    // Le rôle du dernier geste l'emporte.
+    expect(rows[0].role).toBe("viewer");
+  });
+
+  it("⚠️ ré-inviter EFFACE un refus : c'est un geste délibéré qui rouvre la porte", async () => {
+    const email = `rouvert-${Date.now()}@x.tld`;
+    await prisma.workspaceInvitation.create({
+      data: { workspaceId, email, role: "viewer", invitedBy: admin.id, declinedAt: new Date() },
     });
-    expect(m?.role).toBe("viewer");
+    await mkUser(email);
+
+    await addMember(post({ email, role: "editor" }), withId(workspaceId));
+    const row = await prisma.workspaceInvitation.findUnique({
+      where: { workspaceId_email: { workspaceId, email } },
+    });
+    expect(row?.declinedAt).toBeNull();
   });
 
   it("retirer le membre ne le fait pas revenir tout seul à la connexion suivante", async () => {
@@ -463,7 +480,9 @@ describe("L'ajout d'un membre CONSOMME l'invitation qui visait la même adresse"
       data: { workspaceId, email, role: "admin", invitedBy: admin.id },
     });
     const user = await mkUser(email);
-    await addMember(post({ email, role: "viewer" }), withId(workspaceId));
+    // L'ajout ne crée plus la membership : on la pose directement, le sujet du
+    // test est le RETRAIT, pas le chemin d'entrée.
+    await prisma.membership.create({ data: { userId: user.id, workspaceId, role: "viewer" } });
 
     const removed = await removeMember(workspaceId, user.id);
     expect(removed.ok).toBe(true);
@@ -488,14 +507,9 @@ describe("L'ajout d'un membre CONSOMME l'invitation qui visait la même adresse"
 
     for (let i = 0; i < INVITE_BUDGET.max; i++) {
       const r = await addMember(post({ email: cible.email, role: "viewer" }), withId(ws.id));
-      // 200 la 1re fois (ajout), 409 ensuite (déjà membre) — dans les deux cas
-      // c'est l'ENVOI qu'on plafonne, et seul le 1er en déclenche un.
-      expect([200, 409]).toContain(r.status);
-      if (r.status === 200) {
-        await prisma.membership.delete({
-          where: { userId_workspaceId: { userId: cible.id, workspaceId: ws.id } },
-        });
-      }
+      // 201 à chaque fois : l'upsert ré-émet l'invitation, et c'est l'ENVOI
+      // qu'on plafonne, pas l'écriture.
+      expect(r.status).toBe(201);
     }
     const bloque = await addMember(post({ email: cible.email, role: "viewer" }), withId(ws.id));
     expect(bloque.status).toBe(429);
@@ -522,8 +536,9 @@ describe("Provisioning IdP — l'invitation ne promet plus une connexion impossi
   it("l'ajout d'un compte EXISTANT ne provisionne rien (il a déjà une identité)", async () => {
     const u = await mkUser(`deja-${Date.now()}@x.tld`);
     const res = await addMember(post({ email: u.email, role: "viewer" }), withId(workspaceId));
-    expect(res.status).toBe(200);
-    expect((await res.json()).loginLink).toBeUndefined();
+    expect(res.status).toBe(201);
+    // Un compte existant n'a pas besoin d'un lien de connexion : il verra la cloche.
+    expect((await res.json()).loginLink).toBeFalsy();
   });
 });
 
