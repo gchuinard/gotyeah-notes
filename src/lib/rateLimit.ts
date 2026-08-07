@@ -29,6 +29,21 @@ const DEFAULT_BUDGET: RateBudget = { windowMs: WINDOW_MS, max: MAX_FAILURES };
  */
 export const INVITE_BUDGET: RateBudget = { windowMs: 60 * 60 * 1000, max: 20 };
 
+/**
+ * Budget par DESTINATAIRE. Le budget ci-dessus plafonne ce qu'un acteur envoie ;
+ * celui-ci plafonne ce qu'une ADRESSE reçoit, tous acteurs confondus.
+ *
+ * ⚠️ Sans lui, `POST /api/workspaces` étant volontairement exempté de rôle, tout
+ * titulaire d'un compte pouvait créer autant d'espaces qu'il voulait — au nom
+ * qu'il choisissait, ce nom figurant dans le SUJET du message — et viser la même
+ * adresse depuis chacun. 20/h par acteur ne borne rien quand les acteurs et les
+ * espaces sont gratuits.
+ *
+ * 5/h : on n'invite pas légitimement la même personne cinq fois en une heure,
+ * et « Renvoyer » reste utilisable plusieurs fois d'affilée.
+ */
+export const RECIPIENT_BUDGET: RateBudget = { windowMs: 60 * 60 * 1000, max: 5 };
+
 type Bucket = { count: number; resetAt: number };
 const buckets = new Map<string, Bucket>();
 

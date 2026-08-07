@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from "vitest";
+import { readFileSync } from "node:fs";
 
 // Mock PARTIEL : seul getSession est simulé. Le module exporte aussi hashToken
 // et createSession, dont dépendent des chemins réels (ex. les jetons de
@@ -18,7 +19,7 @@ import {
   INVITATION_TTL_DAYS,
 } from "@/lib/invitations";
 import { updateMemberRole, removeMember } from "@/lib/workspace";
-import { _resetRateLimit, INVITE_BUDGET } from "@/lib/rateLimit";
+import { _resetRateLimit, INVITE_BUDGET, RECIPIENT_BUDGET } from "@/lib/rateLimit";
 import { seedUserWithWorkspace, seedMember } from "../helpers/seed";
 
 const mockGetSession = vi.mocked(getSession);
@@ -523,5 +524,64 @@ describe("Provisioning IdP — l'invitation ne promet plus une connexion impossi
     const res = await addMember(post({ email: u.email, role: "viewer" }), withId(workspaceId));
     expect(res.status).toBe(200);
     expect((await res.json()).loginLink).toBeUndefined();
+  });
+});
+
+describe("Plafond par DESTINATAIRE — une adresse ne se fait pas noyer", () => {
+  /** Espace neuf + admin dédié : le plafond par ACTEUR ne doit pas interférer. */
+  async function acteurNeuf(tag: string) {
+    const s = await seedUserWithWorkspace(`cap-${tag}-${Date.now()}@x.tld`);
+    return { userId: s.user.id, workspaceId: s.workspace.id };
+  }
+
+  it("au-delà du budget, l'email est retenu mais l'INVITATION est créée quand même", async () => {
+    _resetRateLimit();
+    const cible = `cible-${Date.now()}@x.tld`;
+    let dernier: Response | null = null;
+
+    // Chaque tour : un acteur DIFFÉRENT, donc le budget par acteur n'est jamais
+    // atteint — c'est bien la cible qui sature.
+    for (let i = 0; i < RECIPIENT_BUDGET.max + 1; i++) {
+      const a = await acteurNeuf(`a${i}`);
+      asUser(a.userId);
+      dernier = await addMember(post({ email: cible, role: "viewer" }), withId(a.workspaceId));
+    }
+
+    const body = await dernier!.json();
+    // ⚠️ Le code HTTP ne change PAS : répondre 429 ferait de la route un oracle
+    // (« cette adresse a déjà été visée »), et punirait un admin pour un abus
+    // qu'il ne commet pas.
+    expect(dernier!.status).toBe(201);
+    expect(body.status).toBe("invited");
+    expect(body.emailSent).toBe(false);
+    expect(body.emailReason).toBe("throttled");
+
+    // L'écriture, elle, a bien eu lieu : l'invitation est la source de vérité.
+    const inv = await prisma.workspaceInvitation.findFirst({ where: { email: cible } });
+    expect(inv).not.toBeNull();
+  });
+
+  it("inviter 10 personnes DIFFÉRENTES ne déclenche aucun plafond", async () => {
+    // Le cas légitime ne doit pas être gêné : le plafond est par cible.
+    _resetRateLimit();
+    const a = await acteurNeuf("equipe");
+    asUser(a.userId);
+    const stamp = Date.now();
+    for (let i = 0; i < 10; i++) {
+      const r = await addMember(
+        post({ email: `equipe${i}-${stamp}@x.tld`, role: "viewer" }),
+        withId(a.workspaceId)
+      );
+      expect(r.status).toBe(201);
+      expect((await r.json()).emailReason).not.toBe("throttled");
+    }
+  });
+
+  it("la clé de plafond ne contient PAS l'adresse en clair", async () => {
+    // Ces compteurs vivent en mémoire, mais rien n'oblige à y stocker en clair
+    // l'adresse de quelqu'un qui n'a rien demandé.
+    const src = readFileSync("src/app/api/workspaces/[id]/members/route.ts", "utf8");
+    expect(src).toMatch(/createHash\("sha256"\)\.update\(email\)/);
+    expect(src).not.toMatch(/`to:\$\{email\}`/);
   });
 });
