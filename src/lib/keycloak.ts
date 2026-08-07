@@ -116,17 +116,26 @@ function endpoints(): { token: string; admin: string } | null {
 }
 
 /**
- * Plafond du listing d'annuaire. Le realm est PARTAGÉ : `GET /users` renvoie
- * aussi les comptes des autres sites et les service accounts des autres clients.
- * On lit une page bornée et on croise localement par email — un lookup par
- * membre serait N allers-retours pour afficher un seul écran.
+ * Lecture de l'annuaire : on PAGINE, avec un plafond global.
  *
- * ⚠️ Si la page est pleine, l'annuaire est INCOMPLET et doit le dire
- * (`truncated`) : afficher « pas de compte » pour quelqu'un qu'on n'a simplement
- * pas lu serait un mensonge, et l'admin cliquerait « créer » sur un compte
- * existant — donc créerait un doublon d'identité dans l'IdP de l'écosystème.
+ * Le realm est PARTAGÉ : `GET /users` renvoie aussi les comptes des autres sites
+ * et les service accounts des autres clients. On lit l'annuaire et on croise
+ * localement par email — un lookup par membre serait N allers-retours pour
+ * afficher un seul écran.
+ *
+ * ⚠️ Une page unique bornée créait un CUL-DE-SAC PERMANENT pour la queue du
+ * realm : passé le seuil, les derniers comptes n'étaient jamais lus, donc jamais
+ * autre chose que « non vérifié », et aucun rechargement n'y changeait rien. La
+ * pagination le referme.
+ *
+ * ⚠️ `MAX_ACCOUNTS` reste un garde-fou dur : sans lui, un realm qui grossit
+ * ferait boucler l'écran indéfiniment. Au-delà, on rend `truncated` — afficher
+ * « pas de compte » pour quelqu'un qu'on n'a simplement pas lu serait un
+ * mensonge, et l'admin cliquerait « créer » sur un compte existant, donc
+ * fabriquerait un doublon d'identité dans l'IdP de l'écosystème.
  */
-const LIST_LIMIT = 500;
+const PAGE_SIZE = 200;
+const MAX_ACCOUNTS = 2_000;
 
 export type ProvisionResult =
   | { status: "created" }
@@ -154,7 +163,10 @@ export type EnableResult =
   // second appel échoue, la suspension est PARTIELLE — l'annoncer complète
   // ferait croire un offboarding terminé alors que la personne travaille encore.
   | { status: "suspended"; sessionsCut: boolean }
-  | { status: "resumed" }
+  // ⚠️ `pending` : le compte est reactivé, mais il n'a jamais eu de mot de passe.
+  // Annoncer « accès rétabli » tout court promettrait une connexion qui échouera
+  // — la personne n'a toujours aucun moyen d'entrer.
+  | { status: "resumed"; pending: boolean }
   /** Aucun compte IdP pour cette adresse : il n'y a rien à suspendre. */
   | { status: "absent" }
   | { status: "disabled" }
@@ -425,23 +437,32 @@ export async function listIdpAccounts(): Promise<IdpDirectory> {
   const c = await adminContext();
   if (!c.ok) return { ok: false, reason: c.reason };
 
-  try {
-    const res = await call(
-      `${c.ctx.admin}/users?max=${LIST_LIMIT}&briefRepresentation=false`,
-      c.ctx
-    );
-    if (!res.ok) return { ok: false, reason: `list_${res.status}` };
-    const rows = (await res.json()) as KcUser[];
-    if (!Array.isArray(rows)) return { ok: false, reason: "malformed" };
+  // `normalizeEmail` et pas un trim/lowercase à la main : les deux côtés du
+  // croisement doivent normaliser IDENTIQUEMENT, sinon un compte existant passe
+  // pour absent et l'écran propose d'en créer un second.
+  const accounts = new Map<string, IdpAccount>();
 
-    // `normalizeEmail` et pas un trim/lowercase à la main : les deux côtés du
-    // croisement doivent normaliser IDENTIQUEMENT, sinon un compte existant
-    // passe pour absent et l'écran propose d'en créer un second.
-    const accounts = new Map<string, IdpAccount>();
-    for (const u of rows) {
-      if (u.email) accounts.set(normalizeEmail(u.email), toAccount(u));
+  try {
+    for (let first = 0; ; first += PAGE_SIZE) {
+      const res = await call(
+        `${c.ctx.admin}/users?first=${first}&max=${PAGE_SIZE}&briefRepresentation=false`,
+        c.ctx
+      );
+      if (!res.ok) return { ok: false, reason: `list_${res.status}` };
+      const rows = (await res.json()) as KcUser[];
+      if (!Array.isArray(rows)) return { ok: false, reason: "malformed" };
+
+      for (const u of rows) {
+        if (u.email) accounts.set(normalizeEmail(u.email), toAccount(u));
+      }
+
+      // Page incomplète = fin de l'annuaire. C'est le cas nominal, et il évite
+      // une requête de plus dont on connaît déjà la réponse.
+      if (rows.length < PAGE_SIZE) return { ok: true, accounts, truncated: false };
+      if (first + PAGE_SIZE >= MAX_ACCOUNTS) {
+        return { ok: true, accounts, truncated: true };
+      }
     }
-    return { ok: true, accounts, truncated: rows.length >= LIST_LIMIT };
   } catch (err) {
     return { ok: false, reason: err instanceof Error ? err.name : "unknown" };
   }
@@ -478,7 +499,7 @@ export async function setIdpAccountEnabled(
     });
     if (!res.ok) return { status: "failed", reason: `update_${res.status}` };
 
-    if (enabled) return { status: "resumed" };
+    if (enabled) return { status: "resumed", pending: isPending(found.user) };
 
     // Keycloak refuse les NOUVELLES connexions dès `enabled: false`, mais les
     // sessions déjà ouvertes survivraient jusqu'à leur expiration : suspendre
