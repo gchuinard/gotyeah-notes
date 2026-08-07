@@ -173,3 +173,37 @@ describe("POST /api/auth/magic — la route ne dit jamais qui a un compte", () =
     expect(bloque).toBe(true);
   });
 });
+
+describe("Concurrence — deux requêtes portant le MÊME jeton", () => {
+  it("⚠️ une seule gagne : un jeton « à usage unique » doit l'être VRAIMENT", async () => {
+    // Trouvé par revue adversariale et reproduit sur le vrai handler : la
+    // version « findUnique puis delete().catch(() => {}) » laissait les DEUX
+    // appels passer la lecture, donc créait deux sessions valides. Le scénario
+    // est celui déjà documenté dans le module — un filtre anti-hameçonnage qui
+    // précharge le lien pendant que le destinataire clique.
+    const { user } = await seedUserWithWorkspace(`race-${Date.now()}@x.tld`);
+    const token = await issueMagicLink(user.email);
+
+    const [a, b] = await Promise.all([consumeMagicLink(token!), consumeMagicLink(token!)]);
+    const gagnants = [a, b].filter((r) => r.ok);
+    expect(gagnants).toHaveLength(1);
+    expect([a, b].filter((r) => !r.ok && r.reason === "invalid")).toHaveLength(1);
+  });
+
+  it("⚠️ branche INVITÉ : pas de collision sur la création du compte", async () => {
+    // Le perdant faisait remonter un P2002 depuis prisma.user.create, non
+    // rattrapé par le handler GET → 500 sur la PREMIÈRE page que voit l'invité.
+    const { user, workspace } = await seedUserWithWorkspace(`racehote-${Date.now()}@x.tld`);
+    const email = `raceinvite-${Date.now()}@x.tld`;
+    await prisma.workspaceInvitation.create({
+      data: { workspaceId: workspace.id, email, role: "editor", invitedBy: user.id },
+    });
+    const token = await issueMagicLink(email, INVITE_LINK_TTL_MINUTES);
+
+    // Ne doit RIEN lever, quel que soit l'ordre d'arrivée.
+    const res = await Promise.all([consumeMagicLink(token!), consumeMagicLink(token!)]);
+    expect(res.filter((r) => r.ok)).toHaveLength(1);
+    // Un seul compte créé, pas deux ni zéro.
+    expect(await prisma.user.count({ where: { email } })).toBe(1);
+  });
+});

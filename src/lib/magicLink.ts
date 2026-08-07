@@ -106,7 +106,21 @@ export async function consumeMagicLink(token: string): Promise<ConsumeResult> {
 
   const row = await prisma.loginToken.findUnique({ where: { id } });
   if (!row) return { ok: false, reason: "invalid" };
-  await prisma.loginToken.delete({ where: { id } }).catch(() => {});
+
+  // ⚠️ LA SUPPRESSION EST LA PREUVE DE POSSESSION, pas une formalité de ménage.
+  // `deleteMany` est atomique et rend le nombre de lignes retirées : sur deux
+  // requêtes concurrentes portant le même jeton, une seule obtient count === 1.
+  //
+  // La version précédente lisait puis supprimait en avalant l'échec
+  // (`delete().catch(() => {})`) : les deux appels passaient la lecture, et
+  // « usage unique » devenait faux. Mesuré sur le vrai handler — deux sessions
+  // valides pour un compte existant, et un 500 sur la branche invité, les deux
+  // `user.create` entrant en collision. Le cas n'est pas théorique : c'est
+  // exactement le filtre anti-hameçonnage qui précharge le lien pendant que le
+  // destinataire clique, scénario déjà documenté dans ce module.
+  const { count } = await prisma.loginToken.deleteMany({ where: { id } });
+  if (count !== 1) return { ok: false, reason: "invalid" };
+
   if (row.expiresAt.getTime() <= Date.now()) return { ok: false, reason: "expired" };
 
   const email = row.email;
@@ -137,10 +151,17 @@ export async function consumeMagicLink(token: string): Promise<ConsumeResult> {
   // Compte sans mot de passe utilisable : ce chemin n'en demande jamais, et
   // LEGACY_LOGIN est fermé en production. Un hash aléatoire vaut « aucun ».
   const passwordHash = await bcrypt.hash(randomBytes(32).toString("base64url"), 12);
-  const created = await prisma.user.create({
-    data: { email, firstName: local, lastName: "", displayName: local, passwordHash },
-    select: { id: true },
-  });
+  // Filet de sécurité : `deleteMany` garantit déjà un seul gagnant, mais un
+  // compte peut naître par un AUTRE chemin entre-temps (callback OIDC). On
+  // récupère alors l'existant plutôt que de laisser remonter un P2002 — le
+  // handler de consommation redirige, il ne doit jamais rendre 500.
+  const created = await prisma.user
+    .create({
+      data: { email, firstName: local, lastName: "", displayName: local, passwordHash },
+      select: { id: true },
+    })
+    .catch(async () => prisma.user.findUnique({ where: { email }, select: { id: true } }));
+  if (!created) return { ok: false, reason: "no_access" };
 
   const claimed = await claimInvitationsSafely(created.id, email);
   const own = await createWorkspaceWithDefaults("Mon espace", created.id);

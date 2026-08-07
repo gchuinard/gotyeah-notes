@@ -26,7 +26,14 @@ export async function GET(req: NextRequest) {
   if (!magicLinkEnabled()) return back("disabled");
 
   const token = new URL(req.url).searchParams.get("token") ?? "";
-  const result = await consumeMagicLink(token);
+  // ⚠️ Filet ULTIME : ce handler est la première page que voit un invité. Une
+  // exception non rattrapée y afficherait l'écran d'erreur de Next au lieu d'une
+  // redirection — sur le tout premier contact avec l'instance. Aucun détail
+  // n'est journalisé : le jeton est encore valable à cet instant.
+  const result = await consumeMagicLink(token).catch((err) => {
+    console.error(`[magic-consume-failed] err=${err instanceof Error ? err.name : "unknown"}`);
+    return { ok: false, reason: "invalid" } as const;
+  });
   // ⚠️ Le jeton n'apparaît dans AUCUN journal : il est encore valable au moment
   // où l'on écrirait la ligne.
   if (!result.ok) return back(result.reason);
