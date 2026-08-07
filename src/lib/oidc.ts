@@ -28,6 +28,30 @@ export function oidcEnabled(): boolean {
   return !!(ISSUER && CLIENT_ID && CLIENT_SECRET && REDIRECT_URI);
 }
 
+/**
+ * Console de compte de l'IdP — l'écran où une personne gère SES moyens de
+ * connexion : mot de passe, clés d'accès (passkeys), MFA.
+ *
+ * ⚠️ POURQUOI UN LIEN, ET PAS UN ÉCRAN DANS NOTES. Une clé d'accès naît d'une
+ * cérémonie `navigator.credentials.create()` exécutée par le NAVIGATEUR, et le
+ * credential produit est lié au domaine appelant. Une cérémonie lancée depuis
+ * notes fabriquerait une clé pour le domaine de NOTES — que Keycloak ne verrait
+ * jamais, et que notes ne saurait pas vérifier (il n'a ni challenge, ni stockage
+ * de credential, ni vérification d'assertion : son auth s'arrête à un id_token).
+ * L'API admin de Keycloak ne sait pas davantage injecter un credential WebAuthn.
+ * Le lien externe n'est donc pas un pis-aller, c'est le seul chemin possible.
+ *
+ * ⚠️ NE JAMAIS construire cette URL depuis `lib/keycloak.ts > endpoints()` : cette
+ * fonction substitue `KEYCLOAK_INTERNAL_URL` (`http://login-keycloak:8080`) à
+ * l'origine publique. Le lien mènerait à une page qui ne charge pas, avec un
+ * diagnostic trompeur — pas une erreur d'authentification, un timeout DNS.
+ *
+ * Chaîne vide = OIDC non configuré : on n'affiche rien plutôt qu'un lien mort.
+ */
+export function accountConsoleUrl(): string {
+  return oidcEnabled() ? `${ISSUER}/account` : "";
+}
+
 /** Login par mot de passe (formulaire email). Désactivable via LEGACY_LOGIN=off quand
  *  l'app passe en « comptes GotYeah uniquement ». Réactivable (break-glass). */
 export function legacyLoginEnabled(): boolean {
