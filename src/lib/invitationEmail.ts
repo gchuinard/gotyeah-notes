@@ -51,19 +51,23 @@ type EmailContext = {
   /** Origine publique de l'app. Vide = email sans bouton (cf. appBaseUrl). */
   url: string;
   /**
-   * Un compte vient d'être créé pour cette adresse dans l'IdP. Change le texte,
-   * et ce n'est pas cosmétique : la personne va recevoir un SECOND message
-   * (émis par Keycloak) pour définir son mot de passe. Sans cette phrase, elle
-   * clique « Ouvrir GotYeah Notes », se retrouve devant un écran de connexion
-   * sans identifiants, et conclut que le lien est cassé.
+   * Lien de connexion direct. Présent = ce message SUFFIT à entrer, et le bouton
+   * mène dans l'espace plutôt que sur un écran de connexion. C'est tout l'objet
+   * du lot : un mail, un clic.
    */
-  idpAccountCreated?: boolean;
+  loginUrl?: string;
 };
 
-function layout(heading: string, body: string, url: string, footer: string): string {
+function layout(
+  heading: string,
+  body: string,
+  url: string,
+  footer: string,
+  boutonLabel = "Ouvrir GotYeah Notes"
+): string {
   const button = url
     ? `<tr><td align="center" style="padding:26px 32px 6px;">
-        <a href="${escapeHtml(url)}" style="display:inline-block;padding:13px 34px;font-family:Segoe UI,Arial,sans-serif;font-size:15px;font-weight:600;color:#ffffff;background:#2f6feb;text-decoration:none;border-radius:8px;">Ouvrir GotYeah Notes</a>
+        <a href="${escapeHtml(url)}" style="display:inline-block;padding:13px 34px;font-family:Segoe UI,Arial,sans-serif;font-size:15px;font-weight:600;color:#ffffff;background:#2f6feb;text-decoration:none;border-radius:8px;">${escapeHtml(boutonLabel)}</a>
       </td></tr>
       <tr><td style="padding:18px 32px 0;">
         <p style="margin:0;font-family:Courier New,monospace;font-size:12px;line-height:1.5;color:#4a5568;word-break:break-all;">${escapeHtml(url)}</p>
@@ -107,16 +111,19 @@ const FOOTER_ADDED =
   "Tu reçois ce message parce qu'un administrateur t'a ajouté à cet espace. Si c'est une erreur, signale-le-lui : l'accès est déjà actif.";
 
 /** Email à une adresse SANS compte : la connexion créera le compte et l'accès. */
-const MARCHE_A_SUIVRE_NOUVEAU =
-  "Un compte GotYeah vient d'être créé pour toi : tu vas recevoir un SECOND message, « Update Your Account », qui te permettra de choisir ton mot de passe. Commence par celui-là — ensuite seulement, reviens ici.";
-const MARCHE_A_SUIVRE_EXISTANT =
-  "Connecte-toi avec ton compte GotYeah : ton accès sera créé automatiquement, il n'y a rien à accepter.";
+const AVEC_LIEN =
+  "Le bouton ci-dessous te connecte directement, sans mot de passe à créer. Il reste valable 7 jours.";
+const SANS_LIEN =
+  "Connecte-toi avec ton compte : ton accès sera créé automatiquement, il n'y a rien à accepter.";
 
 export function invitationEmail(ctx: EmailContext): Omit<OutgoingEmail, "to"> {
   const who = escapeHtml(ctx.inviterName);
   const where = escapeHtml(ctx.workspaceName);
   const what = roleLabel(ctx.role);
-  const marche = ctx.idpAccountCreated ? MARCHE_A_SUIVRE_NOUVEAU : MARCHE_A_SUIVRE_EXISTANT;
+  const marche = ctx.loginUrl ? AVEC_LIEN : SANS_LIEN;
+  // Le lien de connexion REMPLACE le bouton générique : deux boutons dans le
+  // même message, dont un seul connecte, c'est le doute qu'on veut supprimer.
+  const bouton = ctx.loginUrl || ctx.url;
 
   return {
     subject: `${ctx.inviterName} t'invite sur l'espace « ${ctx.workspaceName} »`,
@@ -124,16 +131,48 @@ export function invitationEmail(ctx: EmailContext): Omit<OutgoingEmail, "to"> {
       "Tu es invité",
       paragraph(`<strong>${who}</strong> t'a invité à rejoindre l'espace <strong>${where}</strong> sur GotYeah Notes, avec le rôle <strong>${what}</strong>.`) +
         paragraph(escapeHtml(marche)),
-      ctx.url,
-      FOOTER_INVITE
+      bouton,
+      FOOTER_INVITE,
+      ctx.loginUrl ? "Ouvrir mon espace" : undefined
     ),
     text: `${ctx.inviterName} t'a invité à rejoindre l'espace « ${ctx.workspaceName} » sur GotYeah Notes, avec le rôle ${what}.
 
 ${marche}
-${ctx.url || ""}
+${bouton || ""}
 
 ${FOOTER_INVITE}`,
   };
+}
+
+/**
+ * Lien de connexion demandé depuis l'écran de connexion. Sobre à dessein : ce
+ * message ne contient AUCUN contexte (espace, inviteur) — il part sur simple
+ * saisie d'une adresse, donc potentiellement à quelqu'un qui n'a rien demandé.
+ */
+export function magicLinkEmail(url: string, minutes: number): Omit<OutgoingEmail, "to"> {
+  const texte = `Voici ton lien de connexion à GotYeah Notes. Il est valable ${minutes} minutes et ne fonctionne qu'une fois.`;
+  return {
+    subject: "Ton lien de connexion",
+    html: layout(
+      "Connexion",
+      paragraph(escapeHtml(texte)),
+      url,
+      "Si tu n'as pas demandé ce lien, ignore ce message : il ne se passera rien.",
+      "Me connecter"
+    ),
+    text: `${texte}
+
+${url}
+
+Si tu n'as pas demandé ce lien, ignore ce message : il ne se passera rien.`,
+  };
+}
+
+/** Envoie le lien de connexion. Ne lève jamais (cf. sendEmail). */
+export async function sendMagicLink(to: string, token: string): Promise<MailResult> {
+  const base = appBaseUrl();
+  const url = `${base}/api/auth/magic/consume?token=${encodeURIComponent(token)}`;
+  return sendEmail({ to, ...magicLinkEmail(url, 15) });
 }
 
 /** Email à une adresse qui A DÉJÀ un compte : l'accès est immédiat, on prévient. */

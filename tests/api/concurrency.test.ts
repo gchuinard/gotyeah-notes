@@ -1,6 +1,12 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 
-vi.mock("@/lib/session", () => ({ getSession: vi.fn() }));
+// Mock PARTIEL : seul getSession est simulé. Le module exporte aussi hashToken
+// et createSession, dont dépendent des chemins réels (ex. les jetons de
+// connexion par email) — un mock total les remplacerait par undefined.
+vi.mock("@/lib/session", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/session")>()),
+  getSession: vi.fn(),
+}));
 
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";

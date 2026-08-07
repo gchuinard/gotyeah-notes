@@ -64,6 +64,9 @@ services:
       # Inscription par formulaire : "off" par défaut (découplée du login legacy et de
       # l'OIDC). Mettre "on" pour rouvrir POST /api/auth/register.
       REGISTRATION: "${REGISTRATION:-off}"
+      # Connexion par lien email — le canal des invites, qui n'ont pas de compte
+      # dans le realm partage. "off" le ferme (cf. lib/magicLink.ts).
+      MAGIC_LINK: "${MAGIC_LINK:-on}"
       # Envoi des emails d'invitation (API HTTP Brevo, cf. lib/mailer.ts).
       # ⚠️ Ce compose n'utilise PAS env_file : sans ces 4 lignes, une clé posée
       # dans le .env du Pi n'atteindrait jamais le conteneur et l'envoi resterait

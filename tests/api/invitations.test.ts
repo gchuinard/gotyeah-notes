@@ -1,6 +1,12 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from "vitest";
 
-vi.mock("@/lib/session", () => ({ getSession: vi.fn() }));
+// Mock PARTIEL : seul getSession est simulé. Le module exporte aussi hashToken
+// et createSession, dont dépendent des chemins réels (ex. les jetons de
+// connexion par email) — un mock total les remplacerait par undefined.
+vi.mock("@/lib/session", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/session")>()),
+  getSession: vi.fn(),
+}));
 
 import { getSession } from "@/lib/session";
 import { GET as listMembers, POST as addMember } from "@/app/api/workspaces/[id]/members/route";
@@ -507,7 +513,7 @@ describe("Provisioning IdP — l'invitation ne promet plus une connexion impossi
     );
     expect(res.status).toBe(201);
     const body = await res.json();
-    expect(body.idpAccount).toBe("disabled");
+    expect(body.loginLink).toBe(false);
     // L'invitation existe quoi qu'il arrive côté IdP.
     expect(body.status).toBe("invited");
   });
@@ -516,6 +522,6 @@ describe("Provisioning IdP — l'invitation ne promet plus une connexion impossi
     const u = await mkUser(`deja-${Date.now()}@x.tld`);
     const res = await addMember(post({ email: u.email, role: "viewer" }), withId(workspaceId));
     expect(res.status).toBe(200);
-    expect((await res.json()).idpAccount).toBeUndefined();
+    expect((await res.json()).loginLink).toBeUndefined();
   });
 });
