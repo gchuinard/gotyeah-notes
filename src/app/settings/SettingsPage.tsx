@@ -6,6 +6,7 @@ import useSWR, { mutate as globalMutate } from "swr";
 import {
   ArrowLeft, User, Users, HardDrive, Palette,
   Eye, EyeOff, Check, Trash2, UserPlus, Clock, X, Bot, Send,
+  KeyRound, ShieldOff, ShieldCheck,
 } from "lucide-react";
 import type { SessionUser } from "@/lib/session";
 import { useWorkspace, type WorkspaceRole } from "@/contexts/WorkspaceContext";
@@ -247,6 +248,32 @@ type Invitation = {
   invitedByName: string | null;
 };
 
+/**
+ * État des comptes SSO, tel que `GET /api/workspaces/[id]/idp` le rend.
+ *
+ * ⚠️ `unknown` n'est pas « pas de compte » : l'annuaire de l'IdP est lu par page
+ * bornée, et une adresse hors de la page lue n'a pas été vérifiée. Afficher
+ * « aucun compte » ferait créer un doublon d'identité dans un realm partagé.
+ */
+type IdpMemberStatus = "none" | "pending" | "active" | "suspended" | "unknown";
+
+type IdpState = {
+  /** Les variables KEYCLOAK_ADMIN_* sont posées sur cette instance. */
+  configured: boolean;
+  /** L'IdP a effectivement répondu. Faux = on ne sait rien, on n'invente pas. */
+  available: boolean;
+  truncated: boolean;
+  accounts: { userId: string; status: IdpMemberStatus; service: boolean }[];
+};
+
+const IDP_LABELS: Record<IdpMemberStatus, string> = {
+  none: "aucun compte SSO",
+  pending: "compte SSO en attente d'activation",
+  active: "compte SSO actif",
+  suspended: "compte SSO suspendu",
+  unknown: "état SSO non vérifié",
+};
+
 const ROLE_OPTIONS: { id: WorkspaceRole; label: string; description: string }[] = [
   { id: "viewer", label: "Lecteur", description: "Lecture seule totale" },
   { id: "editor", label: "Éditeur", description: "Crée et modifie le contenu" },
@@ -283,7 +310,7 @@ function expiryLabel(createdAt: string): string {
  * serait doublement faux.
  */
 function mailNotice(
-  body: { emailSent?: boolean; emailReason?: string; status?: string; idpAccount?: string },
+  body: { emailSent?: boolean; emailReason?: string; status?: string },
   to: string
 ): string {
   const acquis = body.status === "member" ? `${to} a rejoint l'espace` : "Invitation enregistrée";
@@ -298,18 +325,137 @@ function mailNotice(
     envoi = "Brevo a refusé l'envoi (expéditeur ou clé à vérifier) — préviens la personne toi-même.";
   } else envoi = "L'email n'est pas parti (réseau). Tu peux réessayer.";
 
-  // Sans compte sur l'IdP, l'invité reçoit un message qui l'invite à se
-  // connecter… sans pouvoir. C'est le point qui doit remonter à l'admin.
-  const idp =
-    body.idpAccount === "created"
-      ? " Un compte GotYeah a été créé : elle recevra un second message pour choisir son mot de passe."
-      : body.idpAccount === "failed"
-        ? " ⚠️ En revanche son compte GotYeah n'a PAS pu être créé — crée-le dans Keycloak, sinon elle ne pourra pas se connecter."
-        : body.idpAccount === "disabled"
-          ? " Si elle n'a pas encore de compte GotYeah, pense à le lui créer dans Keycloak."
-          : "";
+  // ⚠️ Ne parle PAS de compte IdP. L'email d'invitation porte déjà un lien de
+  // connexion à usage unique : l'invité entre par là, sans compte Keycloak. Le
+  // texte qui vivait ici décrivait le parcours à DEUX emails abandonné le
+  // 06/08 — le laisser en place réintroduirait sa contradiction sans qu'aucun
+  // diff ne la signale. La gestion des comptes SSO est un geste séparé, plus bas
+  // dans cet écran.
+  return `${acquis}. ${envoi}`;
+}
 
-  return `${acquis}. ${envoi}${idp}`;
+/**
+ * Retour d'une action sur un compte SSO. Chaque branche existe parce qu'elle
+ * décrit un effet DIFFÉRENT : « déjà actif » n'envoie aucun email, « suspendu »
+ * ne retire pas de l'espace. Les confondre sous un « OK » ferait croire à un
+ * accès coupé qui ne l'est pas.
+ */
+function idpNotice(body: { status?: string; reason?: string }, name: string): string {
+  switch (body.status) {
+    case "created":
+      return `Compte SSO créé pour ${name} — un email vient de partir pour choisir un mot de passe.`;
+    case "resent":
+      return `Le compte de ${name} existait sans mot de passe : le lien d'activation a été renvoyé.`;
+    case "existing":
+      return `${name} a déjà un compte SSO actif. Aucun email envoyé — proposer un nouveau mot de passe à quelqu'un qui en a un ressemblerait à une prise de contrôle.`;
+    case "suspended":
+      return `Accès SSO suspendu pour ${name}, sur tous les sites de l'IdP. ⚠️ Cela ne retire PAS de cet espace : la connexion par lien email reste possible. Pour couper l'accès à notes, utilise le retrait de l'espace.`;
+    case "resumed":
+      return `Accès SSO rétabli pour ${name}.`;
+    case "absent":
+      return `${name} n'a pas de compte SSO : il n'y a rien à suspendre.`;
+    case "disabled":
+      return "La gestion des comptes SSO n'est pas configurée sur cette instance.";
+    default:
+      return `L'IdP n'a pas pu traiter la demande (${body.reason ?? "raison inconnue"}). Rien n'a changé.`;
+  }
+}
+
+/**
+ * Ligne d'état SSO d'un membre, et l'action qui va avec.
+ *
+ * ⚠️ `unknown` ne propose AUCUNE action : on ne sait pas si le compte existe, et
+ * cliquer « créer » créerait un doublon dans un realm partagé.
+ * ⚠️ Personne ne peut suspendre son propre accès : en production il n'y a plus
+ * de connexion par mot de passe, se couper soi-même n'a pas de retour simple.
+ * Le serveur refuse aussi — ceci n'est que du confort.
+ */
+function IdpControls({
+  status,
+  busy,
+  isSelf,
+  confirming,
+  confirmValue,
+  onConfirmChange,
+  onProvision,
+  onResume,
+  onAskSuspend,
+  onCancelSuspend,
+  onSuspend,
+}: {
+  status: IdpMemberStatus;
+  busy: boolean;
+  isSelf: boolean;
+  confirming: boolean;
+  confirmValue: string;
+  onConfirmChange: (v: string) => void;
+  onProvision: () => void;
+  onResume: () => void;
+  onAskSuspend: () => void;
+  onCancelSuspend: () => void;
+  onSuspend: () => void;
+}) {
+  const link = "text-xs hover:underline disabled:opacity-50 disabled:no-underline";
+
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+      <span className="inline-flex items-center gap-1 text-xs text-[var(--text-muted)]">
+        {status === "suspended" ? (
+          <ShieldOff size={11} className="text-red-500" />
+        ) : status === "active" ? (
+          <ShieldCheck size={11} className="text-emerald-500" />
+        ) : (
+          <KeyRound size={11} />
+        )}
+        {IDP_LABELS[status]}
+      </span>
+
+      {status === "none" && (
+        <button type="button" onClick={onProvision} disabled={busy} className={`${link} text-blue-500`}>
+          Créer le compte SSO
+        </button>
+      )}
+      {status === "pending" && (
+        <button type="button" onClick={onProvision} disabled={busy} className={`${link} text-blue-500`}>
+          Renvoyer l&apos;activation
+        </button>
+      )}
+      {status === "suspended" && (
+        <button type="button" onClick={onResume} disabled={busy} className={`${link} text-blue-500`}>
+          Réactiver
+        </button>
+      )}
+      {status === "active" && !isSelf && !confirming && (
+        <button type="button" onClick={onAskSuspend} disabled={busy} className={`${link} text-red-500`}>
+          Suspendre
+        </button>
+      )}
+
+      {confirming && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            onSuspend();
+          }}
+          className="flex flex-wrap items-center gap-2 basis-full mt-1"
+        >
+          <input
+            value={confirmValue}
+            onChange={(e) => onConfirmChange(e.target.value)}
+            placeholder="Recopie l'adresse pour confirmer"
+            autoComplete="off"
+            className="flex-1 min-w-0 text-base sm:text-xs bg-[var(--surface)] border border-[var(--border)] rounded-md px-2 py-1.5 text-[var(--text)] outline-none focus:border-red-400"
+          />
+          <button type="submit" disabled={busy || !confirmValue.trim()} className={`${link} text-red-500`}>
+            Confirmer la suspension
+          </button>
+          <button type="button" onClick={onCancelSuspend} className={`${link} text-[var(--text-muted)]`}>
+            Annuler
+          </button>
+        </form>
+      )}
+    </div>
+  );
 }
 
 /** Membres de l'ESPACE ACTIF : liste, ajout par email (compte existant), rôle, retrait. */
@@ -325,6 +471,11 @@ function MembersSection({ user }: { user: SessionUser }) {
   const invitationsKey = wsId && isAdmin ? `/api/workspaces/${wsId}/invitations` : null;
   const { data: invitations, mutate: mutateInvitations } =
     useSWR<Invitation[]>(invitationsKey, membersFetcher);
+  // Troisième clé, séparée pour la MÊME raison : elle interroge Keycloak, et la
+  // clé /members alimente aussi les boards (cellules « utilisateur », graines des
+  // colonnes kanban). Un IdP lent ne doit pas retarder l'ouverture d'un kanban.
+  const idpKey = wsId && isAdmin ? `/api/workspaces/${wsId}/idp` : null;
+  const { data: idp, mutate: mutateIdp } = useSWR<IdpState>(idpKey, membersFetcher);
 
   const [email, setEmail]   = useState("");
   // Moindre privilège : lecteur proposé par défaut, on élève explicitement.
@@ -334,11 +485,57 @@ function MembersSection({ user }: { user: SessionUser }) {
   // Distinct de `error` : l'invitation a RÉUSSI, c'est l'email qui peut manquer.
   const [notice, setNotice] = useState<string | null>(null);
   const [resending, setResending] = useState<string | null>(null);
+  const [idpBusy, setIdpBusy] = useState<string | null>(null);
+  // Confirmation de suspension : on demande de RECOPIER l'adresse plutôt que
+  // d'ouvrir une modale « es-tu sûr ? ». Le rayon de l'action dépasse cette
+  // application — la personne perd l'accès à tous les sites de l'IdP — et une
+  // modale se clique sans lire. Recopier oblige à regarder qui est visé.
+  const [suspendTarget, setSuspendTarget] = useState<string | null>(null);
+  const [suspendInput, setSuspendInput] = useState("");
 
   // Se retirer / se rétrograder soi-même change son propre rôle → resynchroniser
   // la liste des workspaces (badge lecture seule, entrées de nav, etc.).
   const refreshSelf = (targetUserId: string) => {
     if (targetUserId === user.id) globalMutate("/api/workspaces");
+  };
+
+  /**
+   * Actions sur le compte d'identité d'un membre. Le message de retour DIT ce
+   * qui s'est passé côté IdP, y compris « rien » : un bouton qui semble réussir
+   * alors qu'aucun email n'est parti est le mode d'échec que cet écran doit
+   * éviter — c'est celui qui avait fait abandonner le provisioning en août.
+   */
+  const idpAction = async (
+    m: Member,
+    action: "create" | "suspend" | "resume",
+    confirmEmail?: string
+  ) => {
+    if (!wsId) return;
+    setError(null);
+    setNotice(null);
+    setIdpBusy(m.userId);
+    try {
+      const res = await fetch(`/api/workspaces/${wsId}/members/${m.userId}/idp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, confirmEmail }),
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        status?: string;
+        reason?: string;
+        error?: string;
+      };
+      if (!res.ok) {
+        setError(body.error ?? `Erreur ${res.status}`);
+        return;
+      }
+      setNotice(idpNotice(body, m.displayName));
+      setSuspendTarget(null);
+      setSuspendInput("");
+      mutateIdp();
+    } finally {
+      setIdpBusy(null);
+    }
   };
 
   const revokeInvitation = async (inv: Invitation) => {
@@ -473,6 +670,12 @@ function MembersSection({ user }: { user: SessionUser }) {
     );
   }
 
+  const idpByUser = new Map((idp?.accounts ?? []).map((a) => [a.userId, a]));
+  // Configuré ET joignable. Sans les deux, on n'affiche RIEN plutôt qu'un état
+  // par défaut : « aucun compte SSO » pour un IdP qu'on n'a pas pu lire ferait
+  // créer des doublons d'identité.
+  const idpUsable = Boolean(idp?.configured && idp.available);
+
   return (
     <div className="max-w-lg">
       <SectionTitle
@@ -572,6 +775,27 @@ function MembersSection({ user }: { user: SessionUser }) {
       {error && <p className="text-xs text-red-500 mb-3">{error}</p>}
       {notice && <p className="text-xs text-[var(--text-muted)] mb-3">{notice}</p>}
 
+      {/* On ne se tait PAS sur ce qu'on ignore : sans ces deux avertissements,
+          un état absent se lirait comme un état vérifié. */}
+      {idp?.configured && !idp.available && (
+        <p className="text-xs text-amber-500 mb-3">
+          L&apos;IdP n&apos;a pas répondu : l&apos;état des comptes SSO n&apos;est pas affiché.
+        </p>
+      )}
+      {idp?.truncated && (
+        <p className="text-xs text-amber-500 mb-3">
+          L&apos;annuaire de l&apos;IdP compte trop de comptes pour être lu en une fois : certains
+          états sont marqués « non vérifié » plutôt que devinés.
+        </p>
+      )}
+      {idpUsable && (
+        <p className="text-xs text-[var(--text-muted)] mb-3">
+          Le SSO est un moyen de connexion, pas un droit d&apos;accès : suspendre un compte SSO
+          ferme la connexion GotYeah sur tous les sites de l&apos;IdP, mais ne retire pas de cet
+          espace. Pour couper l&apos;accès à notes, retire le membre.
+        </p>
+      )}
+
       <div className="flex flex-col divide-y divide-[var(--border)] border border-[var(--border)] rounded-lg">
         {(members ?? []).map((m) => (
           <div key={m.userId} className="flex flex-wrap items-center gap-3 px-3 py-2.5">
@@ -596,6 +820,24 @@ function MembersSection({ user }: { user: SessionUser }) {
                 )}
               </p>
               <p className="text-xs text-[var(--text-muted)] truncate">{m.email}</p>
+              {idpUsable && !m.isService && (
+                <IdpControls
+                  status={idpByUser.get(m.userId)?.status ?? "unknown"}
+                  busy={idpBusy === m.userId}
+                  isSelf={m.userId === user.id}
+                  confirming={suspendTarget === m.userId}
+                  confirmValue={suspendInput}
+                  onConfirmChange={setSuspendInput}
+                  onProvision={() => idpAction(m, "create")}
+                  onResume={() => idpAction(m, "resume")}
+                  onAskSuspend={() => {
+                    setSuspendTarget(m.userId);
+                    setSuspendInput("");
+                  }}
+                  onCancelSuspend={() => setSuspendTarget(null)}
+                  onSuspend={() => idpAction(m, "suspend", suspendInput)}
+                />
+              )}
             </div>
             <div className="flex items-center gap-3 ml-11 sm:ml-0">
               {isAdmin ? (

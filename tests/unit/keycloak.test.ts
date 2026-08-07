@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   ensureInvitedUser,
+  provisionIdpAccount,
+  listIdpAccounts,
+  setIdpAccountEnabled,
   keycloakAdminEnabled,
   _resetKeycloakToken,
 } from "@/lib/keycloak";
@@ -30,6 +33,16 @@ const json = (body: unknown, status = 200) =>
   ({ ok: status < 400, status, json: async () => body }) as Response;
 
 const TOKEN_OK = json({ access_token: "jeton", expires_in: 60 });
+
+/**
+ * Le POST de CRÉATION d'utilisateur. `method === "POST"` seul ne suffit pas :
+ * la demande de jeton en est un aussi, et le test passerait en croyant observer
+ * une création.
+ */
+const createCallOf = (fetchMock: ReturnType<typeof vi.fn>) =>
+  fetchMock.mock.calls.find(
+    (c) => c[1]?.method === "POST" && String(c[0]).endsWith("/users")
+  );
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -159,6 +172,118 @@ describe("Création d'un compte", () => {
       status: "failed",
       reason: "activation_500",
     });
+  });
+});
+
+describe("Compte présent mais JAMAIS activé — sortie de cul-de-sac", () => {
+  it("⚠️ relance l'activation quand UPDATE_PASSWORD est encore pendant", async () => {
+    // Le scénario : la création a réussi, l'email d'activation a échoué. Le
+    // compte existe SANS mot de passe. Avec l'ancienne logique, tout appel
+    // suivant le trouvait « existing » et sortait avant l'envoi — plus jamais
+    // aucun lien ne partait, précisément quand l'admin essayait de réparer.
+    const fetchMock = configured(
+      TOKEN_OK,
+      json([{ id: "u1", requiredActions: ["UPDATE_PASSWORD"], emailVerified: false }]),
+      json({}, 204)
+    );
+    expect(await provisionIdpAccount({ email: "bloque@b.tld", firstName: "A", lastName: "B" })).toEqual({
+      status: "resent",
+    });
+    const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.includes("execute-actions-email"))).toBe(true);
+    // Aucun second compte : on ne recrée pas ce qui existe.
+    expect(createCallOf(fetchMock)).toBeUndefined();
+  });
+
+  it("un compte SANS requiredActions reste « existing » et ne reçoit rien", async () => {
+    // La distinction tient à requiredActions, pas à emailVerified : un compte
+    // utilisable avec une adresse non vérifiée ne doit pas se voir proposer un
+    // nouveau mot de passe — ça ressemblerait à une prise de contrôle.
+    const fetchMock = configured(TOKEN_OK, json([{ id: "u1", emailVerified: false }]));
+    expect(await provisionIdpAccount({ email: "actif@b.tld", firstName: "A", lastName: "B" })).toEqual({
+      status: "existing",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("le prénom et le nom sont envoyés SÉPARÉMENT", async () => {
+    // firstName: displayName mettait « Gautier Chuinard » entier dans le prénom,
+    // et le nom était faux sur tous les sites du realm.
+    const fetchMock = configured(TOKEN_OK, json([]), json({}, 201), json([{ id: "u1" }]), json({}, 204));
+    await provisionIdpAccount({ email: "n@b.tld", firstName: "Ada", lastName: "Lovelace" });
+    const payload = JSON.parse(createCallOf(fetchMock)![1].body);
+    expect(payload.firstName).toBe("Ada");
+    expect(payload.lastName).toBe("Lovelace");
+  });
+});
+
+describe("Annuaire — une requête, croisement local", () => {
+  it("indexe par email NORMALISÉ (l'IdP peut stocker une autre casse)", async () => {
+    configured(TOKEN_OK, json([{ id: "u1", email: "Ada@B.TLD", enabled: true, emailVerified: true }]));
+    const dir = await listIdpAccounts();
+    expect(dir.ok).toBe(true);
+    if (!dir.ok) return;
+    expect(dir.accounts.get("ada@b.tld")).toEqual({
+      enabled: true,
+      emailVerified: true,
+      pending: false,
+    });
+    expect(dir.truncated).toBe(false);
+  });
+
+  it("⚠️ une page pleine est signalée TRONQUÉE, jamais rendue comme complète", async () => {
+    // Sinon une adresse simplement non lue passerait pour « aucun compte », et
+    // l'admin créerait un doublon d'identité dans un realm partagé.
+    const rows = Array.from({ length: 500 }, (_, i) => ({ id: `u${i}`, email: `u${i}@b.tld` }));
+    configured(TOKEN_OK, json(rows));
+    const dir = await listIdpAccounts();
+    expect(dir.ok && dir.truncated).toBe(true);
+  });
+
+  it("une seule requête, quel que soit le nombre de membres à afficher", async () => {
+    const fetchMock = configured(TOKEN_OK, json([]));
+    await listIdpAccounts();
+    // jeton + listing, et rien d'autre : pas de lookup par membre.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("un IdP en erreur rend un échec explicite, pas un annuaire vide", async () => {
+    configured(TOKEN_OK, json({}, 503));
+    expect(await listIdpAccounts()).toEqual({ ok: false, reason: "list_503" });
+  });
+});
+
+describe("Suspension — réversible, et jamais une suppression", () => {
+  it("suspendre pose enabled:false PUIS coupe les sessions ouvertes", async () => {
+    // `enabled: false` bloque les NOUVELLES connexions ; sans le logout, une
+    // session déjà ouverte survivrait jusqu'à son expiration.
+    const fetchMock = configured(TOKEN_OK, json([{ id: "u1" }]), json({}, 204), json({}, 204));
+    expect(await setIdpAccountEnabled("a@b.tld", false)).toEqual({ status: "suspended" });
+
+    const put = fetchMock.mock.calls.find((c) => c[1]?.method === "PUT")!;
+    expect(JSON.parse(put[1].body)).toEqual({ enabled: false });
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).endsWith("/logout"))).toBe(true);
+    // ⚠️ Aucune suppression : le sub, le MFA et les liens fédérés survivent.
+    expect(fetchMock.mock.calls.some((c) => c[1]?.method === "DELETE")).toBe(false);
+  });
+
+  it("réactiver ne coupe aucune session", async () => {
+    const fetchMock = configured(TOKEN_OK, json([{ id: "u1" }]), json({}, 204));
+    expect(await setIdpAccountEnabled("a@b.tld", true)).toEqual({ status: "resumed" });
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).endsWith("/logout"))).toBe(false);
+  });
+
+  it("suspendre une adresse sans compte rend « absent » — et ne crée rien", async () => {
+    const fetchMock = configured(TOKEN_OK, json([]));
+    expect(await setIdpAccountEnabled("inconnu@b.tld", false)).toEqual({ status: "absent" });
+    expect(createCallOf(fetchMock)).toBeUndefined();
+  });
+
+  it("sans configuration, aucune surface", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await setIdpAccountEnabled("a@b.tld", false)).toEqual({ status: "disabled" });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
