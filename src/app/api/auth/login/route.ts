@@ -71,7 +71,9 @@ export async function POST(req: Request) {
   // REGISTRATION=off ⇒ les comptes mot de passe viennent d'un admin ou d'un
   // script, et le rattrapage redevient sûr.
   if (!registrationEnabled()) {
-    await claimInvitationsSafely(user.id, user.email);
+    // grant:false — on PROPOSE. Se connecter ne vaut pas acceptation : la
+    // personne verra l'invitation dans sa cloche et décidera.
+    await claimInvitationsSafely(user.id, user.email, { grant: false });
   }
   const token = await createSession(user.id);
 

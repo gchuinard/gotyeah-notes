@@ -101,7 +101,7 @@ describe("POST /members — email sans compte", () => {
 
     // Sans normalisation des DEUX côtés, ce claim ne matcherait jamais.
     const u = await mkUser(raw.trim().toLowerCase());
-    const { workspaceIds } = await claimInvitations(u.id, raw);
+    const { workspaceIds } = await claimInvitations(u.id, raw, { grant: true });
     expect(workspaceIds).toEqual([workspaceId]);
   });
 
@@ -187,7 +187,7 @@ describe("claimInvitations — matérialisation à la connexion", () => {
     await addMember(post({ email, role: "editor" }), withId(workspaceId));
     const u = await mkUser(email);
 
-    const { workspaceIds } = await claimInvitations(u.id, email);
+    const { workspaceIds } = await claimInvitations(u.id, email, { grant: true });
     expect(workspaceIds).toEqual([workspaceId]);
 
     const m = await prisma.membership.findUnique({
@@ -208,7 +208,7 @@ describe("claimInvitations — matérialisation à la connexion", () => {
     });
     const u = await mkUser(email);
 
-    await claimInvitations(u.id, email);
+    await claimInvitations(u.id, email, { grant: true });
     const m = await prisma.membership.findUnique({
       where: { userId_workspaceId: { userId: u.id, workspaceId } },
     });
@@ -222,7 +222,7 @@ describe("claimInvitations — matérialisation à la connexion", () => {
       data: { workspaceId, email: u.email, role: "viewer", invitedBy: admin.id },
     });
 
-    await expect(claimInvitations(u.id, u.email)).resolves.toEqual({ workspaceIds: [] });
+    await expect(claimInvitations(u.id, u.email, { grant: true })).resolves.toEqual({ workspaceIds: [] });
     // Le rôle EXISTANT prime : une invitation ne rétrograde pas un membre.
     const m = await prisma.membership.findUnique({
       where: { userId_workspaceId: { userId: u.id, workspaceId } },
@@ -234,7 +234,7 @@ describe("claimInvitations — matérialisation à la connexion", () => {
 
   it("sans invitation, c'est un no-op (aucune membership fantôme)", async () => {
     const u = await mkUser(`vierge-${Date.now()}@x.tld`);
-    await expect(claimInvitations(u.id, u.email)).resolves.toEqual({ workspaceIds: [] });
+    await expect(claimInvitations(u.id, u.email, { grant: true })).resolves.toEqual({ workspaceIds: [] });
     expect(await prisma.membership.count({ where: { userId: u.id } })).toBe(0);
   });
 
@@ -270,7 +270,7 @@ describe("Révocation — un droit délégué ne survit pas à la perte du droit
 
     // Et l'invité qui arrive ensuite n'obtient rien.
     const u = await mkUser(email);
-    await expect(claimInvitations(u.id, email)).resolves.toEqual({ workspaceIds: [] });
+    await expect(claimInvitations(u.id, email, { grant: true })).resolves.toEqual({ workspaceIds: [] });
   });
 
   it("retirer un membre emporte ses invitations en attente", async () => {
@@ -317,7 +317,7 @@ describe("Cascade et exposition", () => {
 
     // L'invité qui s'inscrit ensuite n'hérite de rien.
     const u = await mkUser(email);
-    await expect(claimInvitations(u.id, email)).resolves.toEqual({ workspaceIds: [] });
+    await expect(claimInvitations(u.id, email, { grant: true })).resolves.toEqual({ workspaceIds: [] });
   });
 
   it("GET /members expose isService — sans lui, rien ne distingue une automatisation", async () => {
@@ -344,7 +344,7 @@ describe("Péremption — une invitation ne vaut pas éternellement", () => {
     await ageDays(inv.id, INVITATION_TTL_DAYS + 1);
 
     const user = await mkUser(email);
-    const claimed = await claimInvitations(user.id, email);
+    const claimed = await claimInvitations(user.id, email, { grant: true });
 
     // Ni membership fantôme…
     expect(claimed.workspaceIds).toEqual([]);
@@ -367,7 +367,7 @@ describe("Péremption — une invitation ne vaut pas éternellement", () => {
     await ageDays(inv.id, INVITATION_TTL_DAYS - 1);
 
     const user = await mkUser(email);
-    expect((await claimInvitations(user.id, email)).workspaceIds).toEqual([workspaceId]);
+    expect((await claimInvitations(user.id, email, { grant: true })).workspaceIds).toEqual([workspaceId]);
   });
 
   it("hasPendingInvitation : le laissez-passer suit la même échéance", async () => {
@@ -469,7 +469,7 @@ describe("L'ajout d'un membre CONSOMME l'invitation qui visait la même adresse"
     expect(removed.ok).toBe(true);
 
     // Le claim d'une connexion ultérieure ne doit RIEN retrouver.
-    expect((await claimInvitations(user.id, email)).workspaceIds).toEqual([]);
+    expect((await claimInvitations(user.id, email, { grant: true })).workspaceIds).toEqual([]);
     expect(
       await prisma.membership.findUnique({
         where: { userId_workspaceId: { userId: user.id, workspaceId } },
@@ -610,5 +610,53 @@ describe("Plafond par DESTINATAIRE — une adresse ne se fait pas noyer", () => 
         /recipientAllowed\(|recipientBlocked\(/
       );
     }
+  });
+});
+
+describe("⚠️ grant — proposer n'est pas accorder", () => {
+  it("SANS grant, aucune Membership n'est créée et l'invitation SURVIT", async () => {
+    // Le nouveau contrat : se connecter ne vaut pas acceptation. L'invitation
+    // reste en attente et s'affiche dans la cloche, la personne décide.
+    const { user: hote, workspace } = await seedUserWithWorkspace(`grant-hote-${Date.now()}@x.tld`);
+    const u = await mkUser(`grant-invite-${Date.now()}@x.tld`);
+    await prisma.workspaceInvitation.create({
+      data: { workspaceId: workspace.id, email: u.email, role: "editor", invitedBy: hote.id },
+    });
+
+    expect(await claimInvitations(u.id, u.email)).toEqual({ workspaceIds: [] });
+
+    expect(
+      await prisma.membership.findUnique({
+        where: { userId_workspaceId: { userId: u.id, workspaceId: workspace.id } },
+      })
+    ).toBeNull();
+    // L'invitation n'est NI consommée NI purgée : elle attend le clic.
+    expect(
+      await prisma.workspaceInvitation.findFirst({ where: { email: u.email } })
+    ).not.toBeNull();
+  });
+
+  it("⚠️ une invitation REFUSÉE ne se réclame plus, même avec grant", async () => {
+    // Sinon dire non puis se reconnecter suffirait à entrer quand même.
+    const { user: hote, workspace } = await seedUserWithWorkspace(`refus-hote-${Date.now()}@x.tld`);
+    const u = await mkUser(`refus-invite-${Date.now()}@x.tld`);
+    await prisma.workspaceInvitation.create({
+      data: {
+        workspaceId: workspace.id,
+        email: u.email,
+        role: "admin",
+        invitedBy: hote.id,
+        declinedAt: new Date(),
+      },
+    });
+
+    expect(await claimInvitations(u.id, u.email, { grant: true })).toEqual({ workspaceIds: [] });
+    expect(
+      await prisma.membership.findUnique({
+        where: { userId_workspaceId: { userId: u.id, workspaceId: workspace.id } },
+      })
+    ).toBeNull();
+    // …et elle ne sert plus de laissez-passer au provisioning.
+    expect(await hasPendingInvitation(u.email)).toBe(false);
   });
 });

@@ -4,7 +4,6 @@ import { prisma } from "./prisma";
 import { hashToken } from "./session";
 import { normalizeEmail } from "./oidc";
 import { claimInvitationsSafely, hasPendingInvitation } from "./invitations";
-import { createWorkspaceWithDefaults } from "./workspace";
 
 /**
  * Connexion par lien email — le canal des invités.
@@ -87,7 +86,9 @@ export async function issueMagicLink(
 
 export type ConsumeResult =
   | { ok: true; userId: string; workspaceId: string | null }
-  | { ok: false; reason: "invalid" | "expired" | "no_access" };
+  // `needs_acceptance` : l'adresse est invitée mais n'a aucun compte. Rien
+  // n'est créé — l'appelant redirige vers l'écran d'acceptation.
+  | { ok: false; reason: "invalid" | "expired" | "no_access" | "needs_acceptance" };
 
 /**
  * Consomme un jeton et rend l'utilisateur à connecter, en le créant au besoin.
@@ -135,7 +136,9 @@ export async function consumeMagicLink(token: string): Promise<ConsumeResult> {
     // titre qu'au callback OIDC. C'est ce qui distingue ce chemin de
     // POST /api/auth/register, qui ne vérifie rien et n'a donc pas le droit de
     // réclamer une invitation.
-    await claimInvitationsSafely(existing.id, email);
+    // grant:false — compte préexistant : l'invitation reste en attente et
+    // s'affiche dans la cloche. Se connecter n'est pas accepter.
+    await claimInvitationsSafely(existing.id, email, { grant: false });
     const ws = await prisma.membership.findFirst({
       where: { userId: existing.id },
       orderBy: { createdAt: "asc" },
@@ -144,31 +147,24 @@ export async function consumeMagicLink(token: string): Promise<ConsumeResult> {
     return { ok: true, userId: existing.id, workspaceId: ws?.workspaceId ?? null };
   }
 
-  // Pas de compte : il n'en naît un QUE si une invitation est encore vivante.
+  // ⚠️ PAS DE COMPTE : on n'en crée AUCUN ici, et le jeton n'est PAS consommé.
+  //
+  // Décision de Gautier du 07/08 : rien ne doit être créé avant que la personne
+  // ait cliqué « Accepter ». Ce chemin se contente donc d'orienter vers l'écran
+  // d'acceptation, qui porte le même jeton.
+  //
+  // ⚠️ Le jeton est RENDU (réécrit) parce qu'on l'a supprimé plus haut pour
+  // garantir l'usage unique. Sans cette restitution, cliquer le lien afficherait
+  // l'écran d'acceptation… avec un jeton déjà mort, et « Accepter » échouerait.
+  // La garantie d'usage unique n'est pas affaiblie : AUCUNE session n'est
+  // ouverte ici, et c'est l'acceptation qui consommera pour de bon.
   if (!(await hasPendingInvitation(email))) return { ok: false, reason: "no_access" };
 
-  const local = email.split("@")[0];
-  // Compte sans mot de passe utilisable : ce chemin n'en demande jamais, et
-  // LEGACY_LOGIN est fermé en production. Un hash aléatoire vaut « aucun ».
-  const passwordHash = await bcrypt.hash(randomBytes(32).toString("base64url"), 12);
-  // Filet de sécurité : `deleteMany` garantit déjà un seul gagnant, mais un
-  // compte peut naître par un AUTRE chemin entre-temps (callback OIDC). On
-  // récupère alors l'existant plutôt que de laisser remonter un P2002 — le
-  // handler de consommation redirige, il ne doit jamais rendre 500.
-  const created = await prisma.user
-    .create({
-      data: { email, firstName: local, lastName: "", displayName: local, passwordHash },
-      select: { id: true },
-    })
-    .catch(async () => prisma.user.findUnique({ where: { email }, select: { id: true } }));
-  if (!created) return { ok: false, reason: "no_access" };
+  await prisma.loginToken.create({
+    data: { id, email, expiresAt: row.expiresAt },
+  }).catch(() => undefined);
 
-  const claimed = await claimInvitationsSafely(created.id, email);
-  const own = await createWorkspaceWithDefaults("Mon espace", created.id);
-  // On atterrit sur l'espace qui vient d'être réclamé : arriver dans un « Mon
-  // espace » vide quand on suit une invitation donne l'impression que le lien
-  // s'est trompé de destination.
-  return { ok: true, userId: created.id, workspaceId: claimed.workspaceIds[0] ?? own.id };
+  return { ok: false, reason: "needs_acceptance" };
 }
 
 /**

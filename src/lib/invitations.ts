@@ -15,10 +15,22 @@ import { WORKSPACE_ROLES, type WorkspaceRole } from "./workspace";
  *
  * ⚠️ Le claim n'est PAS branché sur POST /api/auth/register : cette route ne
  * vérifie aucun email, une invitation admin y serait réclamable par quiconque
- * occupe l'adresse. Seuls deux chemins réclament : le callback OIDC (Keycloak
- * vérifie l'email, et le callback refuse déjà email_verified === false) et le
- * login d'un compte préexistant. Conséquence assumée : avec REGISTRATION=on et
- * aucun IdP, une invitation reste en attente indéfiniment — c'est voulu.
+ * occupe l'adresse. Conséquence assumée : avec REGISTRATION=on et aucun IdP,
+ * une invitation reste en attente indéfiniment — c'est voulu.
+ *
+ * ⚠️ CINQ points d'appel, et non trois comme l'affirmait la doctrine d'origine
+ * (écrite avant que le lien de connexion par email n'existe) : le login d'un
+ * compte préexistant, les DEUX branches du callback OIDC, et les DEUX branches
+ * de `consumeMagicLink`. Le chemin qui fait RÉELLEMENT entrer un invité externe
+ * aujourd'hui est le lien magique, pas le login — un changement qui l'oublie
+ * referme la seule porte d'entrée des invités, et la CI ne le dit pas.
+ *
+ * ⚠️ `grant` décide si le claim ACCORDE l'accès ou se contente de le PROPOSER.
+ * Depuis l'écran d'acceptation, une invitation ne devient une Membership qu'au
+ * clic de la personne : `grant: false` laisse donc l'invitation en attente et
+ * n'écrit rien. Il n'est à `true` que là où le consentement est déjà acquis —
+ * un compte qui vient de naître n'existe QUE parce qu'une invitation vivante
+ * l'autorisait, et la personne a suivi un lien envoyé à SON adresse.
  */
 
 /**
@@ -70,11 +82,16 @@ export type ClaimResult = {
  */
 export async function claimInvitations(
   userId: string,
-  email: string
+  email: string,
+  options: { grant?: boolean } = {}
 ): Promise<ClaimResult> {
   const normalized = normalizeEmail(email);
   if (!normalized) return { workspaceIds: [] };
 
+  // ⚠️ Défaut à FALSE : proposer, pas accorder. Le défaut sûr est celui qui ne
+  // crée aucun accès — un appelant qui oublie l'option laisse l'invitation en
+  // attente, il n'ouvre pas une porte en silence.
+  const grant = options.grant === true;
   const cutoff = invitationCutoff();
 
   return prisma.$transaction(async (tx) => {
@@ -85,10 +102,16 @@ export async function claimInvitations(
     });
 
     const pending = await tx.workspaceInvitation.findMany({
-      where: { email: normalized, createdAt: { gte: cutoff } },
+      // Une invitation REFUSÉE reste en base comme trace, mais ne confère plus
+      // rien : sans ce filtre, se reconnecter la ferait réclamer malgré le refus.
+      where: { email: normalized, createdAt: { gte: cutoff }, declinedAt: null },
       select: { id: true, workspaceId: true, role: true },
     });
     if (pending.length === 0) return { workspaceIds: [] };
+
+    // Mode PROPOSER : l'invitation reste en attente, la personne l'accepte
+    // depuis sa cloche. Aucune Membership, aucune consommation.
+    if (!grant) return { workspaceIds: [] };
 
     const already = await tx.membership.findMany({
       where: { userId, workspaceId: { in: pending.map((i) => i.workspaceId) } },
@@ -124,10 +147,11 @@ export async function claimInvitations(
  */
 export async function claimInvitationsSafely(
   userId: string,
-  email: string
+  email: string,
+  options: { grant?: boolean } = {}
 ): Promise<ClaimResult> {
   try {
-    return await claimInvitations(userId, email);
+    return await claimInvitations(userId, email, options);
   } catch (err) {
     console.error(`[invitation-claim-failed] user=${userId} err=${String(err)}`);
     return { workspaceIds: [] };
@@ -144,12 +168,20 @@ export async function claimInvitationsSafely(
  *
  * ⚠️ Lecture SEULE, sans purge : appelée avant la création du User, donc hors de
  * la transaction qui réclamera. La purge se fait au claim qui suit.
+ *
+ * ⚠️ Une invitation REFUSÉE n'est PAS un laissez-passer. Sans ce filtre, dire
+ * non puis revenir par « Se connecter » suffirait à obtenir le compte que le
+ * refus venait d'écarter — c'est de la sécurité, pas du confort.
  */
 export async function hasPendingInvitation(email: string): Promise<boolean> {
   const normalized = normalizeEmail(email);
   if (!normalized) return false;
   const found = await prisma.workspaceInvitation.findFirst({
-    where: { email: normalized, createdAt: { gte: invitationCutoff() } },
+    where: {
+      email: normalized,
+      createdAt: { gte: invitationCutoff() },
+      declinedAt: null,
+    },
     select: { id: true },
   });
   return found !== null;

@@ -135,15 +135,17 @@ describe("Claim d'invitation au login — l'inscription ouverte le neutralise", 
     ).not.toBeNull();
   });
 
-  it("REGISTRATION=off : le rattrapage fonctionne (comptes créés par un admin)", async () => {
-    // Inscription fermée = les comptes mot de passe viennent d'un admin ou d'un
-    // script : « le compte existe » redevient une information fiable.
+  it("⚠️ REGISTRATION=off : le claim PROPOSE, il n'accorde plus", async () => {
+    // Le rattrapage au login existe toujours, mais depuis le 07/08 il ne crée
+    // plus la Membership : se connecter ne vaut pas acceptation. L'invitation
+    // reste vivante et s'affiche dans la cloche, la personne décide.
     vi.stubEnv("REGISTRATION", "off");
     const s = await scenario("closed");
     const res = await loginPOST(loginReq(s.mail, PW));
     expect(res.status).toBe(200);
-    const m = await membershipOf(s.userId, s.workspaceId);
-    expect(m?.role).toBe("admin");
-    expect(await prisma.workspaceInvitation.findFirst({ where: { email: s.mail } })).toBeNull();
+
+    expect(await membershipOf(s.userId, s.workspaceId)).toBeNull();
+    // L'invitation SURVIT — c'est elle qui portera le bouton « Accepter ».
+    expect(await prisma.workspaceInvitation.findFirst({ where: { email: s.mail } })).not.toBeNull();
   });
 });

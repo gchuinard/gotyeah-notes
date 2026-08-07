@@ -107,7 +107,8 @@ export async function GET(req: NextRequest) {
     // ⚠️ AVANT le findFirst : une personne qui a quitté tous ses espaces et qu'on
     // vient de réinviter atterrirait sinon sur `null`, alors qu'une membership
     // vient d'être créée. L'email vient de l'IdP et est vérifié (cf. plus haut).
-    await claimInvitationsSafely(existing.id, email);
+    // grant:false — compte préexistant : on propose, on n'accorde pas.
+    await claimInvitationsSafely(existing.id, email, { grant: false });
     const ws = await prisma.membership.findFirst({
       where: { userId: existing.id },
       orderBy: { createdAt: "asc" },
@@ -143,7 +144,11 @@ export async function GET(req: NextRequest) {
   // arriverait sinon dans un « Mon espace » vide, sans rien qui lui dise que
   // l'espace où on l'attend existe — le sélecteur ne se remarque pas quand on
   // découvre l'application.
-  const claimed = await claimInvitationsSafely(created.id, email);
+  // grant:TRUE — ce compte n'existe QUE parce qu'une invitation vivante
+  // l'autorisait (OIDC_ALLOW_SIGNUP=false le refuserait sinon), et l'IdP a
+  // vérifié l'adresse. Le consentement est acquis : demander en plus « acceptes-
+  // tu ? » juste après serait une question dont la réponse est déjà donnée.
+  const claimed = await claimInvitationsSafely(created.id, email, { grant: true });
   const workspace = await createWorkspaceWithDefaults("Mon espace", created.id);
   return finish(created.id, claimed.workspaceIds[0] ?? workspace.id);
 }

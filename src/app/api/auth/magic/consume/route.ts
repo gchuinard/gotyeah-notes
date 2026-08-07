@@ -36,7 +36,17 @@ export async function GET(req: NextRequest) {
   });
   // ⚠️ Le jeton n'apparaît dans AUCUN journal : il est encore valable au moment
   // où l'on écrirait la ligne.
-  if (!result.ok) return back(result.reason);
+  //
+  // `needs_acceptance` n'est PAS une erreur : l'adresse est invitée mais n'a
+  // aucun compte, et rien ne doit être créé avant qu'elle ait cliqué
+  // « Accepter ». On l'emmène à l'écran qui le lui demande, avec le même jeton
+  // — que `consumeMagicLink` a délibérément laissé vivant pour ce cas.
+  if (!result.ok) {
+    if (result.reason === "needs_acceptance") {
+      return NextResponse.redirect(`${base}/invitation?token=${encodeURIComponent(token)}`);
+    }
+    return back(result.reason);
+  }
 
   const session = await createSession(result.userId, result.workspaceId);
   const res = NextResponse.redirect(`${base}/`);
