@@ -588,16 +588,22 @@ describe("Plafond par DESTINATAIRE — une adresse ne se fait pas noyer", () => 
   it("⚠️ le plafond par destinataire est PARTAGÉ, pas recopié par route", async () => {
     // Deux définitions du même hachage divergeraient un jour, et chaque route
     // aurait alors son propre compteur — le plafond ne plafonnerait plus rien.
-    // Toute porte capable de déclencher un envoi doit importer celle-ci.
+    // Toute porte capable de déclencher un envoi doit consommer CELUI-CI.
     for (const f of [
       "src/app/api/workspaces/[id]/members/route.ts",
       "src/app/api/workspaces/[id]/members/[userId]/idp/route.ts",
     ]) {
       const src = readFileSync(f, "utf8");
       expect(src, `${f} redéclare la clé au lieu de l'importer`).not.toMatch(
-        /createHash\("sha256"\)\.update\(email\)/
+        /createHash\(\s*"sha256"\s*\)/
       );
-      expect(src, `${f} ne consomme pas le budget destinataire`).toMatch(/recipientAllowed/);
+      // L'import seul ne prouve rien : on exige que le budget soit RÉFÉRENCÉ
+      // hors de la ligne d'import (appel de recipientAllowed, ou usage explicite
+      // de recipientKey avec RECIPIENT_BUDGET).
+      const horsImport = src.replace(/import\s+\{[^}]*\}\s+from\s+"[^"]*";/g, "");
+      expect(horsImport, `${f} ne consomme pas le budget destinataire`).toMatch(
+        /recipientAllowed\(|recipientKey\(/
+      );
     }
   });
 });

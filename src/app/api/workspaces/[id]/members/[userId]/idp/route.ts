@@ -8,14 +8,15 @@ import {
   keycloakAdminEnabled,
   provisionIdpAccount,
   setIdpAccountEnabled,
+  isIdpAdmin,
 } from "@/lib/keycloak";
 import {
   tooManyFailures,
   recordFailure,
   retryAfterSeconds,
-  recipientAllowed,
   recipientKey,
   INVITE_BUDGET,
+  RECIPIENT_BUDGET,
 } from "@/lib/rateLimit";
 
 /**
@@ -60,6 +61,20 @@ export async function POST(
   if (!membership) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (!hasRole(membership, "admin")) {
     return NextResponse.json({ error: "Rôle insuffisant" }, { status: 403 });
+  }
+  // ⚠️ SECONDE garde, et c'est elle qui tient. Le rôle admin d'un espace est
+  // auto-attribuable (`POST /api/workspaces` n'a aucun gate), et `POST /members`
+  // crée une Membership immédiate pour toute adresse ayant déjà un compte notes,
+  // sans son consentement : les deux conditions ci-dessus se fabriquent en deux
+  // requêtes. Sans cette allowlist d'instance, n'importe quel titulaire de
+  // compte pouvait couper la connexion Keycloak d'un tiers sur TOUS les sites
+  // du realm partagé. Elle s'applique aux trois actions — `resume` comprise :
+  // rendre un accès que quelqu'un a coupé hors de notes est aussi une décision.
+  if (!isIdpAdmin(user.email)) {
+    return NextResponse.json(
+      { error: "La gestion des comptes SSO est réservée aux administrateurs de l'instance." },
+      { status: 403 }
+    );
   }
 
   const body = await req.json().catch(() => null);
@@ -118,19 +133,28 @@ export async function POST(
     // dont l'activation ne part pas produit un compte sans mot de passe, donc
     // exactement le cul-de-sac que `resent` sert à réparer. Et il n'y a pas
     // d'oracle à craindre — l'admin voit déjà ce membre et son adresse.
-    if (!recipientAllowed(email)) {
+    const rk = recipientKey(email);
+    if (tooManyFailures(rk, Date.now(), RECIPIENT_BUDGET)) {
       return NextResponse.json(
         { error: "Trop d'envois vers cette adresse. Réessaie plus tard." },
-        { status: 429, headers: { "Retry-After": String(retryAfterSeconds(recipientKey(email))) } }
+        { status: 429, headers: { "Retry-After": String(retryAfterSeconds(rk)) } }
       );
     }
-    recordFailure(actorKey, Date.now(), INVITE_BUDGET);
 
     const result = await provisionIdpAccount({
       email,
       firstName: target.user.firstName,
       lastName: target.user.lastName,
     });
+
+    // ⚠️ On consomme APRÈS, et seulement si un email est VRAIMENT parti. Le
+    // consommer d'office ferait payer à l'adresse un `existing` qui n'envoie
+    // rien — et comme le budget est partagé avec l'invitation, cinq clics sans
+    // effet bloqueraient ensuite les invitations légitimes vers cette personne.
+    if (result.status === "created" || result.status === "resent") {
+      recordFailure(rk, Date.now(), RECIPIENT_BUDGET);
+      recordFailure(actorKey, Date.now(), INVITE_BUDGET);
+    }
     console.info(
       `[idp-action] actor=${user.id} workspace=${workspaceId} target=${targetUserId} action=create status=${result.status}`
     );

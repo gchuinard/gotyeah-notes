@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 import { getMembership, hasRole } from "@/lib/workspace";
-import { keycloakAdminEnabled, listIdpAccounts } from "@/lib/keycloak";
+import { keycloakAdminEnabled, listIdpAccounts, isIdpAdmin } from "@/lib/keycloak";
+import { normalizeEmail } from "@/lib/oidc";
 
 /**
  * État des comptes d'identité (IdP) des membres de l'espace — LECTURE SEULE.
@@ -40,10 +41,19 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
     return NextResponse.json({ error: "Rôle insuffisant" }, { status: 403 });
   }
 
+  const vide = { truncated: false, accounts: [] };
+
   // Non configuré n'est pas une panne : c'est le mode par défaut du self-host.
   // Le client s'en sert pour ne pas afficher des boutons qui ne feraient rien.
   if (!keycloakAdminEnabled()) {
-    return NextResponse.json({ configured: false, available: false, truncated: false, accounts: [] });
+    return NextResponse.json({ configured: false, allowed: false, available: false, ...vide });
+  }
+
+  // ⚠️ Le rôle admin de l'espace ne suffit PAS : il est auto-attribuable (cf.
+  // `isIdpAdmin`). Sans cette garde, quiconque se crée un espace et y ajoute
+  // de force un membre lirait l'état SSO d'un tiers dans le realm partagé.
+  if (!isIdpAdmin(user.email)) {
+    return NextResponse.json({ configured: true, allowed: false, available: false, ...vide });
   }
 
   const directory = await listIdpAccounts();
@@ -51,7 +61,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
     // L'IdP est injoignable : on le DIT plutôt que de rendre une liste de
     // « aucun compte », qui se lirait comme un état vérifié.
     console.error(`[idp-directory-failed] workspace=${workspaceId} reason=${directory.reason}`);
-    return NextResponse.json({ configured: true, available: false, truncated: false, accounts: [] });
+    return NextResponse.json({ configured: true, allowed: true, available: false, ...vide });
   }
 
   const members = await prisma.membership.findMany({
@@ -66,7 +76,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
     // compte qui voit les pages privées).
     if (u.isService) return { userId, status: "none" as IdpMemberStatus, service: true };
 
-    const found = directory.accounts.get(u.email.trim().toLowerCase());
+    const found = directory.accounts.get(normalizeEmail(u.email));
     let status: IdpMemberStatus;
     if (!found) status = directory.truncated ? "unknown" : "none";
     else if (!found.enabled) status = "suspended";
@@ -77,6 +87,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
 
   return NextResponse.json({
     configured: true,
+    allowed: true,
     available: true,
     truncated: directory.truncated,
     accounts,

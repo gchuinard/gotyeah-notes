@@ -38,7 +38,39 @@
  * MCP_SHARED_SECRET et BREVO_API_KEY) : sans configuration, aucune surface.
  */
 
+import { normalizeEmail } from "./oidc";
+
 const env = (name: string) => (process.env[name] || "").trim();
+
+/**
+ * ⚠️ AUTORITÉ D'INSTANCE — la garde qui compte, et pourquoi un rôle ne suffit pas.
+ *
+ * Ces actions portent sur un realm PARTAGÉ par tout l'écosystème : leur rayon
+ * dépasse notes. Or notes n'a pas d'admin d'instance, et son rôle « admin » est
+ * AUTO-ATTRIBUABLE en trois requêtes — `POST /api/workspaces` n'a aucun gate
+ * (exemption assumée : on crée SON espace et on en devient admin), puis
+ * `POST /members` crée une Membership IMMÉDIATE pour toute adresse ayant déjà un
+ * compte notes, sans le consentement de la personne visée. Un lecteur invité sur
+ * un seul board pouvait ainsi se fabriquer l'autorité de couper la connexion
+ * Keycloak de n'importe quel utilisateur, sur tous les sites.
+ *
+ * D'où une allowlist explicite, hors du modèle de rôles. Elle ne remplace pas le
+ * gate admin de l'espace : elle s'y AJOUTE.
+ *
+ * ⚠️ Vide = PERSONNE, jamais « tout le monde ». Même patron que
+ * MCP_SHARED_SECRET et BREVO_API_KEY — sans configuration, aucune surface. Le
+ * défaut inverse (vide = permissif) est celui qui a rendu MCP_ACT_AS_ALLOWLIST
+ * inerte pendant trois semaines, diff vert à l'appui.
+ */
+export function isIdpAdmin(email: string): boolean {
+  const raw = env("IDP_ADMIN_EMAILS");
+  if (!raw) return false;
+  return raw
+    .split(",")
+    .map((e) => normalizeEmail(e))
+    .filter(Boolean)
+    .includes(normalizeEmail(email));
+}
 
 /** Actions imposées au premier accès. VERIFY_EMAIL est ce qui prouve l'adresse. */
 const REQUIRED_ACTIONS = ["UPDATE_PASSWORD", "VERIFY_EMAIL"];
@@ -222,13 +254,20 @@ async function adminContext(): Promise<
   };
 }
 
-const call = (url: string, ctx: AdminContext, init: RequestInit = {}) =>
-  fetch(url, {
+async function call(url: string, ctx: AdminContext, init: RequestInit = {}) {
+  const res = await fetch(url, {
     ...init,
     headers: ctx.auth,
     signal: AbortSignal.timeout(TIMEOUT_MS),
     cache: "no-store",
   });
+  // ⚠️ Un 401 signifie que le jeton en cache ne vaut plus rien (révocation du
+  // client, redémarrage du realm, horloges désynchronisées). Sans cette purge,
+  // `adminToken()` continuerait de le servir jusqu'à son expiration nominale et
+  // TOUTE la fonctionnalité resterait cassée jusque-là, sans raison lisible.
+  if (res.status === 401) cachedToken = null;
+  return res;
+}
 
 /**
  * Recherche par adresse. `exact=true` est load-bearing : sans lui Keycloak
@@ -374,9 +413,12 @@ export async function listIdpAccounts(): Promise<IdpDirectory> {
     const rows = (await res.json()) as KcUser[];
     if (!Array.isArray(rows)) return { ok: false, reason: "malformed" };
 
+    // `normalizeEmail` et pas un trim/lowercase à la main : les deux côtés du
+    // croisement doivent normaliser IDENTIQUEMENT, sinon un compte existant
+    // passe pour absent et l'écran propose d'en créer un second.
     const accounts = new Map<string, IdpAccount>();
     for (const u of rows) {
-      if (u.email) accounts.set(u.email.trim().toLowerCase(), toAccount(u));
+      if (u.email) accounts.set(normalizeEmail(u.email), toAccount(u));
     }
     return { ok: true, accounts, truncated: rows.length >= LIST_LIMIT };
   } catch (err) {

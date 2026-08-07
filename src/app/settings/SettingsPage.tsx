@@ -260,6 +260,12 @@ type IdpMemberStatus = "none" | "pending" | "active" | "suspended" | "unknown";
 type IdpState = {
   /** Les variables KEYCLOAK_ADMIN_* sont posées sur cette instance. */
   configured: boolean;
+  /**
+   * L'utilisateur courant figure dans `IDP_ADMIN_EMAILS`. Être admin de l'espace
+   * ne suffit pas : ce rôle est auto-attribuable, et l'action porte sur un realm
+   * partagé par tous les sites.
+   */
+  allowed: boolean;
   /** L'IdP a effectivement répondu. Faux = on ne sait rien, on n'invente pas. */
   available: boolean;
   truncated: boolean;
@@ -357,6 +363,13 @@ function idpNotice(body: { status?: string; reason?: string }, name: string): st
     case "disabled":
       return "La gestion des comptes SSO n'est pas configurée sur cette instance.";
     default:
+      // ⚠️ « Rien n'a changé » serait FAUX sur un échec d'activation : le compte
+      // a bien été créé, seul l'email n'est pas parti. Le dire évite que l'admin
+      // aille en créer un second dans un realm partagé — et un nouveau clic
+      // repart sur la branche `resent`, qui relance le lien.
+      if (body.reason?.startsWith("activation_")) {
+        return `Le compte SSO de ${name} a bien été créé, mais l'email d'activation n'est pas parti (${body.reason}). Ne le recrée pas : reclique pour relancer le lien.`;
+      }
       return `L'IdP n'a pas pu traiter la demande (${body.reason ?? "raison inconnue"}). Rien n'a changé.`;
   }
 }
@@ -493,6 +506,15 @@ function MembersSection({ user }: { user: SessionUser }) {
   const [suspendTarget, setSuspendTarget] = useState<string | null>(null);
   const [suspendInput, setSuspendInput] = useState("");
 
+  // ⚠️ Une confirmation de suspension ne survit pas au changement d'espace : la
+  // liste des membres change sous elle, et l'adresse déjà recopiée se
+  // retrouverait pré-remplie en face de quelqu'un d'autre — exactement la
+  // friction que cette saisie sert à créer.
+  useEffect(() => {
+    setSuspendTarget(null);
+    setSuspendInput("");
+  }, [wsId]);
+
   // Se retirer / se rétrograder soi-même change son propre rôle → resynchroniser
   // la liste des workspaces (badge lecture seule, entrées de nav, etc.).
   const refreshSelf = (targetUserId: string) => {
@@ -533,6 +555,11 @@ function MembersSection({ user }: { user: SessionUser }) {
       setSuspendTarget(null);
       setSuspendInput("");
       mutateIdp();
+    } catch {
+      // Sans ce catch, une coupure réseau produisait une rejection non gérée et
+      // AUCUN message : le bouton retombait à l'état normal, comme s'il avait
+      // fonctionné.
+      setError("L'action n'a pas pu être envoyée (réseau). Rien n'a changé.");
     } finally {
       setIdpBusy(null);
     }
@@ -674,7 +701,7 @@ function MembersSection({ user }: { user: SessionUser }) {
   // Configuré ET joignable. Sans les deux, on n'affiche RIEN plutôt qu'un état
   // par défaut : « aucun compte SSO » pour un IdP qu'on n'a pas pu lire ferait
   // créer des doublons d'identité.
-  const idpUsable = Boolean(idp?.configured && idp.available);
+  const idpUsable = Boolean(idp?.configured && idp.allowed && idp.available);
 
   return (
     <div className="max-w-lg">
@@ -777,7 +804,7 @@ function MembersSection({ user }: { user: SessionUser }) {
 
       {/* On ne se tait PAS sur ce qu'on ignore : sans ces deux avertissements,
           un état absent se lirait comme un état vérifié. */}
-      {idp?.configured && !idp.available && (
+      {idp?.configured && idp.allowed && !idp.available && (
         <p className="text-xs text-amber-500 mb-3">
           L&apos;IdP n&apos;a pas répondu : l&apos;état des comptes SSO n&apos;est pas affiché.
         </p>

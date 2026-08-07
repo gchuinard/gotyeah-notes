@@ -4,6 +4,7 @@ import {
   provisionIdpAccount,
   listIdpAccounts,
   setIdpAccountEnabled,
+  isIdpAdmin,
   keycloakAdminEnabled,
   _resetKeycloakToken,
 } from "@/lib/keycloak";
@@ -214,6 +215,25 @@ describe("Compte présent mais JAMAIS activé — sortie de cul-de-sac", () => {
     const payload = JSON.parse(createCallOf(fetchMock)![1].body);
     expect(payload.firstName).toBe("Ada");
     expect(payload.lastName).toBe("Lovelace");
+  });
+});
+
+describe("Autorité d'instance — isIdpAdmin", () => {
+  it("⚠️ vide = PERSONNE (jamais « tout le monde »)", async () => {
+    // Le défaut permissif est celui qui a rendu MCP_ACT_AS_ALLOWLIST inerte
+    // trois semaines : la variable était là, seule la VALEUR manquait.
+    vi.stubEnv("IDP_ADMIN_EMAILS", "");
+    expect(isIdpAdmin("gautier@x.tld")).toBe(false);
+  });
+
+  it("compare normalisé, tolère les espaces, et n'accepte pas un préfixe", async () => {
+    vi.stubEnv("IDP_ADMIN_EMAILS", " Gautier@X.TLD , autre@x.tld ");
+    expect(isIdpAdmin("gautier@x.tld")).toBe(true);
+    expect(isIdpAdmin("  GAUTIER@x.tld ")).toBe(true);
+    expect(isIdpAdmin("autre@x.tld")).toBe(true);
+    expect(isIdpAdmin("gautier@x.tld.evil")).toBe(false);
+    expect(isIdpAdmin("gautier@x.tl")).toBe(false);
+    expect(isIdpAdmin("")).toBe(false);
   });
 });
 
