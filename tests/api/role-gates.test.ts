@@ -24,6 +24,7 @@ import { DELETE as workspaceDELETE } from "@/app/api/workspaces/[id]/route";
 import { POST as membersPOST } from "@/app/api/workspaces/[id]/members/route";
 import { PATCH as memberPATCH, DELETE as memberDELETE } from "@/app/api/workspaces/[id]/members/[userId]/route";
 import { DELETE as invitationDELETE } from "@/app/api/workspaces/[id]/invitations/[invitationId]/route";
+import { POST as memberIdpPOST } from "@/app/api/workspaces/[id]/members/[userId]/idp/route";
 import { POST as databasesPOST } from "@/app/api/databases/route";
 import { PATCH as databasePATCH, DELETE as databaseDELETE } from "@/app/api/databases/[id]/route";
 import { POST as propertiesPOST } from "@/app/api/databases/[id]/properties/route";
@@ -83,6 +84,13 @@ const jsonReq = (url: string, method: string, body: unknown) =>
   });
 
 beforeAll(async () => {
+  // ⚠️ Sans ça, le cas POST /idp passerait à VIDE : la route refuse déjà tout le
+  // monde en 403 quand IDP_ADMIN_EMAILS est absente, donc le test ne prouverait
+  // rien sur le gate de RÔLE. En autorisant l'identité utilisée par `as()`, un
+  // gate `hasRole` supprimé ferait tomber la réponse en 409 (IdP non configuré)
+  // et le test échouerait — ce qu'on attend d'un garde.
+  vi.stubEnv("IDP_ADMIN_EMAILS", "x@x.tld");
+
   const seeded = await seedUserWithWorkspace(`roles-admin-${Date.now()}@x.tld`);
   adminId = seeded.user.id;
   workspaceId = seeded.workspace.id;
@@ -123,6 +131,7 @@ beforeAll(async () => {
   otherRecordId = (await prisma.record.create({ data: { databaseId: otherDb.id, title: "O" } })).id;
 });
 afterAll(async () => {
+  vi.unstubAllEnvs();
   await prisma.$disconnect();
 });
 
@@ -146,6 +155,7 @@ const cases: GateCase[] = [
   { name: "PATCH /api/workspaces/[id]/members/[userId]", minRole: "admin", call: () => memberPATCH(jsonReq(`/api/workspaces/${workspaceId}/members/${editorId}`, "PATCH", { role: "viewer" }), P({ id: workspaceId, userId: editorId })) },
   { name: "DELETE /api/workspaces/[id]/members/[userId] (autrui)", minRole: "admin", call: () => memberDELETE(req(`/api/workspaces/${workspaceId}/members/${adminId}`, "DELETE"), P({ id: workspaceId, userId: adminId })) },
   { name: "DELETE /api/workspaces/[id]/invitations/[invitationId]", minRole: "admin", call: () => invitationDELETE(req(`/api/workspaces/${workspaceId}/invitations/nope`, "DELETE"), P({ id: workspaceId, invitationId: "nope" })) },
+  { name: "POST /api/workspaces/[id]/members/[userId]/idp", minRole: "admin", call: () => memberIdpPOST(jsonReq(`/api/workspaces/${workspaceId}/members/${editorId}/idp`, "POST", { action: "create" }), P({ id: workspaceId, userId: editorId })) },
   { name: "POST /api/databases", minRole: "editor", call: () => databasesPOST(jsonReq("/api/databases", "POST", { pageId })) },
   { name: "PATCH /api/databases/[id]", minRole: "editor", call: () => databasePATCH(jsonReq(`/api/databases/${databaseId}`, "PATCH", {}), P({ id: databaseId })) },
   { name: "DELETE /api/databases/[id]", minRole: "admin", call: () => databaseDELETE(req(`/api/databases/${databaseId}`, "DELETE"), P({ id: databaseId })) },
@@ -280,6 +290,7 @@ const DECLARED: Record<string, string[]> = {
   "workspaces/[id]/route.ts": ["DELETE"],
   "workspaces/[id]/members/route.ts": ["POST"],
   "workspaces/[id]/members/[userId]/route.ts": ["PATCH", "DELETE"],
+  "workspaces/[id]/members/[userId]/idp/route.ts": ["POST"],
   "workspaces/[id]/invitations/[invitationId]/route.ts": ["DELETE"],
   "databases/route.ts": ["POST"],
   "databases/[id]/route.ts": ["PATCH", "DELETE"],

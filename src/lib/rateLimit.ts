@@ -6,6 +6,8 @@
  *
  * En mémoire → réinitialisé au redémarrage (acceptable). Pas de dépendance externe.
  */
+import { createHash } from "node:crypto";
+
 const WINDOW_MS = 15 * 60 * 1000; // 15 min
 const MAX_FAILURES = 8;
 
@@ -43,6 +45,46 @@ export const INVITE_BUDGET: RateBudget = { windowMs: 60 * 60 * 1000, max: 20 };
  * et « Renvoyer » reste utilisable plusieurs fois d'affilée.
  */
 export const RECIPIENT_BUDGET: RateBudget = { windowMs: 60 * 60 * 1000, max: 5 };
+
+/**
+ * Clé du budget par destinataire. VIT ICI, et pas dans la route qui l'a
+ * introduite : toute porte capable de déclencher un envoi vers une adresse doit
+ * consommer le MÊME compteur. Deux définitions du même hachage divergeraient un
+ * jour, et le plafond ne plafonnerait plus rien — chaque route aurait le sien.
+ *
+ * ⚠️ L'adresse est HACHÉE : ces compteurs vivent en mémoire, mais rien n'oblige
+ * à y stocker en clair l'adresse de quelqu'un qui n'a rien demandé — même règle
+ * que « pas d'email dans les journaux ».
+ */
+export const recipientKey = (email: string) =>
+  `to:${createHash("sha256").update(email).digest("hex").slice(0, 32)}`;
+
+/**
+ * Teste puis consomme le budget d'une adresse. `false` = ne pas envoyer.
+ * Partagé par l'invitation et le provisioning IdP : l'email d'activation est
+ * émis par Keycloak, donc il échappe à `lib/mailer.ts` — sans ce passage, un
+ * bouton re-cliquable rouvrirait le canal que ce budget vient de fermer.
+ */
+export function recipientAllowed(email: string, now = Date.now()): boolean {
+  if (recipientBlocked(email, now)) return false;
+  recordRecipientSend(email, now);
+  return true;
+}
+
+/**
+ * Les deux moitiés de `recipientAllowed`, séparées pour les portes qui ne
+ * savent qu'APRÈS coup si un email est réellement parti (le provisioning IdP
+ * délègue l'envoi à Keycloak, et certains chemins n'envoient rien). Consommer
+ * d'avance ferait payer à une adresse des actions muettes, et bloquerait
+ * ensuite les invitations légitimes vers elle — le compteur est partagé.
+ */
+export function recipientBlocked(email: string, now = Date.now()): boolean {
+  return tooManyFailures(recipientKey(email), now, RECIPIENT_BUDGET);
+}
+
+export function recordRecipientSend(email: string, now = Date.now()): void {
+  recordFailure(recipientKey(email), now, RECIPIENT_BUDGET);
+}
 
 type Bucket = { count: number; resetAt: number };
 const buckets = new Map<string, Bucket>();

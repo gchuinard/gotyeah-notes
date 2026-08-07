@@ -87,6 +87,11 @@ services:
       # écran de connexion). On joint donc Keycloak par le réseau partagé.
       # Seule la BASE est surchargée : le realm reste dérivé d'OIDC_ISSUER.
       KEYCLOAK_INTERNAL_URL: "${KEYCLOAK_INTERNAL_URL:-}"
+      # Autorité d'INSTANCE pour la gestion des comptes SSO (Réglages → Membres).
+      # ⚠️ Vide = personne, jamais « tout le monde ». Le rôle admin d'un espace
+      # est auto-attribuable et ne peut donc pas garder une action dont l'effet
+      # porte sur le realm partagé par tous les sites.
+      IDP_ADMIN_EMAILS: "${IDP_ADMIN_EMAILS:-}"
     # Reached by Nginx Proxy Manager over the shared external network, as
     # gotyeah_notes:3000 (no host port published — same convention as the other
     # apps on this Pi). Add `ports: ["30001:3000"]` if you need direct access.

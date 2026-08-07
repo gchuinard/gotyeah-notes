@@ -580,8 +580,35 @@ describe("Plafond par DESTINATAIRE — une adresse ne se fait pas noyer", () => 
   it("la clé de plafond ne contient PAS l'adresse en clair", async () => {
     // Ces compteurs vivent en mémoire, mais rien n'oblige à y stocker en clair
     // l'adresse de quelqu'un qui n'a rien demandé.
-    const src = readFileSync("src/app/api/workspaces/[id]/members/route.ts", "utf8");
+    const src = readFileSync("src/lib/rateLimit.ts", "utf8");
     expect(src).toMatch(/createHash\("sha256"\)\.update\(email\)/);
     expect(src).not.toMatch(/`to:\$\{email\}`/);
+  });
+
+  it("⚠️ le plafond par destinataire est PARTAGÉ, pas recopié par route", async () => {
+    // Deux définitions du même hachage divergeraient un jour, et chaque route
+    // aurait alors son propre compteur — le plafond ne plafonnerait plus rien.
+    // Toute porte capable de déclencher un envoi doit consommer CELUI-CI.
+    for (const f of [
+      "src/app/api/workspaces/[id]/members/route.ts",
+      "src/app/api/workspaces/[id]/members/[userId]/idp/route.ts",
+    ]) {
+      const src = readFileSync(f, "utf8");
+      expect(src, `${f} redéclare la clé au lieu de l'importer`).not.toMatch(
+        /createHash\(\s*"sha256"\s*\)/
+      );
+      // L'import seul ne prouve rien : on exige que le budget soit RÉFÉRENCÉ
+      // hors de la ligne d'import (appel de recipientAllowed, ou usage explicite
+      // de recipientKey avec RECIPIENT_BUDGET).
+      const horsImport = src.replace(/import\s+\{[^}]*\}\s+from\s+"[^"]*";/g, "");
+      // L'import seul ne prouve rien : on exige un APPEL, hors ligne d'import.
+      expect(horsImport, `${f} ne consomme pas le budget destinataire`).toMatch(
+        /recipientAllowed\(|recordRecipientSend\(/
+      );
+      // …et une VÉRIFICATION avant d'agir (recipientAllowed fait les deux).
+      expect(horsImport, `${f} ne vérifie pas le budget destinataire`).toMatch(
+        /recipientAllowed\(|recipientBlocked\(/
+      );
+    }
   });
 });
