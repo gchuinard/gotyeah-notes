@@ -107,7 +107,15 @@ export async function checkRecordAccess(
     include: {
       database: {
         select: {
-          page: { select: { workspaceId: true, visibility: true, ownerId: true, trashedAt: true } },
+          page: {
+            select: {
+              id: true,
+              workspaceId: true,
+              visibility: true,
+              ownerId: true,
+              trashedAt: true,
+            },
+          },
         },
       },
     },
@@ -124,6 +132,11 @@ export async function checkRecordAccess(
     workspaceId: row.database.page.workspaceId,
     membership,
     databaseId: row.databaseId,
+    // Champ ADDITIF : la page hôte, déjà chargée par la requête ci-dessus. Sa
+    // visibilité décide qui peut être prévenu d'une assignation — une carte sur
+    // une page privée ne doit pas voir son titre partir dans la cloche de
+    // quelqu'un qui n'y a pas accès.
+    page: row.database.page,
     record,
   };
 }

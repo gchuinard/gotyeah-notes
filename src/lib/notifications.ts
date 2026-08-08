@@ -27,6 +27,7 @@ export const NOTIFICATION_TYPES = [
   "role_changed",
   "membership_removed",
   "invitation_declined",
+  "record_assigned",
 ] as const;
 
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
@@ -56,6 +57,13 @@ export type NotificationPayload = {
   actorName?: string;
   roleBefore?: WorkspaceRole;
   roleAfter?: WorkspaceRole;
+  /** Titre de la carte à l'instant de l'assignation — repli si elle disparaît. */
+  recordTitle?: string;
+  /** Lien profond vers la carte (?r=<id>), façon Database.patchNotesPageId. */
+  pageId?: string;
+  recordId?: string;
+  /** Nombre de cartes assignées d'affilée, quand la notification a coalescé. */
+  count?: number;
 };
 
 /**
@@ -111,6 +119,45 @@ export function isInvitationActionable(
   return invitation.createdAt >= invitationCutoff;
 }
 
+/**
+ * Fenêtre de coalescence des assignations. `BulkActionBar` envoie un PATCH
+ * INDÉPENDANT par carte : cocher 30 cartes fait 30 transactions, et le serveur
+ * ne peut structurellement pas savoir que c'était un seul clic. Sans fusion, la
+ * cloche prendrait 30 lignes pour un geste.
+ *
+ * 2 minutes, comme `shouldCoalesceRevision` — même problème, même réponse.
+ */
+export const ASSIGNMENT_COALESCE_MS = 2 * 60 * 1000;
+
+/**
+ * Faut-il fusionner cette assignation dans la précédente ? Oui SSI elle existe,
+ * vient du MÊME acteur et date de moins de `ASSIGNMENT_COALESCE_MS`. Ne fusionne
+ * jamais le geste d'un autre acteur, ni hors fenêtre.
+ */
+export function shouldCoalesceAssignment(
+  last: { actorId: string | null; createdAt: Date } | null | undefined,
+  actorId: string,
+  now: Date = new Date()
+): boolean {
+  if (!last || last.actorId !== actorId) return false;
+  return now.getTime() - last.createdAt.getTime() < ASSIGNMENT_COALESCE_MS;
+}
+
+/**
+ * Qui vient d'être AJOUTÉ aux assignés ? On notifie sur les entrants seulement,
+ * jamais sur « la propriété a changé » — sinon retirer quelqu'un préviendrait
+ * tous les autres, et réordonner la liste préviendrait tout le monde.
+ *
+ * Tolérant à des valeurs non conformes : une propriété `user` est censée porter
+ * un tableau de chaînes, mais une donnée héritée peut être n'importe quoi.
+ */
+export function addedAssignees(before: unknown, after: unknown): string[] {
+  const list = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && x !== "") : [];
+  const avant = new Set(list(before));
+  return list(after).filter((id) => !avant.has(id));
+}
+
 /** Ce dont l'affichage a besoin, une fois les références résolues. */
 export type NotificationView = {
   id: string;
@@ -163,6 +210,14 @@ export function notificationMessage(input: {
       return `${acteur} t'a retiré de « ${espace} ».`;
     case "invitation_declined":
       return `${acteur} a refusé ton invitation à « ${espace} ».`;
+    case "record_assigned": {
+      const n = input.payload.count ?? 1;
+      if (n > 1) return `${acteur} t'a assigné ${n} cartes dans « ${espace} ».`;
+      const titre = input.payload.recordTitle?.trim();
+      return titre
+        ? `${acteur} t'a assigné « ${titre} ».`
+        : `${acteur} t'a assigné une carte dans « ${espace} ».`;
+    }
     default:
       // Type inconnu : on affiche une ligne neutre plutôt que de casser.
       return `Nouvel événement dans « ${espace} ».`;

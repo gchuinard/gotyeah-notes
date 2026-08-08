@@ -7,6 +7,9 @@ import {
   isInvitationActionable,
   isKnownNotificationType,
   notificationMessage,
+  addedAssignees,
+  shouldCoalesceAssignment,
+  ASSIGNMENT_COALESCE_MS,
 } from "@/lib/notifications";
 
 /**
@@ -132,5 +135,73 @@ describe("Message — rendu à la lecture, jamais stocké", () => {
     });
     expect(m).toBeTruthy();
     expect(m).toContain("X");
+  });
+});
+
+describe("Assignation — on notifie les ENTRANTS, et on fusionne les rafales", () => {
+  it("ne retient que les ids AJOUTÉS", () => {
+    // Notifier sur « la propriété a changé » préviendrait tout le monde à chaque
+    // retrait, et à chaque réordonnancement de la liste.
+    expect(addedAssignees(["a"], ["a", "b"])).toEqual(["b"]);
+    expect(addedAssignees(["a", "b"], ["a"])).toEqual([]);
+    expect(addedAssignees(["a", "b"], ["b", "a"])).toEqual([]);
+    expect(addedAssignees(null, ["a"])).toEqual(["a"]);
+    expect(addedAssignees(["a"], null)).toEqual([]);
+  });
+
+  it("tolère une valeur non conforme sans lever", () => {
+    // La propriété est censée porter un tableau de chaînes, mais une donnée
+    // héritée peut être n'importe quoi.
+    expect(addedAssignees("pas un tableau", ["a"])).toEqual(["a"]);
+    expect(addedAssignees(["a"], [42, "b", null, ""])).toEqual(["b"]);
+    expect(addedAssignees(undefined, undefined)).toEqual([]);
+  });
+
+  it("⚠️ fusionne les assignations du MÊME acteur dans la fenêtre", () => {
+    // Sans ça, cocher 30 cartes dans BulkActionBar ferait 30 lignes : il envoie
+    // un PATCH indépendant par carte, le serveur ne peut pas savoir que c'était
+    // un seul clic.
+    const now = new Date("2026-08-08T12:00:00Z");
+    const recent = new Date(now.getTime() - 30_000);
+    expect(shouldCoalesceAssignment({ actorId: "ada", createdAt: recent }, "ada", now)).toBe(true);
+  });
+
+  it("ne fusionne JAMAIS le geste d'un autre acteur, ni hors fenêtre", () => {
+    const now = new Date("2026-08-08T12:00:00Z");
+    const recent = new Date(now.getTime() - 30_000);
+    const vieux = new Date(now.getTime() - ASSIGNMENT_COALESCE_MS - 1);
+    expect(shouldCoalesceAssignment({ actorId: "bob", createdAt: recent }, "ada", now)).toBe(false);
+    expect(shouldCoalesceAssignment({ actorId: "ada", createdAt: vieux }, "ada", now)).toBe(false);
+    expect(shouldCoalesceAssignment(null, "ada", now)).toBe(false);
+  });
+
+  it("le message bascule au pluriel dès que ça a fusionné", () => {
+    const une = notificationMessage({
+      type: "record_assigned",
+      payload: { recordTitle: "Corriger la cloche" },
+      actorName: "Ada",
+      workspaceName: "Board",
+    });
+    expect(une).toContain("Corriger la cloche");
+
+    const plusieurs = notificationMessage({
+      type: "record_assigned",
+      payload: { count: 12 },
+      actorName: "Ada",
+      workspaceName: "Board",
+    });
+    expect(plusieurs).toContain("12 cartes");
+    // Le titre d'UNE carte ne veut plus rien dire quand il y en a douze.
+    expect(plusieurs).not.toContain("Corriger");
+  });
+
+  it("une carte sans titre reste annonçable", () => {
+    const m = notificationMessage({
+      type: "record_assigned",
+      payload: { recordTitle: "   " },
+      actorName: "Ada",
+      workspaceName: "Board",
+    });
+    expect(m).toContain("Board");
   });
 });
