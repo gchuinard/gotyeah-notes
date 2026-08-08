@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { register } from "./helpers/auth";
+import { register, joinWorkspace } from "./helpers/auth";
 
 // Propriété « utilisateur » : la cellule liste les MEMBRES de l'espace de la
 // database, écrit un tableau d'ids, et n'expose jamais leur email. Deux
@@ -13,13 +13,12 @@ test("assigner un membre depuis une cellule utilisateur, filtrer dessus, sans fu
   const ctxB = await browser.newContext();
   const pageB = await ctxB.newPage();
   const b = await register(pageB, "userprop-b", "Bob Membre");
-  await ctxB.close();
 
   // B devient membre de l'espace de A (éditeur), donc assignable.
-  const added = await page.request.post(`/api/workspaces/${a.workspaceId}/members`, {
-    data: { email: b.email, role: "editor" },
-  });
-  expect(added.ok()).toBeTruthy();
+  // ⚠️ Il doit ACCEPTER : ajouter ne fait plus entrer. Son contexte ne peut
+  // donc être fermé qu'APRÈS — c'est lui qui répond à l'invitation.
+  await joinWorkspace(page, pageB, a.workspaceId, b.email, "editor");
+  await ctxB.close();
 
   // Database + colonne « Assigné » de type user + une carte.
   const pg = await (

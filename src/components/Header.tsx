@@ -1,5 +1,6 @@
 "use client";
 import { Menu, Search, Settings } from "lucide-react";
+import NotificationBell from "./NotificationBell";
 import Link from "next/link";
 import type { SessionUser } from "@/lib/session";
 import { getAvatarColor, getInitials } from "@/lib/avatar";
@@ -62,6 +63,9 @@ export default function Header({ user, onOpenNav }: Props) {
             Rechercher…
           </span>
         </button>
+        {/* Entre la recherche et les réglages : c'est là que l'œil va chercher
+            une cloche, et c'est la place demandée. */}
+        <NotificationBell />
         <Link
           href="/settings"
           aria-label="Paramètres"

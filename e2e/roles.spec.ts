@@ -26,7 +26,25 @@ test("invitation d'un lecteur : écran Membres, lecture seule, élévation en é
   }).toPass();
   await page.getByPlaceholder("email@exemple.fr").fill(b.email);
   await page.getByRole("button", { name: "Ajouter" }).click();
-  await expect(page.getByText("Bob Lecteur")).toBeVisible();
+  // ⚠️ Ajouter ne fait plus entrer : B est INVITÉ, il doit accepter. Il
+  // apparaît donc dans « En attente », pas encore dans la liste des membres.
+  await expect(page.getByText(/est invité·e/)).toBeVisible();
+
+  const notifs = await (await pageB.request.get("/api/notifications")).json();
+  const inv = notifs.find(
+    (n: { actionable: boolean; invitationId: string | null }) => n.actionable && n.invitationId
+  );
+  expect(inv, "B n'a reçu aucune invitation actionnable").toBeTruthy();
+  const accepte = await pageB.request.post(`/api/invitations/${inv.invitationId}`, {
+    data: { action: "accept" },
+  });
+  expect(accepte.ok(), await accepte.text()).toBeTruthy();
+
+  await page.reload();
+  await expect(async () => {
+    await page.getByRole("button", { name: "Membres" }).click();
+    await expect(page.getByText("Bob Lecteur")).toBeVisible({ timeout: 2000 });
+  }).toPass();
 
   // Garde-fou « dernier admin » remonté jusqu'à l'UI : A ne peut pas se rétrograder.
   // Selects de l'écran : [rôle du formulaire d'ajout, ligne Alice, ligne Bob].

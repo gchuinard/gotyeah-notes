@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { register } from "./helpers/auth";
+import { register, joinWorkspace } from "./helpers/auth";
 
 // Dupliquer — phase B : l'action existait côté serveur (POST /records/[id]/duplicate)
 // et n'était câblée que dans Kanban et Backlog. Ce spec couvre les trois vues
@@ -111,9 +111,7 @@ test("lecture seule : aucune action de duplication n'est proposée", async ({ pa
   const pageB = await ctxB.newPage();
   const b = await register(pageB, "dup-ro-b", "Bob Lecteur");
 
-  await page.request.post(`/api/workspaces/${a.workspaceId}/members`, {
-    data: { email: b.email, role: "viewer" },
-  });
+  await joinWorkspace(page, pageB, a.workspaceId, b.email, "viewer");
   await pageB.request.post(`/api/workspaces/${a.workspaceId}/switch`);
 
   const sections = await (
