@@ -42,6 +42,25 @@ export function cuid() {
 }
 
 /**
+ * Horodatage au format EXACT de Prisma sur SQLite.
+ *
+ * ⚠️ Ne jamais écrire `CURRENT_TIMESTAMP` dans une colonne DateTime. Prisma y
+ * stocke du TEXTE ISO-8601 avec un « T » et un décalage
+ * (`2026-08-08T11:02:42.575+00:00`) ; CURRENT_TIMESTAMP écrit
+ * `2026-08-08 11:02:42`, séparateur ESPACE. La colonne étant du texte, la
+ * comparaison est lexicographique : l'espace (0x20) passe avant le « T » (0x54),
+ * donc une ligne écrite ainsi devient la PLUS ANCIENNE de la journée.
+ *
+ * Ce n'est pas cosmétique : le pont MCP fixe l'espace COURANT d'une identité
+ * incarnée à sa membership la plus ancienne (lib/session.ts > firstWorkspaceId).
+ * Une membership horodatée par CURRENT_TIMESTAMP déplace donc l'espace de
+ * travail par défaut du compte de service, en silence et sans erreur.
+ */
+export function prismaNow() {
+  return new Date().toISOString().replace("Z", "+00:00");
+}
+
+/**
  * Crée le compte de service et sa membership, ou remet en état ce qui manque.
  *
  * Idempotent par construction : chaque étape est conditionnée à l'état lu, et
@@ -70,8 +89,8 @@ export function createServiceAccount(db, { email, displayName, workspaceId, role
       const passwordHash = bcrypt.hashSync(randomBytes(32).toString("base64url"), 12);
       db.prepare(
         `INSERT INTO User (id, email, firstName, lastName, displayName, passwordHash, isService, createdAt)
-         VALUES (?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)`
-      ).run(id, normalized, displayName, "", displayName, passwordHash);
+         VALUES (?, ?, ?, ?, ?, ?, 1, ?)`
+      ).run(id, normalized, displayName, "", displayName, passwordHash, prismaNow());
       user = { id, isService: 1 };
       actions.push("user_created");
     } else if (!user.isService) {
@@ -89,8 +108,8 @@ export function createServiceAccount(db, { email, displayName, workspaceId, role
     if (!membership) {
       db.prepare(
         `INSERT INTO Membership (id, userId, workspaceId, role, createdAt)
-         VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)`
-      ).run(cuid(), user.id, workspaceId, role);
+         VALUES (?, ?, ?, ?, ?)`
+      ).run(cuid(), user.id, workspaceId, role, prismaNow());
       actions.push("membership_created");
     } else if (membership.role !== role) {
       db.prepare("UPDATE Membership SET role = ? WHERE id = ?").run(role, membership.id);

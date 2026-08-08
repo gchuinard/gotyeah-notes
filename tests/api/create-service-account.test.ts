@@ -2,7 +2,12 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import Database from "better-sqlite3";
 import { prisma } from "@/lib/prisma";
 import { seedUserWithWorkspace } from "../helpers/seed";
-import { createServiceAccount, cuid, dbPathFromUrl } from "../../scripts/create-service-account.mjs";
+import {
+  createServiceAccount,
+  cuid,
+  dbPathFromUrl,
+  prismaNow,
+} from "../../scripts/create-service-account.mjs";
 
 // Le script agit en SQL direct (le client Prisma généré n'est pas importable
 // hors bundler) : on l'exécute donc sur LA MÊME base que les tests, ouverte par
@@ -42,6 +47,29 @@ describe("cuid", () => {
     const ids = new Set(Array.from({ length: 500 }, () => cuid()));
     expect(ids.size).toBe(500);
     for (const id of ids) expect(id).toMatch(/^c[a-z0-9]{20,}$/);
+  });
+});
+
+describe("prismaNow", () => {
+  it("écrit le format exact de Prisma, décalage compris", () => {
+    expect(prismaNow()).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}\+00:00$/);
+  });
+
+  it("⚠️ une ligne du script ne devient PAS la plus ancienne de la journée", async () => {
+    // Le vrai piège, démontré : la colonne DateTime est du TEXTE, donc triée
+    // lexicographiquement. Le format de CURRENT_TIMESTAMP a un ESPACE là où
+    // l'ORM met un « T » — 0x20 < 0x54 — et passerait donc avant TOUT ce que
+    // Prisma a écrit le même jour. Or firstWorkspaceId (pont MCP) prend la
+    // membership la plus ancienne : l'espace de travail par défaut du compte de
+    // service basculerait, sans erreur.
+    expect("2026-08-08 11:02:42" < "2026-08-08T11:02:42.575+00:00").toBe(true);
+
+    const seeded = await seedUserWithWorkspace(`ts-format-${Date.now()}@x.tld`);
+    // better-sqlite3 rend `unknown` : on narrow, on ne caste pas en any.
+    const row = db
+      .prepare("SELECT createdAt FROM Membership WHERE userId = ?")
+      .get(seeded.user.id) as { createdAt: string };
+    expect(prismaNow() > row.createdAt).toBe(true);
   });
 });
 
