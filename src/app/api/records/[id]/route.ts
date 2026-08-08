@@ -3,6 +3,12 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 import { checkRecordAccess, hasRole } from "@/lib/workspace";
+import {
+  addedAssignees,
+  shouldCoalesceAssignment,
+  parseNotificationPayload,
+  serializeNotificationPayload,
+} from "@/lib/notifications";
 import { validateRelationValues } from "@/lib/relations";
 import { validateUserValues } from "@/lib/assignees";
 import { deniedTransitions, type TransitionRule } from "@/lib/permissionRules";
@@ -184,6 +190,23 @@ export async function PATCH(
 
   const now = new Date();
 
+  // Quelles propriétés modifiées sont de type `user` ? Lu avant la transaction :
+  // c'est une lecture de schéma, elle n'a pas à tenir la base ouverte.
+  //
+  // ⚠️ Aucune notification si la page hôte n'est pas accessible au destinataire :
+  // une carte peut vivre sur une page PRIVÉE, et le message porte son titre.
+  // Prévenir quelqu'un d'une assignation qu'il ne peut pas voir lui divulguerait
+  // un titre et le laisserait devant un 404.
+  const assigneeProps =
+    rawProperties === undefined || changedPropIds.length === 0
+      ? []
+      : (
+          await prisma.databaseProperty.findMany({
+            where: { id: { in: changedPropIds }, databaseId: access.databaseId, type: "user" },
+            select: { id: true },
+          })
+        ).filter(() => access.page.visibility !== "private" || access.page.ownerId === user.id);
+
   const updated = await prisma.$transaction(async (tx) => {
     const row = await tx.record.update({
       where: { id },
@@ -228,6 +251,73 @@ export async function PATCH(
             createdAt: now,
           },
         });
+      }
+    }
+
+    // ─── Notifier les assignés AJOUTÉS ────────────────────────────────────────
+    // Dans la MÊME transaction que l'écriture : hors d'elle, une notification
+    // survivrait à un rollback et annoncerait une assignation qui n'a pas eu lieu.
+    if (assigneeProps.length > 0) {
+      const nouveaux = new Map<string, string>(); // userId → propertyId
+      for (const prop of assigneeProps) {
+        const change = changes.find((c) => c.field === prop.id);
+        if (!change) continue;
+        for (const uid of addedAssignees(change.before, change.after)) {
+          // ⚠️ On ne se notifie JAMAIS soi-même : s'assigner une carte est un
+          // geste dont on est déjà au courant. Ce filtre vit ici parce que
+          // l'écriture ne passe pas par `notify()` — la coalescence exige de
+          // lire la dernière ligne, ce que ce helper ne fait pas.
+          if (uid !== user.id && !nouveaux.has(uid)) nouveaux.set(uid, prop.id);
+        }
+      }
+
+      for (const uid of nouveaux.keys()) {
+        // ⚠️ Coalescence : `BulkActionBar` envoie un PATCH par carte. Sans
+        // fusion, cocher 30 cartes ferait 30 lignes dans la cloche pour un seul
+        // geste. Même fenêtre et même raison que les révisions.
+        const last = await tx.notification.findFirst({
+          where: { userId: uid, type: "record_assigned", workspaceId: access.workspaceId },
+          orderBy: { createdAt: "desc" },
+          select: { id: true, actorId: true, createdAt: true, payload: true },
+        });
+
+        if (shouldCoalesceAssignment(last, user.id, now)) {
+          const p = parseNotificationPayload(last!.payload);
+          await tx.notification.update({
+            where: { id: last!.id },
+            data: {
+              // Au-delà de la première, le titre d'UNE carte ne veut plus rien
+              // dire : on compte, et le message bascule au pluriel.
+              payload: serializeNotificationPayload({
+                ...p,
+                count: (p.count ?? 1) + 1,
+                recordTitle: undefined,
+                recordId: undefined,
+              }),
+              readAt: null,
+              createdAt: now,
+            },
+          });
+        } else {
+          await tx.notification.create({
+            data: {
+              userId: uid,
+              type: "record_assigned",
+              workspaceId: access.workspaceId,
+              actorId: user.id,
+              // Pas de workspaceName ici : il est résolu à la LECTURE via la
+              // relation, et un espace renommé doit s'afficher sous son nom
+              // actuel. On ne copie que ce qui n'existe nulle part ailleurs.
+              payload: serializeNotificationPayload({
+                actorName: user.displayName,
+                recordTitle: (title ?? access.record.title) || undefined,
+                recordId: id,
+                pageId: access.page.id,
+              }),
+              createdAt: now,
+            },
+          });
+        }
       }
     }
 
