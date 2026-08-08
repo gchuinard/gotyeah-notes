@@ -1,4 +1,5 @@
 import { prisma } from "./prisma";
+import { notify } from "./notify";
 
 /**
  * Règle de confidentialité intra-workspace : une page privée n'est accessible
@@ -241,11 +242,15 @@ export async function hasRoleInAnyWorkspace(
 export async function updateMemberRole(
   workspaceId: string,
   targetUserId: string,
-  role: WorkspaceRole
+  role: WorkspaceRole,
+  /** Qui agit, et sous quel nom d'espace l'annoncer. Optionnels : sans eux la
+   *  notification reste correcte, elle est simplement moins nommée. */
+  context: { actorId?: string; workspaceName?: string } = {}
 ): Promise<
   | { ok: true; membership: { userId: string; role: string } }
   | { ok: false; code: "not_found" | "last_admin" }
 > {
+  const { actorId, workspaceName } = context;
   return prisma.$transaction(async (tx) => {
     const target = await tx.membership.findUnique({
       where: { userId_workspaceId: { userId: targetUserId, workspaceId } },
@@ -272,6 +277,21 @@ export async function updateMemberRole(
         where: { workspaceId, invitedBy: targetUserId },
       });
     }
+    // On le DIT : jusqu'ici, la personne découvrait sa rétrogradation en
+    // encaissant des 403 sur des gestes qu'elle faisait la veille.
+    await notify(tx, [
+      {
+        userId: targetUserId,
+        type: "role_changed",
+        workspaceId,
+        actorId,
+        payload: {
+          workspaceName: workspaceName ?? undefined,
+          roleBefore: target.role as WorkspaceRole,
+          roleAfter: role,
+        },
+      },
+    ]);
     return { ok: true as const, membership: updated };
   });
 }
@@ -282,12 +302,14 @@ export async function updateMemberRole(
  */
 export async function removeMember(
   workspaceId: string,
-  targetUserId: string
+  targetUserId: string,
+  context: { actorId?: string; workspaceName?: string } = {}
 ): Promise<{ ok: true } | { ok: false; code: "not_found" | "last_admin" }> {
+  const { actorId, workspaceName } = context;
   return prisma.$transaction(async (tx) => {
     const target = await tx.membership.findUnique({
       where: { userId_workspaceId: { userId: targetUserId, workspaceId } },
-      select: { role: true },
+      select: { role: true, user: { select: { email: true } } },
     });
     if (!target) return { ok: false as const, code: "not_found" as const };
 
@@ -304,6 +326,28 @@ export async function removeMember(
     await tx.workspaceInvitation.deleteMany({
       where: { workspaceId, invitedBy: targetUserId },
     });
+    // ⚠️ ET celles qui le VISENT, sur cet espace. Sans ça, un retrait ne retire
+    // pas : l'invitation survivante rouvre l'accès dès que la personne l'accepte
+    // — le retour qu'on croyait fermé. Ce trou était masqué tant que l'ajout
+    // d'un membre consommait l'invitation ; depuis que l'ajout n'est plus qu'une
+    // proposition, il n'y a plus rien pour la nettoyer.
+    await tx.workspaceInvitation.deleteMany({
+      where: { workspaceId, email: target.user.email },
+    });
+    // ⚠️ Et ses notifications de CET espace : sans ça, la cloche resterait un
+    // canal de lecture vers un espace dont on vient de sortir — noms de cartes
+    // et d'acteurs compris.
+    await tx.notification.deleteMany({ where: { userId: targetUserId, workspaceId } });
+    // Puis on annonce le retrait — APRÈS l'effacement, sinon on l'effacerait.
+    await notify(tx, [
+      {
+        userId: targetUserId,
+        type: "membership_removed",
+        workspaceId,
+        actorId,
+        payload: { workspaceName: workspaceName ?? undefined },
+      },
+    ]);
     return { ok: true as const };
   });
 }

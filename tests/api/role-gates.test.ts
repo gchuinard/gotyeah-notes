@@ -284,6 +284,15 @@ const DECLARED: Record<string, string[]> = {
   "workspaces/[id]/switch/route.ts": ["POST"],
   "workspaces/route.ts": ["POST"],
   "me/route.ts": ["PATCH"],
+  // La cloche : marquer SES notifications lues, accepter ou refuser une
+  // invitation qui ME vise. L'autorité est l'invitation (vérifiée sur l'email
+  // du demandeur), jamais un rôle dans un espace — on ne peut pas exiger un
+  // rôle dans un espace qu'on n'a pas encore rejoint.
+  "notifications/route.ts": ["PATCH"],
+  "invitations/[id]/route.ts": ["POST"],
+  // PUBLIQUE : portée par le jeton du lien email, pas par une session. C'est
+  // l'écran qu'un invité SANS COMPTE voit avant qu'on lui crée quoi que ce soit.
+  "invitations/claim/route.ts": ["POST"],
   // Gatés — couverts par la table ci-dessus.
   "pages/route.ts": ["POST"],
   "pages/[id]/route.ts": ["PATCH", "DELETE"],

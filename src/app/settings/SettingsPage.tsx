@@ -338,10 +338,15 @@ function expiryLabel(createdAt: string): string {
  * serait doublement faux.
  */
 function mailNotice(
-  body: { emailSent?: boolean; emailReason?: string; status?: string },
+  body: { emailSent?: boolean; emailReason?: string; status?: string; notified?: boolean },
   to: string
 ): string {
-  const acquis = body.status === "member" ? `${to} a rejoint l'espace` : "Invitation enregistrée";
+  // ⚠️ Depuis le 07/08, la réponse ne dit plus jamais « member » : ajouter
+  // quelqu'un ne l'ajoute plus, ça le lui PROPOSE. Le message ne doit donc
+  // jamais annoncer une arrivée qui n'a pas eu lieu.
+  const acquis = body.notified
+    ? `${to} est invité·e — la demande l'attend dans sa cloche`
+    : "Invitation enregistrée";
 
   let envoi: string;
   if (body.emailSent) envoi = "Email envoyé.";
@@ -351,14 +356,12 @@ function mailNotice(
     // Brevo a refusé (expéditeur non vérifié, clé invalide…). Réessayer à
     // l'identique redonnera la même erreur : ne promettons pas le contraire.
     envoi = "Brevo a refusé l'envoi (expéditeur ou clé à vérifier) — préviens la personne toi-même.";
+  } else if (body.emailReason === "throttled") {
+    envoi = "Email retenu (trop d'envois récents vers cette adresse) — l'invitation, elle, est bien posée.";
   } else envoi = "L'email n'est pas parti (réseau). Tu peux réessayer.";
 
-  // ⚠️ Ne parle PAS de compte IdP. L'email d'invitation porte déjà un lien de
-  // connexion à usage unique : l'invité entre par là, sans compte Keycloak. Le
-  // texte qui vivait ici décrivait le parcours à DEUX emails abandonné le
-  // 06/08 — le laisser en place réintroduirait sa contradiction sans qu'aucun
-  // diff ne la signale. La gestion des comptes SSO est un geste séparé, plus bas
-  // dans cet écran.
+  // ⚠️ Ne parle PAS de compte IdP : la gestion des comptes SSO est un geste
+  // séparé, plus bas dans cet écran.
   return `${acquis}. ${envoi}`;
 }
 

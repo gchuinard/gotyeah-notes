@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { register } from "./helpers/auth";
+import { register, joinWorkspace } from "./helpers/auth";
 
 // Lot B — deux acquis à prouver EN VRAI, parce qu'aucun test unitaire ne peut le faire :
 //  1. une UNIQUE vue filtrée « Moi » montre à chacun SES cartes (View.config est partagé) ;
@@ -16,11 +16,13 @@ test("vue partagée filtrée « Moi » : chacun voit ses cartes ; kanban regroup
   const b = await register(pageB, "mefilter-b", "Bob Assigné");
 
   // B rejoint l'espace de A en éditeur, puis bascule dessus.
-  const added = await page.request.post(`/api/workspaces/${a.workspaceId}/members`, {
-    data: { email: b.email, role: "editor" },
-  });
-  expect(added.ok()).toBeTruthy();
-  const bUserId = (await added.json()).userId as string;
+  // ⚠️ Ajouter ne fait plus entrer : B est invité, puis accepte. Et la réponse
+  // ne rend plus de userId — on le lit sur la liste des membres, une fois entré.
+  await joinWorkspace(page, pageB, a.workspaceId, b.email, "editor");
+  const membres = await (
+    await page.request.get(`/api/workspaces/${a.workspaceId}/members`)
+  ).json();
+  const bUserId = membres.find((m: { email: string }) => m.email === b.email)?.userId as string;
   expect(bUserId).toBeTruthy();
   expect((await pageB.request.post(`/api/workspaces/${a.workspaceId}/switch`)).ok()).toBeTruthy();
 
@@ -129,13 +131,16 @@ test("carte d'un membre parti : visible dans « Membre retiré », et réattribu
   const ctxB = await browser.newContext();
   const pageB = await ctxB.newPage();
   const b = await register(pageB, "orphan-b", "Bob Part");
-  await ctxB.close();
 
-  const added = await page.request.post(`/api/workspaces/${a.workspaceId}/members`, {
-    data: { email: b.email, role: "editor" },
-  });
-  expect(added.ok()).toBeTruthy();
-  const bUserId = (await added.json()).userId as string;
+  // Il doit accepter avant de pouvoir « partir » : son contexte se ferme après.
+  await joinWorkspace(page, pageB, a.workspaceId, b.email, "editor");
+  await ctxB.close();
+  const membresOrphan = await (
+    await page.request.get(`/api/workspaces/${a.workspaceId}/members`)
+  ).json();
+  const bUserId = membresOrphan.find((m: { email: string }) => m.email === b.email)
+    ?.userId as string;
+  expect(bUserId).toBeTruthy();
 
   const pg = await (
     await page.request.post("/api/pages", { data: { workspaceId: a.workspaceId, title: "Board orphelin" } })

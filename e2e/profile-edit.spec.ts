@@ -13,6 +13,9 @@ test("le profil s'enregistre, et le nom affiché se propage à toute l'applicati
 }) => {
   await register(page, "profil", "Nom Initial");
   await page.goto("/settings");
+  // La cloche de l'en-tête charge son compteur au montage : attendre que le
+  // réseau se calme évite de saisir pendant une revalidation qui re-rend.
+  await page.waitForLoadState("networkidle");
 
   const displayName = page.getByLabel("Pseudo / Nom affiché");
   await expect(displayName).toHaveValue("Nom Initial");

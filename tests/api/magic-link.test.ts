@@ -113,7 +113,9 @@ describe("Consommation", () => {
     expect(await consumeMagicLink("")).toEqual({ ok: false, reason: "invalid" });
   });
 
-  it("crée le compte de l'invité, le fait entrer dans l'espace, et consomme l'invitation", async () => {
+  it("⚠️ un invité SANS compte n'obtient RIEN : ni User, ni session, ni espace", async () => {
+    // Décision du 07/08 : rien n'est créé avant le clic sur « Accepter ».
+    // Le lien mène désormais à un écran d'acceptation, pas à une session.
     const { user, workspace } = await seedUserWithWorkspace(`hote-${Date.now()}@x.tld`);
     const email = `nouveau-${Date.now()}@x.tld`;
     await prisma.workspaceInvitation.create({
@@ -121,17 +123,24 @@ describe("Consommation", () => {
     });
 
     const token = await issueMagicLink(email, INVITE_LINK_TTL_MINUTES);
-    const r = await consumeMagicLink(token!);
-    expect(r.ok).toBe(true);
-    if (!r.ok) return;
+    expect(await consumeMagicLink(token!)).toEqual({ ok: false, reason: "needs_acceptance" });
 
-    // On atterrit sur l'espace RÉCLAMÉ, pas sur le « Mon espace » créé au passage.
-    expect(r.workspaceId).toBe(workspace.id);
-    const m = await prisma.membership.findUnique({
-      where: { userId_workspaceId: { userId: r.userId, workspaceId: workspace.id } },
+    expect(await prisma.user.findUnique({ where: { email } })).toBeNull();
+    expect(await prisma.workspaceInvitation.findFirst({ where: { email } })).not.toBeNull();
+  });
+
+  it("⚠️ et le jeton reste VIVANT : sinon l'écran d'acceptation naîtrait déjà mort", async () => {
+    // Le jeton est supprimé puis restitué : aucune session n'est ouverte, donc
+    // l'usage unique n'est pas affaibli — c'est l'acceptation qui consommera.
+    const { user, workspace } = await seedUserWithWorkspace(`hote2-${Date.now()}@x.tld`);
+    const email = `vivant-${Date.now()}@x.tld`;
+    await prisma.workspaceInvitation.create({
+      data: { workspaceId: workspace.id, email, role: "viewer", invitedBy: user.id },
     });
-    expect(m?.role).toBe("editor");
-    expect(await prisma.workspaceInvitation.findFirst({ where: { email } })).toBeNull();
+
+    const token = await issueMagicLink(email, INVITE_LINK_TTL_MINUTES);
+    await consumeMagicLink(token!);
+    expect(await prisma.loginToken.findUnique({ where: { id: hashToken(token!) } })).not.toBeNull();
   });
 
   it("⚠️ l'invitation RÉVOQUÉE entre l'envoi et le clic ne laisse pas entrer", async () => {
@@ -190,9 +199,7 @@ describe("Concurrence — deux requêtes portant le MÊME jeton", () => {
     expect([a, b].filter((r) => !r.ok && r.reason === "invalid")).toHaveLength(1);
   });
 
-  it("⚠️ branche INVITÉ : pas de collision sur la création du compte", async () => {
-    // Le perdant faisait remonter un P2002 depuis prisma.user.create, non
-    // rattrapé par le handler GET → 500 sur la PREMIÈRE page que voit l'invité.
+  it("⚠️ branche INVITÉ : deux clics concurrents ne créent toujours aucun compte", async () => {
     const { user, workspace } = await seedUserWithWorkspace(`racehote-${Date.now()}@x.tld`);
     const email = `raceinvite-${Date.now()}@x.tld`;
     await prisma.workspaceInvitation.create({
@@ -202,8 +209,7 @@ describe("Concurrence — deux requêtes portant le MÊME jeton", () => {
 
     // Ne doit RIEN lever, quel que soit l'ordre d'arrivée.
     const res = await Promise.all([consumeMagicLink(token!), consumeMagicLink(token!)]);
-    expect(res.filter((r) => r.ok)).toHaveLength(1);
-    // Un seul compte créé, pas deux ni zéro.
-    expect(await prisma.user.count({ where: { email } })).toBe(1);
+    expect(res.every((r) => !r.ok)).toBe(true);
+    expect(await prisma.user.count({ where: { email } })).toBe(0);
   });
 });
