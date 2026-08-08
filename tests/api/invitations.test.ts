@@ -398,6 +398,28 @@ describe("Péremption — une invitation ne vaut pas éternellement", () => {
     expect(await hasPendingInvitation(`jamais-${Date.now()}@x.tld`)).toBe(false);
     expect(await hasPendingInvitation("")).toBe(false);
   });
+
+  it("⚠️ une invitation REFUSÉE ne sert plus de laissez-passer au provisioning", async () => {
+    // Sécurité, pas confort : à OIDC_ALLOW_SIGNUP=false, hasPendingInvitation
+    // est ce qui autorise la CRÉATION du compte au callback. Sans l'exclusion du
+    // refus, dire non puis revenir par « Se connecter » suffirait à obtenir le
+    // compte que le refus venait précisément d'écarter.
+    const email = `refus-${Date.now()}@x.tld`;
+    const inv = await prisma.workspaceInvitation.create({
+      data: { workspaceId, email, role: "viewer", invitedBy: admin.id },
+    });
+    expect(await hasPendingInvitation(email)).toBe(true);
+
+    await prisma.workspaceInvitation.update({
+      where: { id: inv.id },
+      data: { declinedAt: new Date() },
+    });
+    expect(await hasPendingInvitation(email)).toBe(false);
+
+    // La ligne SURVIT : l'admin doit continuer de voir qu'il y a eu un refus,
+    // sinon « en attente » s'évanouit sans dire si c'est un refus ou un délai.
+    expect(await prisma.workspaceInvitation.findUnique({ where: { id: inv.id } })).not.toBeNull();
+  });
 });
 
 describe("Renvoyer une invitation = la ré-émettre", () => {
