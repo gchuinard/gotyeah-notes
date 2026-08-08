@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
-import { checkRecordAccess, hasRole } from "@/lib/workspace";
+import { checkRecordAccess, hasRole, isPageAccessible } from "@/lib/workspace";
 import {
   addedAssignees,
   shouldCoalesceAssignment,
@@ -193,19 +193,13 @@ export async function PATCH(
   // Quelles propriétés modifiées sont de type `user` ? Lu avant la transaction :
   // c'est une lecture de schéma, elle n'a pas à tenir la base ouverte.
   //
-  // ⚠️ Aucune notification si la page hôte n'est pas accessible au destinataire :
-  // une carte peut vivre sur une page PRIVÉE, et le message porte son titre.
-  // Prévenir quelqu'un d'une assignation qu'il ne peut pas voir lui divulguerait
-  // un titre et le laisserait devant un 404.
   const assigneeProps =
     rawProperties === undefined || changedPropIds.length === 0
       ? []
-      : (
-          await prisma.databaseProperty.findMany({
-            where: { id: { in: changedPropIds }, databaseId: access.databaseId, type: "user" },
-            select: { id: true },
-          })
-        ).filter(() => access.page.visibility !== "private" || access.page.ownerId === user.id);
+      : await prisma.databaseProperty.findMany({
+          where: { id: { in: changedPropIds }, databaseId: access.databaseId, type: "user" },
+          select: { id: true },
+        });
 
   const updated = await prisma.$transaction(async (tx) => {
     const row = await tx.record.update({
@@ -267,11 +261,44 @@ export async function PATCH(
           // geste dont on est déjà au courant. Ce filtre vit ici parce que
           // l'écriture ne passe pas par `notify()` — la coalescence exige de
           // lire la dernière ligne, ce que ce helper ne fait pas.
-          if (uid !== user.id && !nouveaux.has(uid)) nouveaux.set(uid, prop.id);
+          //
+          // ⚠️ ET LA PAGE DOIT ÊTRE ACCESSIBLE AU DESTINATAIRE, pas à l'acteur.
+          // Le message porte le TITRE de la carte : prévenir quelqu'un d'une
+          // assignation sur une page privée qu'il ne peut pas ouvrir lui
+          // divulguerait ce titre et le laisserait devant un 404. Le test doit
+          // donc porter sur `uid`, jamais sur `user.id` — une garde écrite avec
+          // l'acteur ne se déclenche que quand l'acteur est lui-même exclu,
+          // c'est-à-dire jamais (il vient d'écrire sur cette carte).
+          //
+          // Le 3e argument vaut `false` À DESSEIN : on évalue le destinataire
+          // comme un HUMAIN. L'exemption de compte de service sert à laisser
+          // l'automatisation LIRE, pas à lui faire recevoir des messages — et
+          // les comptes de service sont écartés juste en dessous.
+          if (
+            uid !== user.id &&
+            !nouveaux.has(uid) &&
+            isPageAccessible(access.page, uid, false)
+          ) {
+            nouveaux.set(uid, prop.id);
+          }
         }
       }
 
-      for (const uid of nouveaux.keys()) {
+      // ⚠️ Un compte de SERVICE n'est JAMAIS destinataire. C'est la règle de
+      // `notify()`, redéclarée ici pour la même raison que « jamais soi-même » :
+      // cette écriture ne passe pas par le helper, la coalescence exigeant de
+      // lire la dernière ligne. Elle manquait — un compte de service assigné
+      // accumulait des lignes de cloche qu'il ne peut pas lire. Une seule
+      // requête, quel que soit le nombre de destinataires.
+      const humains =
+        nouveaux.size === 0
+          ? []
+          : await tx.user.findMany({
+              where: { id: { in: [...nouveaux.keys()] }, isService: false },
+              select: { id: true },
+            });
+
+      for (const { id: uid } of humains) {
         // ⚠️ Coalescence : `BulkActionBar` envoie un PATCH par carte. Sans
         // fusion, cocher 30 cartes ferait 30 lignes dans la cloche pour un seul
         // geste. Même fenêtre et même raison que les révisions.

@@ -165,21 +165,109 @@ describe("⚠️ Avalanche — une action groupée ne fait pas 30 lignes", () =>
   });
 });
 
-describe("⚠️ Confidentialité — une page privée ne fuit pas par la cloche", () => {
-  it("assigner sur une page PRIVÉE d'autrui ne notifie pas", async () => {
-    // Le message porte le titre de la carte. Prévenir quelqu'un d'une
-    // assignation qu'il ne peut pas voir lui divulguerait ce titre et le
-    // laisserait devant un 404.
+describe("⚠️ Confidentialité — la garde porte sur le DESTINATAIRE", () => {
+  it("⚠️ le propriétaire d'une page privée qui assigne un tiers ne le notifie PAS", async () => {
+    // LE cas que la première écriture ratait. La garde testait `user.id` —
+    // l'ACTEUR — alors que la question est « le DESTINATAIRE peut-il ouvrir
+    // cette page ? ». Écrite avec l'acteur, elle ne se déclenchait que si
+    // l'acteur était lui-même exclu, c'est-à-dire jamais : il vient d'écrire
+    // sur la carte. Le message porte le titre — on divulguait ce titre à
+    // quelqu'un qui tombait ensuite sur un 404.
+    //
+    // ⚠️ Destinataire NEUF à chaque cas : le test d'origine réutilisait
+    // `assigneeId`, déjà notifié plus haut dans ce fichier, et la coalescence
+    // 2 min absorbait la nouvelle ligne. Il passait sans rien prouver.
+    const cible = (await seedMember(workspaceId, "editor")).user.id;
     const { recordId, propId } = await seedRecord("private", "Secret du propriétaire");
-    as(ownerId, "Ada");
-    const avant = (await notifsFor(assigneeId)).length;
 
-    const res = await patch(recordId, { properties: { [propId]: [assigneeId] } });
-    expect(res.status).toBe(200); // l'assignation elle-même est valide
+    as(ownerId, "Ada"); // l'acteur EST le propriétaire : il voit la page, pas la cible
+    const res = await patch(recordId, { properties: { [propId]: [cible] } });
+    expect(res.status).toBe(200); // l'assignation elle-même reste valide
 
-    expect((await notifsFor(assigneeId)).length).toBe(avant);
-    // …et le titre n'a fuité nulle part.
-    const toutes = await prisma.notification.findMany({ where: { userId: assigneeId } });
+    expect(await notifsFor(cible)).toHaveLength(0);
+    const toutes = await prisma.notification.findMany({ where: { userId: cible } });
     expect(toutes.some((n) => n.payload.includes("Secret du propriétaire"))).toBe(false);
+  });
+
+  it("mais le PROPRIÉTAIRE reste prévenu sur sa propre page privée — c'est le Dev Loop", async () => {
+    // Sans ce cas, une garde qui refuse TOUT LE MONDE passerait aussi.
+    //
+    // ⚠️ Et l'acteur ne peut être qu'un compte de SERVICE : sur une page privée,
+    // checkRecordAccess rend 404 à quiconque n'en est pas propriétaire, et le
+    // propriétaire ne se notifie pas lui-même. Le seul chemin par lequel une
+    // notification légitime naît sur une page privée est donc le pont MCP —
+    // très exactement « IA passe la main à Gautier » sur une carte privée.
+    const proprio = (await seedMember(workspaceId, "editor")).user.id;
+    const service = await prisma.user.create({
+      data: {
+        email: `notif-ia-${Date.now()}@gotyeah.local`,
+        firstName: "IA",
+        lastName: "",
+        displayName: "IA notif",
+        passwordHash: "not-a-real-hash",
+        isService: true,
+        memberships: { create: { workspaceId, role: "admin" } },
+      },
+    });
+
+    const page = await prisma.page.create({
+      data: { title: "Privée du destinataire", workspaceId, ownerId: proprio, visibility: "private", sectionId },
+    });
+    const db = await prisma.database.create({ data: { pageId: page.id } });
+    const prop = await prisma.databaseProperty.create({
+      data: { databaseId: db.id, name: "Main à", type: "user", position: 1000, config: '{"type":"user"}' },
+    });
+    const record = await prisma.record.create({ data: { databaseId: db.id, title: "Pour le proprio" } });
+
+    vi.mocked(getSession).mockResolvedValue({
+      id: service.id,
+      email: "ia@gotyeah.local",
+      displayName: "IA notif",
+      currentWorkspaceId: workspaceId,
+      isService: true,
+    });
+    expect((await patch(record.id, { properties: { [prop.id]: [proprio] } })).status).toBe(200);
+
+    const [n] = await notifsFor(proprio);
+    expect(n).toBeTruthy();
+    expect(n.payload).toContain("Pour le proprio");
+  });
+
+  it("une page d'ÉQUIPE notifie normalement — on n'a rien sur-bloqué", async () => {
+    const cible = (await seedMember(workspaceId, "editor")).user.id;
+    const { recordId, propId } = await seedRecord("team", "Carte visible de tous");
+
+    as(ownerId, "Ada");
+    await patch(recordId, { properties: { [propId]: [cible] } });
+
+    expect(await notifsFor(cible)).toHaveLength(1);
+  });
+});
+
+describe("⚠️ Un compte de service n'est jamais destinataire", () => {
+  it("assigner l'IA n'écrit aucune ligne dans sa cloche", async () => {
+    // Règle de notify(), redéclarée ici parce que cette écriture ne passe pas
+    // par le helper — elle manquait. Un compte de service n'a pas de cloche :
+    // les lignes s'y accumulaient sans lecteur.
+    const service = await prisma.user.create({
+      data: {
+        email: `notif-svc-${Date.now()}@gotyeah.local`,
+        firstName: "IA",
+        lastName: "",
+        displayName: "IA destinataire",
+        passwordHash: "not-a-real-hash",
+        isService: true,
+        memberships: { create: { workspaceId, role: "admin" } },
+      },
+    });
+    const humain = (await seedMember(workspaceId, "editor")).user.id;
+    const { recordId, propId } = await seedRecord("team", "Carte pour deux");
+
+    as(ownerId, "Ada");
+    await patch(recordId, { properties: { [propId]: [service.id, humain] } });
+
+    expect(await notifsFor(service.id)).toHaveLength(0);
+    // …mais l'humain du MÊME lot est bien prévenu : le filtre écarte, il n'annule pas.
+    expect(await notifsFor(humain)).toHaveLength(1);
   });
 });
