@@ -37,6 +37,57 @@ export function mimeForName(name: string): string {
   return MIME_BY_EXT[ext] ?? "application/octet-stream";
 }
 
+/**
+ * Types qu'on accepte d'afficher DANS le navigateur. Tout le reste est renvoyé
+ * en pièce jointe, donc téléchargé au lieu d'être rendu.
+ *
+ * ⚠️ `image/svg+xml` y figure — un SVG doit continuer de s'afficher dans un
+ * `<img>` de l'éditeur, et un `Content-Disposition: attachment` n'y changerait
+ * rien (l'en-tête ne vaut que pour une navigation, pas pour une sous-ressource).
+ * Ce n'est donc PAS lui qui protège du SVG : c'est la CSP, cf. FILE_CSP.
+ */
+const INLINE_SAFE = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "image/svg+xml",
+]);
+
+/**
+ * ⚠️ CE QUI FERME LA XSS. Un SVG est un DOCUMENT : il peut porter un `<script>`,
+ * et `image/svg+xml` est un type que le navigateur exécute quand on ouvre l'URL
+ * directement. `X-Content-Type-Options: nosniff` (posé globalement dans
+ * next.config.ts) n'y peut rien — il empêche de DEVINER un autre type, pas
+ * d'honorer celui qu'on déclare. Or n'importe quel éditeur peut téléverser un
+ * SVG, et l'URL servie est sur l'origine de l'application.
+ *
+ * `sandbox` sans jeton retire TOUT : scripts, formulaires, et l'origine elle-même
+ * (le document devient opaque, donc sans accès aux cookies ni au stockage de
+ * l'app). `default-src 'none'` coupe en plus toute sous-ressource que le fichier
+ * tenterait de charger — exfiltration comprise.
+ *
+ * Sans effet sur les images légitimes : une CSP de réponse ne s'applique pas au
+ * rendu d'une sous-ressource `<img>`.
+ */
+export const FILE_CSP = "default-src 'none'; sandbox";
+
+/** En-têtes de service d'un fichier téléversé. Le nom sert au libellé de téléchargement. */
+export function fileResponseHeaders(name: string): Record<string, string> {
+  const mime = mimeForName(name);
+  return {
+    "Content-Type": mime,
+    "Content-Security-Policy": FILE_CSP,
+    // Empêche un autre site d'embarquer nos fichiers (fuite par <img> distant).
+    "Cross-Origin-Resource-Policy": "same-origin",
+    // Ce qu'on ne sait pas afficher sans risque est téléchargé, jamais rendu.
+    ...(INLINE_SAFE.has(mime)
+      ? {}
+      : { "Content-Disposition": `attachment; filename="${name}"` }),
+    "Cache-Control": "private, max-age=86400",
+  };
+}
+
 /** Noms de fichiers `/api/files/<name>` référencés dans un texte (content sérialisé). */
 export function extractUploadRefs(text: string | null): Set<string> {
   const out = new Set<string>();
