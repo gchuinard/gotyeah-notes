@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { getSession } from "@/lib/session";
-import { uploadsDir, isSafeUploadName, mimeForName } from "@/lib/uploads";
+import { uploadsDir, isSafeUploadName, fileResponseHeaders } from "@/lib/uploads";
 
 /** Sert un fichier uploadé (session requise, nom validé anti path-traversal). */
 export async function GET(_: Request, { params }: { params: Promise<{ name: string }> }) {
@@ -17,10 +17,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ name: stri
   try {
     const buf = await fs.readFile(path.join(uploadsDir(), name));
     return new NextResponse(new Uint8Array(buf), {
-      headers: {
-        "Content-Type": mimeForName(name),
-        "Cache-Control": "private, max-age=86400",
-      },
+      headers: fileResponseHeaders(name),
     });
   } catch {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
