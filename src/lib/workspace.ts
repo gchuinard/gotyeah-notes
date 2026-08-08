@@ -365,7 +365,32 @@ export async function removeMember(
   });
 }
 
-export async function createWorkspaceWithDefaults(name: string, userId: string) {
+/**
+ * Rôle donné aux comptes de service rattachés d'office. `admin` et pas `editor` :
+ * six outils MCP (`notes_delete_database|_property|_view|_sprint|_section|_template`)
+ * sont gatés admin. En éditeur, ils répondraient 403 dans les espaces neufs et
+ * marcheraient dans l'espace historique — une incohérence qui se paierait en
+ * diagnostics, pour un compte qui a déjà ce rôle là où il travaille.
+ */
+const SERVICE_ACCOUNT_ROLE: WorkspaceRole = "admin";
+
+export async function createWorkspaceWithDefaults(
+  name: string,
+  userId: string,
+  /**
+   * Rattache les comptes de SERVICE (User.isService) au nouvel espace.
+   *
+   * ⚠️ Opt-in, défaut FALSE, et ce défaut est load-bearing. Des quatre appelants,
+   * un seul le demande : `POST /api/workspaces`, le geste « créer un espace ».
+   * Les trois autres (register, callback OIDC, acceptation d'invitation)
+   * fabriquent le « Mon espace » PERSONNEL d'un compte qui vient de naître — or
+   * un compte de service voit les pages PRIVÉES des espaces où il est membre
+   * (isPageAccessible). L'y ajouter d'office ferait lire l'espace personnel de
+   * toute personne qui s'inscrit. Le défaut sûr est celui qui n'accorde rien,
+   * même règle que `claimInvitations({ grant })`.
+   */
+  options: { withServiceAccounts?: boolean } = {}
+) {
   return prisma.$transaction(async (tx) => {
     const workspace = await tx.workspace.create({
       data: { name, createdBy: userId },
@@ -379,6 +404,29 @@ export async function createWorkspaceWithDefaults(name: string, userId: string) 
         { name: "Espace d'équipe", type: "team", position: 1, workspaceId: workspace.id },
       ],
     });
+
+    if (options.withServiceAccounts) {
+      // ⚠️ Le créateur peut LUI-MÊME être un compte de service : le pont MCP
+      // expose `notes_create_workspace`. Sa membership vient d'être posée juste
+      // au-dessus — la réémettre violerait l'unique (userId, workspaceId) et
+      // ferait échouer toute la transaction, donc la création de l'espace.
+      const services = await tx.user.findMany({
+        where: { isService: true, id: { not: userId } },
+        select: { id: true },
+      });
+      if (services.length > 0) {
+        // Aucune notification : `notify()` écarte déjà les comptes de service
+        // comme destinataires, et cette membership est un acte SYSTÈME — il n'y
+        // a personne à prévenir.
+        await tx.membership.createMany({
+          data: services.map((s) => ({
+            userId: s.id,
+            workspaceId: workspace.id,
+            role: SERVICE_ACCOUNT_ROLE,
+          })),
+        });
+      }
+    }
     return workspace;
   });
 }

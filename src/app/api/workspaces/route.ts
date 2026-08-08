@@ -32,6 +32,11 @@ export async function POST(req: Request) {
       { status: 400 }
     );
   }
-  const workspace = await createWorkspaceWithDefaults(parsed.data.name, user.id);
+  // Seul appelant à rattacher les comptes de service : c'est le geste explicite
+  // « créer un espace ». Les trois autres appels fabriquent un « Mon espace »
+  // personnel — cf. le commentaire de l'option dans lib/workspace.ts.
+  const workspace = await createWorkspaceWithDefaults(parsed.data.name, user.id, {
+    withServiceAccounts: true,
+  });
   return NextResponse.json(workspace);
 }
