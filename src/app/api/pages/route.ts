@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
-import { getMembership, hasRole, pageVisibilityFilter } from "@/lib/workspace";
+import {
+  getMembership,
+  hasRole,
+  isPageAccessible,
+  pageVisibilityFilter,
+} from "@/lib/workspace";
 import { createPage } from "@/lib/pages";
 import { prisma } from "@/lib/prisma";
 
@@ -58,9 +63,19 @@ export async function POST(req: Request) {
   if (parentId) {
     const parent = await prisma.page.findUnique({
       where: { id: parentId },
-      select: { workspaceId: true, trashedAt: true },
+      select: { workspaceId: true, trashedAt: true, visibility: true, ownerId: true },
     });
     if (!parent || parent.trashedAt || parent.workspaceId !== workspaceId) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+    // ⚠️ Le contrôle d'espace ne suffisait PAS : sans ce test, un éditeur pouvait
+    // créer une sous-page sous la page PRIVÉE d'un autre membre. `createPage`
+    // recopie la visibility du parent — l'enfant naissait donc privé au nom du
+    // créateur, planté dans un arbre que son propriétaire ne verra jamais, et
+    // remonté en racine orpheline chez le créateur (buildTree remonte un nœud
+    // dont le parent est absent de la map). 404 comme partout : on ne dit pas
+    // qu'une page privée existe.
+    if (!isPageAccessible(parent, user.id, user.isService)) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
   }
