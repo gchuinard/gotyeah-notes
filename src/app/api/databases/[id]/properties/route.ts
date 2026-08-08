@@ -98,6 +98,20 @@ export async function POST(
     );
   }
 
+  // ⚠️ MÊME TROU QUE LE PATCH, resté ouvert ici. Cette route est gatée ÉDITEUR et
+  // accepte un `config` arbitraire que validatePropertyConfig laisse passer avec
+  // ses `rules` : un éditeur créait donc une colonne dont les règles d'accès
+  // étaient déjà posées par lui. Le gate du PATCH porte sur la DIFFÉRENCE (le
+  // popover réémet le config à chaque renommage) ; à la CRÉATION il n'y a rien à
+  // diffuser — la présence de règles EST l'acte à gouverner.
+  const rulesAtCreation = (config as { rules?: unknown }).rules;
+  if (Array.isArray(rulesAtCreation) && rulesAtCreation.length > 0 && !hasRole(access.membership, "admin")) {
+    return NextResponse.json(
+      { error: "Rôle insuffisant : seuls les administrateurs modifient les règles d'accès." },
+      { status: 403 }
+    );
+  }
+
   // relation : la database cible doit exister, être accessible, et vivre dans le
   // MÊME workspace (sinon on créerait un lien traversant une frontière d'accès).
   if (type === "relation") {
