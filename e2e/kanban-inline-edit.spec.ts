@@ -80,9 +80,15 @@ async function recordOf(page: Page, dbId: string, id: string) {
   return records.find((r: { id: string }) => r.id === id);
 }
 
-// ─── AC1 / AC2 : titre au simple clic ────────────────────────────────────────
+// ─── AC1 / AC2 : titre au DOUBLE-clic ────────────────────────────────────────
+//
+// ⚠️ Ces deux cas exigeaient le SIMPLE clic jusqu'au 09/08/2026. Le geste a
+// changé à la demande de Gautier : viser le titre pour ouvrir une carte faisait
+// entrer en édition sans l'avoir demandé. Le simple clic ouvre désormais la
+// carte, comme partout ailleurs sur elle — c'est couvert par
+// `kanban-title-dblclick.spec.ts`, qui verrouille AUSSI cette branche-là.
 
-test("AC1 : simple clic sur le titre → édition inline focus, le panneau ne s'ouvre pas", async ({ page }) => {
+test("AC1 : double-clic sur le titre → édition inline focus, le panneau ne s'ouvre pas", async ({ page }) => {
   const { pageId, dbId, statutId, viewId } = await seed(page);
   const title = `Carte ${Date.now()}`;
   await page.request.post(`/api/databases/${dbId}/records`, {
@@ -93,7 +99,7 @@ test("AC1 : simple clic sur le titre → édition inline focus, le panneau ne s'
   const col = column(page, "Alpha");
   await expect(col.getByText(title, { exact: true })).toBeVisible();
 
-  await col.getByText(title, { exact: true }).click();
+  await col.getByText(title, { exact: true }).dblclick();
 
   // Un champ d'édition apparaît, focus ; le RecordPanel n'est pas monté.
   await expect(col.getByRole("textbox")).toBeFocused();
@@ -117,7 +123,7 @@ test("AC2 : éditer le titre + Entrée → optimistic + persistance ; PATCH 500 
   const patched = page.waitForResponse(
     (r) => r.url().includes(`/api/records/${rec.id}`) && r.request().method() === "PATCH"
   );
-  await col.getByText(title, { exact: true }).click();
+  await col.getByText(title, { exact: true }).dblclick();
   await col.getByRole("textbox").fill(newTitle);
   await col.getByRole("textbox").press("Enter");
   await patched;
@@ -131,7 +137,7 @@ test("AC2 : éditer le titre + Entrée → optimistic + persistance ; PATCH 500 
     return route.continue();
   });
   const rolledBack = `${newTitle} ko`;
-  await col.getByText(newTitle, { exact: true }).click();
+  await col.getByText(newTitle, { exact: true }).dblclick();
   await col.getByRole("textbox").fill(rolledBack);
   await col.getByRole("textbox").press("Enter");
 
