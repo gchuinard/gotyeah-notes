@@ -190,6 +190,8 @@ AppConfig       → réglages globaux de l'instance. Ligne UNIQUE id="app", uplo
 - **Commentaires (`RecordComment`)** — un fil par carte, `GET`/`POST /api/records/[id]/comments`, onglet « Commentaires » du `RecordPanel` (monté à la demande, comme l'Historique).
   - ⚠️ **APPEND-ONLY**, et c'est une décision, pas un manque : ni `PATCH` ni `DELETE`, ni par l'API ni par l'écran ni par le MCP. Un test vérifie que le module n'exporte **que** `GET` et `POST`, un autre que le modèle n'a ni `updatedAt` ni `deletedAt`. Leur absence supprime avec elle « qui a le droit de modifier », la modale de confirmation et la mention « modifié ».
   - ⚠️ **ÉDITEUR pour publier**, lecteur pour lire : « lecteur = lecture seule TOTALE » n'est pas assoupli.
+  - ⚠️ **Le GET est BORNÉ à 200 messages** (`TAKE`), les plus récents d'abord, et il n'y a **aucune pagination**. Au-delà, les plus anciens ne sont plus servis — ni à l'écran, ni à l'API, ni au MCP. La donnée reste en base, seule la lecture est tronquée, et **rien ne le signale** : le fil a simplement l'air de commencer là. À reprendre si un fil approche ce volume.
+  - ⚠️ **Le `fetcher` du composant ne teste pas `r.ok`** (`fetch(url).then(r => r.json())`) : une réponse d'erreur devient la donnée. Un 404 — accès perdu, ou carte mise en corbeille pendant que le panneau est ouvert — rendrait un objet là où un tableau est attendu. Non observé à ce jour ; c'est la forme du défaut à chercher en premier si le fil casse au lieu d'être vide.
   - ⚠️ **AUCUNE notification** — le message porterait un extrait de texte, et le prévenir à quelqu'un qui ne peut pas ouvrir la carte lui divulguerait ce contenu. C'est le piège que la garde de `record_assigned` a mis deux jours à cerner ; ici la décision le ferme au lieu de le contourner.
   - **Texte brut**, pas BlockNote : un corps BlockNote n'a aucun aperçu lisible (l'Historique y renonce déjà et affiche « Contenu mis à jour »), exigerait un éditeur client-only par message, et se fabrique péniblement côté serveur — or le pont MCP écrit dans ce champ.
   - ⚠️ **La publication insère la ligne rendue par le SERVEUR** au lieu de refaire un `GET` : deux publications rapprochées faisaient dédupliquer le second `mutate()` par SWR (requête du premier encore en vol), et le message n'apparaissait qu'à la revalidation suivante. Le fil étant append-only, la réponse EST la vérité — rien à réconcilier, aucun rollback.
@@ -229,7 +231,9 @@ src/
 │   ├── pages/[id]/page.tsx          # Server Component : charge Page, enregistre la visite,
 │   │                                #   branche DatabaseShell (si database) OU EditorClient
 │   ├── globals.css                  # Thèmes (data-theme), mapping --bn-colors-* de BlockNote
-│   └── api/                         # 41 route handlers → voir « Conventions des routes API »
+│   └── api/                         # 50 route handlers → voir « Conventions des routes API »
+│                                    #   ⚠️ Ce compteur a annoncé 41 pendant que le dossier en
+│                                    #   portait 50 : `find src/app/api -name route.ts | wc -l`
 │       ├── me/route.ts              # PATCH profil de l'utilisateur COURANT (displayName,
 │       │                            #   firstName, lastName). Aucun gate de rôle : on ne
 │       │                            #   modifie que soi-même. ⚠️ L'EMAIL n'y est PAS modifiable
@@ -259,7 +263,11 @@ src/
 │       ├── search/route.ts          # GET pages + records (scopé workspace, hors corbeille)
 │       ├── config/route.ts          # GET/PATCH réglages instance ; le GET purge les uploads orphelins
 │       ├── upload/route.ts          # POST image multipart → { url } ; 413 trop gros / 415 type
-│       ├── files/[name]/route.ts    # GET sert le fichier (OCTETS BRUTS, pas de JSON) ; session requise
+│       ├── files/[name]/route.ts    # GET sert le fichier (OCTETS BRUTS, pas de JSON) ; session requise.
+│                                    #   ⚠️ Réponse construite par `fileResponseHeaders` : CSP + CORP,
+│                                    #   et Content-Disposition sauf pour les types INLINE_SAFE
+│       ├── attachments/[id]/route.ts # GET télécharge une pièce jointe (STREAMÉE), DELETE la détache.
+│                                    #   Accès par la CARTE (checkRecordAccess), pas par le nom du fichier
 │       ├── templates/               # route.ts GET/POST, [id] GET/PATCH/DELETE (builtins → 400)
 │       ├── databases/
 │       │   ├── route.ts             # POST create (+ scaffold colonnes/kanban/backlog depuis templateId)
@@ -276,7 +284,9 @@ src/
 │       │   ├── route.ts             # GET, PATCH (+ écrit les RecordRevision), DELETE → CORBEILLE (?permanent=1)
 │       │   ├── duplicate/route.ts   # POST copie serveur atomique (titre « (copie) », props/corps/sprint)
 │       │   ├── restore/route.ts     # POST restaure (409 si la page hôte est encore en corbeille)
-│       │   └── revisions/route.ts   # GET historique des modifs
+│       │   ├── revisions/route.ts   # GET historique des modifs
+│       │   ├── comments/route.ts    # GET fil / POST message (éditeur+). APPEND-ONLY : ni PATCH ni DELETE
+│       │   └── attachments/route.ts # GET liste / POST dépose un document (éditeur+, multipart)
 │       ├── sprints/[id]/route.ts    # PATCH (démarrer/terminer + notes de version + append Patch notes), DELETE
 │       └── views/[id]/route.ts      # PATCH, DELETE (400 si c'est la dernière vue)
 ├── contexts/                        # Les 2 SEULS contextes React (pas de state global au-delà)
@@ -477,6 +487,12 @@ Instance exposée durcie — variables d'env associées (défauts sûrs, cf. `.e
 - **Login** : rate-limit mémoire (IP+email) → 429 ; anti-énumération (bcrypt factice sur email inconnu, même message/temps). Emails normalisés (`normalizeEmail` = trim+lowercase) sur register/login/act-as.
 - **Ajout de membre** (`POST /api/workspaces/[id]/members`) : même `lib/rateLimit.ts`, clé **`members:<userId>`** (⚠️ préfixe obligatoire — le login partage la Map avec des clés `ip:email`). Seuls les **404 « compte inconnu »** sont comptés (le signal de sondage ; un ajout réussi fait `clearFailures`) et journalisés (`[members-add-unknown]`). Le message explicite est CONSERVÉ — une typo d'email doit rester visible. ⚠️ Limite assumée : mémoire + mono-instance, remis à zéro à chaque redéploiement — ça rend le balayage impraticable, pas impossible ; fermer vraiment l'oracle demanderait un flux d'invitation avec acceptation.
 - **Headers** (`next.config.ts`) : `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`. **Anti-CSRF** (`src/proxy.ts`) : une mutation `/api/*` avec `Origin` cross-site est refusée (403) ; GET, same-origin et pont MCP passent.
+- **Fichiers téléversés neutralisés (`lib/uploads.ts > fileResponseHeaders`, 08/08/2026)** — un SVG est un **DOCUMENT**, pas une image inerte : il peut porter un `<script>`, et `image/svg+xml` fait partie des types que `POST /api/upload` accepte, route ouverte à tout **éditeur d'au moins un espace**. Ouvrir directement l'URL `/api/files/<nom>.svg` exécutait donc ce script **sur l'origine de l'application**, avec la session du lecteur : XSS stockée same-origin.
+  - ⚠️ **`nosniff` ne protégeait PAS de ça, et c'est le piège** : il empêche le navigateur de **deviner** un autre type, pas d'honorer celui qu'on **déclare**. Ici le type déclaré est justement celui qui pose problème. Trois en-têtes globaux étaient bien posés, aucun ne couvrait ce cas — et le projet n'avait **aucune CSP**, nulle part.
+  - **`FILE_CSP = "default-src 'none'; sandbox"`, posée sur TOUTE réponse de la route**, sans allowlist de types « dangereux » : une liste de ce qu'on croit risqué se périme, un défaut sûr non. Le fichier n'est **pas** filtré — le `<script>` reste dans les octets servis, c'est l'en-tête qui le neutralise (un test le vérifie explicitement, pour qu'on ne « répare » pas la mauvaise chose).
+  - **`INLINE_SAFE`** (les 5 types téléversables : png, jpeg, gif, webp, svg) est ce qui reste rendu **inline** ; tout le reste part en `Content-Disposition: attachment`. Cette branche par défaut a semblé inutile le 08/08 — elle a servi **le lendemain**, le lot pièces jointes écrivant des `.pdf`/`.docx`/`.zip` dans le MÊME `UPLOAD_DIR`, inconnus de `mimeForName` donc `application/octet-stream`.
+  - Plus `Cross-Origin-Resource-Policy: same-origin` (un autre site ne peut pas embarquer nos fichiers par `<img>`).
+  - ⚠️ Ce durcissement est la raison pour laquelle **`ALLOWED` (upload) et `ATTACHMENT_TYPES` (pièces jointes) restent SÉPARÉS** : élargir `ALLOWED` exposerait les documents aux trois éditeurs BlockNote, donc aux **pages**, servies par `/api/files/[name]` qui ne vérifie qu'une session et n'est scopée à aucun espace.
 
 ### Variables d'environnement
 
@@ -529,6 +545,10 @@ Toutes les variables réellement lues (`process.env`). Source de vérité : `.en
 
 - **Membres (1)** : `notes_list_members` (userId / displayName / role, **jamais l'email** — le renvoyer diffuserait les adresses de l'espace à qui lit un board). Sert de source à la résolution des assignés par nom. Ajouté le 05/08/2026.
 
+- **Commentaires (2)** : `notes_list_record_comments`, `notes_add_record_comment` (09/08/2026). ⚠️ La **lecture** n'est pas un confort : `notes_get_record` rend le titre, les propriétés et le corps, **jamais** les commentaires — sans elle, une remarque serait écrite pour un lecteur (la session IA suivante) qui ne la verrait jamais. L'**écriture** est la façon de poser une note SANS toucher au corps, qui s'écrit en remplacement total. `update`/`delete` sont des `Gap` motivés : les routes n'existent pas côté notes. Le corps vide et le corps > 4000 caractères sont refusés **avant** l'appel HTTP.
+
+⚠️ **Ce compteur par entité doit sommer au titre de la rubrique.** Il a annoncé 50 pendant que le titre disait 52 : le lot commentaires avait ajouté ses deux outils et bougé le titre, sans ajouter sa puce. Deux compteurs qui divergent, c'est celui d'en bas qu'on croit — il a l'air détaillé. `grep -oE "def (notes_[a-z_]+)" mcp_remote/remote.py | sort -u | wc -l` tranche, et `tests/test_remote_boot.py` fige le total.
+
 ⚠️ **Réversibilité : ce que les descriptions doivent dire.** Côté notes, **seules `Page` et `Record` ont un `trashedAt`** : `notes_delete_page` / `notes_delete_record` mettent à la **corbeille** (restaurable 30 j), tout le reste est **définitif**. Les descriptions de ces deux outils annonçaient « Irréversible » — c'était faux, et un mensonge de description est pire qu'un outil manquant : le trou se voit, pas le mensonge. Corrigé le 2026-07-30, en même temps que `notes_delete_view` / `notes_delete_sprint` qui, eux, se **taisaient** sur une suppression pourtant définitive. Règle : toute description de suppression dit où va l'objet et comment le récupérer, ou qu'il n'y a pas de retour.
 
 ⚠️ **Le MCP ne couvre toujours pas toute l'API.** Sans outil dédié à ce jour : upload d'images (`/api/upload`, `/api/files/[name]` — **préalable bloquant** : aucune route notes ne supprime un fichier, il ne faut donc pas exposer l'upload avant de l'avoir construite), purge définitive de la corbeille (`?permanent=1`, volontairement hors MCP), config d'instance (`/api/config`), suppression et renommage de workspace. Ne conclus pas « la fonctionnalité n'existe pas » parce qu'aucun outil `notes_*` ne l'expose — et vérifie d'abord `notes_entities.py`, qui dit lesquels manquent **exprès**.
@@ -536,7 +556,10 @@ Toutes les variables réellement lues (`process.env`). Source de vérité : `.en
 - **⚠️ Le pont incarne « IA » depuis le 05/08/2026** : `NOTES_ACT_AS_EMAIL=ia@gotyeah.local` dans le `.env` de `gotyeah-mcp` remplace l'email du porteur du jeton claude.ai pour TOUS les outils `notes_*` — les révisions des écritures MCP sont attribuées à « IA », plus à Gautier. Le compte `ia@gotyeah.local` est un **compte de service** (`User.isService`, cf. modèle) créé par `scripts/create-service-account.mjs`, membre admin de « Mon espace », listé dans `MCP_ACT_AS_ALLOWLIST`. Retirer la variable = retour au comportement historique.
 - **Lot du 05/08** : résolution des assignés PAR NOM dans `notes_create_record`/`notes_update_record` (propriété `user` : displayName, email ou userId acceptés), adossée à `notes_list_members` (cf. rubrique *Membres*). La liste des membres n'est chargée que si un assigné est visé — un appel qui ne touche pas aux assignés ne paie pas cette requête.
 - **Activation** (sur le Pi) : même secret dans les deux `.env` — `MCP_SHARED_SECRET` ici, `NOTES_API_BASE_URL=http://gotyeah_notes:3000` + `NOTES_MCP_SECRET` côté MCP (dépôt `gotyeah-mcp` ; les deux conteneurs sont sur le réseau `nginx-proxy-manager_default`) — puis `docker compose up -d` et rafraîchir le connecteur claude.ai. **✅ Actif en prod (2026-06-29)** ; l'email du User a été aligné sur le gmail (= email IdP).
-- **Déploiement du MCP** : le Pi sert `gotyeah-mcp` en `fb687dc` (PR #6 « feat/user-assignees », 05/08/2026), connecteur claude.ai rafraîchi le même jour — les 50 outils répondent. Après tout ajout d'outil : push `gotyeah-mcp` sur `main`, redéploiement du conteneur, **puis** rafraîchissement du connecteur. L'oublier produit un outil en prod que le client ne propose pas, et qu'on relit à tort comme « pas déployé » : **vérifier un déploiement se fait sur le Pi (HEAD du dépôt), pas dans la liste d'outils**.
+- **Déploiement du MCP** : après tout ajout d'outil, l'ordre est **push `main` → redéploiement du conteneur → PUIS rafraîchissement du connecteur claude.ai**. Sauter le dernier temps produit un outil bien présent en production que le client ne propose pas, et qu'on relit à tort comme « pas déployé ».
+  - ⚠️ **NE PAS vérifier ce déploiement en lisant le HEAD git du Pi. Il répond FAUX.** `gotyeah-mcp` se déploie par **rsync** (cf. son `deploy.yml`) : `/home/pi/sites/gotyeah-mcp` contient bien un `.git`, reliquat d'un ancien clone, mais rsync écrase les fichiers **suivis** sans jamais avancer la référence. Constaté le 09/08/2026 : `git log -1` y annonce `fb687dc` (05/08) et `git show HEAD:mcp_remote/remote.py` compte **50** outils, pendant que le fichier **sur disque** en porte **52** et que le conteneur les sert. `git status` liste six fichiers suivis en « modifié » — état permanent, pas un incident. Un HEAD périmé qui a l'air d'une source de vérité est pire qu'une absence de source : c'est le mode de panne habituel de ce projet (une garde qu'on croit active), appliqué cette fois à la vérification elle-même.
+  - **Ce qui fait foi : le code DANS le conteneur.** `docker exec gotyeah_mcp sh -lc 'grep -oE "def (notes_[a-z_]+)" /app/mcp_remote/remote.py | sort -u | wc -l'`. C'est ce que le serveur exécute — ni le dépôt du Pi, ni la liste d'outils du client, qui ne dit que l'état du cache de claude.ai.
+  - ⚠️ Corollaire pour `gotyeah-notes`, qui se déploie autrement (`git reset --hard origin/main` + rebuild) : **là**, le HEAD du Pi est légitime. La règle n'est donc pas « le HEAD ment », c'est « vérifier au bon endroit selon le mode de déploiement du dépôt ». Les deux dépôts n'ont pas le même.
 - Variables d'env : voir `.env.example`.
 
 ## Reste à faire
@@ -562,6 +585,7 @@ Toutes les variables réellement lues (`process.env`). Source de vérité : `.en
 ### Reste
 
 - [ ] **Builds hors Pi** : le build Docker tourne toujours **sur le Pi** (`deploy.yml` → `docker compose up -d --build`), RAM-intensif sur arm64. Cible : builder l'image en CI (`ci.yml` n'a aujourd'hui aucun job Docker) + `docker pull` au déploiement.
+- [ ] **Pièces jointes — glisser-déposer + trace dans l'Historique** (demandé le 09/08/2026, détaillé dans la carte « Joindre un document à une carte » du 📦 Board). Deux pièges déjà relevés : (a) les éditeurs BlockNote du panneau **capturent déjà** le dépôt pour insérer une image dans le corps — l'arbitrage se fait à la ZONE visée, jamais au type de fichier ; (b) côté Historique, `RecordPanel > fieldLabel()` retombe sur « Section » pour tout `field` inconnu et `isBodyField()` renvoie `true` dans ce cas, donc une révision « pièce jointe » s'afficherait « Section — Contenu mis à jour » : la ligne apparaîtrait, **fausse**. Les deux fonctions doivent bouger avec l'écriture.
 - [x] ~~**`MCP_ACT_AS_ALLOWLIST` absente du `docker-compose.yml`, puis vide**~~ : injectée le 18/07/2026 (PR #38), **renseignée dans le `.env` du Pi le 05/08/2026** — 3 emails, dont le compte de service `ia@gotyeah.local`, lus dans le conteneur `gotyeah_notes`. La garde filtre donc réellement. Corollaire : toute nouvelle incarnation doit être ajoutée ici au moment où on la crée, sinon le pont refuse en 401 et le MCP ne dit pas pourquoi.
 - [x] ~~**MCP — édition fine des options select**~~ : fait (2026-07-30). `notes_update_select_option` (renommer / recolorer / réordonner) + `notes_remove_select_option` (refus serveur si l'option est encore référencée, traduit en consigne).
 - [x] ~~**MCP — trous de la matrice CRUD (corbeille, sections, workspaces)**~~ : fait (2026-07-30), **déployé et visible côté connecteur**. 12 outils ajoutés, descriptions de suppression corrigées, table d'entités + test anti-régression (`notes_entities.py`).
