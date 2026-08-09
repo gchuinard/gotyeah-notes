@@ -19,6 +19,14 @@ type Props = {
   children: React.ReactNode;
   minWidth?: number;
   className?: string;
+  /**
+   * Ferme sur Échap. ⚠️ OPT-IN, défaut FALSE, et ce défaut est délibéré : les
+   * sept consommateurs historiques gèrent DÉJÀ Échap eux-mêmes (Cell le fait à
+   * six endroits, pour annuler une édition en cours). L'activer ici pour tout le
+   * monde ferait traiter la touche deux fois, avec deux intentions différentes.
+   * Les nouveaux panneaux le demandent explicitement.
+   */
+  closeOnEscape?: boolean;
 };
 
 export default function Portal({
@@ -27,6 +35,7 @@ export default function Portal({
   children,
   minWidth = 160,
   className = "bg-[var(--bg)] border border-[var(--border)] rounded-lg shadow-lg py-1 overflow-y-auto max-h-72",
+  closeOnEscape = false,
 }: Props) {
   const contentRef = useRef<HTMLDivElement>(null);
   const [style, setStyle] = useState<React.CSSProperties>({
@@ -133,6 +142,15 @@ export default function Portal({
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [anchor, onClose]);
+
+  useEffect(() => {
+    if (!closeOnEscape) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [closeOnEscape, onClose]);
 
   if (!mounted) return null;
   return createPortal(

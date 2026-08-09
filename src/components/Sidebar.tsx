@@ -4,8 +4,9 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import {
   ChevronDown, ChevronRight, Clock, FileText,
-  Home, LayoutTemplate, Lock, LogOut, Plus, Settings, Trash2, Users,
+  Home, LayoutTemplate, Lock, LogOut, Plus, Settings, SlidersHorizontal, Trash2, Users,
 } from "lucide-react";
+import PageOptionsPanel from "@/components/PageOptionsPanel";
 import { useEffect, useRef, useState } from "react";
 import {
   DndContext,
@@ -502,6 +503,9 @@ function TreeItem({
   const router = useRouter();
   const { confirm } = useDialog();
   const hasChildren = node.children.length > 0;
+  const [optionsOpen, setOptionsOpen] = useState(false);
+  const optionsRef = useRef<HTMLButtonElement>(null);
+  const { isAdmin } = useWorkspace();
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: node.id, disabled: readOnly });
@@ -608,6 +612,33 @@ function TreeItem({
           </Link>
         )}
 
+        {/* ⚠️ Hors du `!readOnly` : le panneau sert d'abord à SAVOIR ce qui est
+            verrouillé, et `isViewer` vaut true pendant tout le chargement du
+            rôle — un bouton gardé par le rôle clignoterait à chaque montage. Le
+            panneau désactive lui-même ce qui n'est pas permis. */}
+        <button
+          ref={optionsRef}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setOptionsOpen((v) => !v);
+          }}
+          className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-2 md:p-0.5 rounded cursor-pointer text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] transition-colors"
+          // ⚠️ DEUX pièges d'étiquetage, tous deux constatés en E2E.
+          // (1) `title` seul, PAS d'aria-label — comme les deux boutons voisins :
+          //     un aria-label sur un descendant remonte dans le nom accessible de
+          //     la LIGNE (elle-même un role="button" portant le titre de la page),
+          //     et y mettre ce titre rendait ambiguë toute recherche de page par
+          //     son nom. Le `title`, lui, ne remonte pas.
+          // (2) Le libellé n'est PAS « Options » tout court : le menu ⋯ des
+          //     onglets de vue porte déjà ce titre exact, et un spec le cible par
+          //     `button[title="Options"]` sur toute la page — mon bouton décalait
+          //     ses index.
+          title="Options de la page"
+        >
+          <SlidersHorizontal size={12} />
+        </button>
+
         {!readOnly && (
           <>
             <button
@@ -631,6 +662,17 @@ function TreeItem({
           </>
         )}
       </div>
+
+      {optionsOpen && (
+        <PageOptionsPanel
+          node={node}
+          anchor={optionsRef}
+          onClose={() => setOptionsOpen(false)}
+          pagesKey={pagesKey}
+          isAdmin={isAdmin}
+          readOnly={readOnly}
+        />
+      )}
 
       {open && hasChildren && (
         <SortableContext items={childIds} strategy={verticalListSortingStrategy}>
