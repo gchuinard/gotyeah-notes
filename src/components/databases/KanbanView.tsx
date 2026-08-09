@@ -55,6 +55,19 @@ import { useRecordDeepLink } from "@/lib/client/useRecordDeepLink";
 
 // ─── Constants / types ────────────────────────────────────────────────────────
 
+/**
+ * Fenêtre pendant laquelle un clic sur le TITRE d'une carte attend un second
+ * clic avant d'ouvrir le panneau. C'est le prix du double-clic pour renommer :
+ * sans elle, le premier clic ouvrirait la carte et le renommage démarrerait
+ * derrière un panneau déjà ouvert.
+ *
+ * ⚠️ Compromis assumé, dans les deux sens. Trop court, un double-clic un peu
+ * lent ouvre la carte au lieu de renommer ; trop long, ouvrir une carte en
+ * visant son titre devient mou. 300 ms couvre les doubles-clics usuels tout en
+ * restant sous le seuil où l'attente se remarque — et le délai ne porte QUE sur
+ * le titre : partout ailleurs sur la carte, l'ouverture reste immédiate.
+ */
+const DOUBLE_CLICK_DELAY_MS = 300;
 
 type Props = {
   databaseId: string;
@@ -277,6 +290,42 @@ function KanbanCard({
     }
   }, [isDragging]);
 
+  // Le titre départage le clic simple (ouvrir la carte) du double (renommer).
+  // ⚠️ Un double-clic émet DEUX `click` AVANT le `dblclick` : sans ce report,
+  // le premier ouvrirait déjà le panneau et le renommage démarrerait derrière
+  // lui. On attend donc un éventuel second clic — et seulement sur le titre :
+  // partout ailleurs sur la carte, l'ouverture reste immédiate.
+  const openTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (openTimerRef.current) clearTimeout(openTimerRef.current);
+    },
+    []
+  );
+
+  const handleTitleClick = (e: React.MouseEvent) => {
+    // Le clic ne remonte jamais à la carte : c'est ici qu'on arbitre.
+    e.stopPropagation();
+    if (justDraggedRef.current) return;
+
+    // `detail` compte les clics du geste en cours : 2 = second clic d'un double.
+    // Il arrive avant `dblclick`, donc l'ouverture est annulée à temps — c'est
+    // ce qui permet de tout traiter dans un seul handler.
+    if (e.detail >= 2) {
+      if (openTimerRef.current) {
+        clearTimeout(openTimerRef.current);
+        openTimerRef.current = null;
+      }
+      setIsEditingTitle(true);
+      return;
+    }
+
+    openTimerRef.current = setTimeout(() => {
+      openTimerRef.current = null;
+      onCardClick?.(record);
+    }, DOUBLE_CLICK_DELAY_MS);
+  };
+
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -335,6 +384,7 @@ function KanbanCard({
         {isEditingTitle ? (
           <input
             ref={titleInputRef}
+            data-card-title-input
             value={titleValue}
             onChange={(e) => setTitleValue(e.target.value)}
             onBlur={commitTitle}
@@ -347,8 +397,12 @@ function KanbanCard({
             onClick={(e) => e.stopPropagation()}
           />
         ) : (
-          // Simple clic sur le titre → édition inline (n'ouvre PAS le panneau).
-          // En lecture seule, le clic remonte à la carte → ouvre le panneau.
+          // DOUBLE-clic sur le titre → édition inline ; clic simple → ouvre la
+          // carte, comme partout ailleurs sur elle. Le simple clic renommait
+          // jusqu'au 09/08/2026 : viser le titre pour ouvrir une carte faisait
+          // entrer en édition sans l'avoir demandé.
+          // En lecture seule, aucun handler : le clic remonte à la carte et
+          // l'ouvre SANS délai — il n'y a pas de renommage à départager.
           <p
             // Gouttières réservées aux deux affordances désormais toujours
             // visibles sous md (case de sélection à gauche, actions à droite) :
@@ -357,11 +411,9 @@ function KanbanCard({
               "text-sm font-semibold text-[var(--text)] leading-snug break-words pr-14 md:pr-12",
               readOnly ? "" : "pl-7 md:pl-5 cursor-text",
             ].join(" ")}
-            onClick={readOnly ? undefined : (e) => {
-              e.stopPropagation();
-              if (justDraggedRef.current) return;
-              setIsEditingTitle(true);
-            }}
+            onClick={readOnly ? undefined : handleTitleClick}
+            // Un double-clic ne se devine pas : on le dit au survol.
+            title={readOnly ? undefined : "Double-cliquer pour renommer"}
           >
             {record.title || <span className="text-[var(--text-muted)] font-normal">Sans titre</span>}
           </p>
