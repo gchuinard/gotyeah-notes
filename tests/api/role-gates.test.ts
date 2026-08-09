@@ -313,6 +313,8 @@ const DECLARED: Record<string, string[]> = {
   "properties/[id]/route.ts": ["PATCH", "DELETE"],
   "records/[id]/route.ts": ["PATCH", "DELETE"],
   "records/[id]/duplicate/route.ts": ["POST"],
+  "records/[id]/attachments/route.ts": ["POST"],
+  "attachments/[id]/route.ts": ["DELETE"],
   "records/[id]/restore/route.ts": ["POST"],
   "views/[id]/route.ts": ["PATCH", "DELETE"],
   "sprints/[id]/route.ts": ["PATCH", "DELETE"],

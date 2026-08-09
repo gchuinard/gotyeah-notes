@@ -40,7 +40,7 @@ export async function POST(
 
   const record = await prisma.$transaction(async (tx) => {
     const position = await nextPosition("record", { databaseId }, tx);
-    return tx.record.create({
+    const copie = await tx.record.create({
       data: {
         databaseId,
         createdBy: user.id,
@@ -55,6 +55,25 @@ export async function POST(
         sprintId: src.sprintId,
       },
     });
+
+    // ⚠️ Les pièces jointes suivent, en PARTAGEANT le fichier : on recopie les
+    // lignes, jamais les octets. C'est gratuit et sûr, parce que le `Set` de
+    // purgeOrphanUploads EST le comptage de références du projet — un fichier
+    // cité par deux lignes survit, cité par zéro il part. Copier les octets
+    // coûterait ×N sur le NVMe du Pi pour résoudre un problème déjà résolu.
+    //
+    // ⚠️ `uploadedBy` est celui de l'ORIGINAL, pas le duplicateur : la ligne
+    // dit qui a déposé le document, et ça reste vrai après une copie.
+    const jointes = await tx.recordAttachment.findMany({
+      where: { recordId: id },
+      select: { fileName: true, name: true, mimeType: true, size: true, uploadedBy: true },
+    });
+    if (jointes.length > 0) {
+      await tx.recordAttachment.createMany({
+        data: jointes.map((a) => ({ ...a, recordId: copie.id })),
+      });
+    }
+    return copie;
   });
 
   return NextResponse.json(parseRecord(record), { status: 201 });
