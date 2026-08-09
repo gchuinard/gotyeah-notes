@@ -314,6 +314,7 @@ const DECLARED: Record<string, string[]> = {
   "records/[id]/route.ts": ["PATCH", "DELETE"],
   "records/[id]/duplicate/route.ts": ["POST"],
   "records/[id]/attachments/route.ts": ["POST"],
+  "records/[id]/comments/route.ts": ["POST"],
   "attachments/[id]/route.ts": ["DELETE"],
   "records/[id]/restore/route.ts": ["POST"],
   "views/[id]/route.ts": ["PATCH", "DELETE"],

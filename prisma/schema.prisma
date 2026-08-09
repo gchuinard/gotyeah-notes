@@ -29,6 +29,7 @@ model User {
   records            Record[]
   recordRevisions    RecordRevision[]
   attachments        RecordAttachment[]
+  comments           RecordComment[]
   notifications      Notification[]        @relation("NotificationRecipient")
   notificationsActed Notification[]        @relation("NotificationActor")
 }
@@ -279,11 +280,55 @@ model Record {
   // Pièces jointes (documents déposés sur la carte).
   attachments RecordAttachment[]
 
+  // Fil de discussion de la carte (append-only).
+  comments RecordComment[]
+
   // Composite : les records sont lus filtrés par databaseId ET triés par position.
   @@index([databaseId, position])
   @@index([createdBy])
   @@index([sprintId])
   @@index([trashedAt])
+}
+
+// Commentaire sur une carte : une remarque datée, signée, qu'on ajoute sans
+// toucher au corps.
+//
+// ⚠️ APPEND-ONLY, comme RecordRevision et Notification : pas d'updatedAt, pas de
+// deletedAt, aucune route de modification ni de suppression. Décision de Gautier
+// du 09/08 (« pas de suppression des commentaires ni modification »). Un fil
+// qu'on peut réécrire n'est plus une trace ; et l'absence de ces deux routes
+// supprime avec elles la question « qui a le droit », la modale de confirmation
+// et la mention « modifié ».
+//
+// ⚠️ Le corps est du TEXTE BRUT, pas du BlockNote. Un document BlockNote n'a
+// aucun aperçu lisible (l'onglet Historique y renonce et affiche « Contenu mis à
+// jour »), exige un éditeur client-only par commentaire, et se fabrique
+// péniblement côté serveur — or le pont MCP écrit dans ce champ.
+//
+// ⚠️ La grande raison d'être : Record.content et Record.sectionsBody s'écrivent
+// en REMPLACEMENT TOTAL. Une remarque posée dans le corps risque d'être effacée
+// par la mise à jour suivante — c'est le piège documenté des « 🗣️ Notes de
+// Gautier ». Ici chaque message a sa ligne.
+model RecordComment {
+  id       String @id @default(cuid())
+  recordId String
+  record   Record @relation(fields: [recordId], references: [id], onDelete: Cascade)
+
+  // Texte brut, borné à 4000 caractères par la route.
+  body String
+
+  // SetNull : supprimer un compte ne détruit pas ce qu'il a écrit. L'affichage
+  // dégrade en « Quelqu'un », comme les notifications.
+  authorId String?
+  author   User?   @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
+  // ⚠️ Date de PUBLICATION, jamais rafraîchie — contrairement à
+  // RecordRevision.createdAt, que la coalescence réécrit. Un commentaire ne
+  // coalesce pas : chaque message est un fait daté.
+  createdAt DateTime @default(now())
+
+  @@index([recordId, createdAt])
+  @@index([authorId])
 }
 
 // Pièce jointe d'une carte : un document déposé dessus (contrat, devis, export…).
