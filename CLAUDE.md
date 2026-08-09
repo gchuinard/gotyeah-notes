@@ -81,6 +81,18 @@ Notification    → cloche de l'en-tête. C'est un MESSAGE, JAMAIS une AUTORISAT
                   sinon chaque relance empilerait une carte « Accepter » de plus.
                   Purge 90 j, paresseuse, à l'OUVERTURE du panneau et scopée au destinataire —
                   JAMAIS sur le compteur, qui est le GET le plus chaud de l'app.
+RecordAttachment → PIÈCE JOINTE d'une carte (document déposé dessus). Le FICHIER vit
+                  sur disque (UPLOAD_DIR), la ligne n'en porte que la référence : `fileName`
+                  (nom sur disque, `<uuid>.<ext>`) + `name` (nom d'origine, affiché et
+                  restitué au téléchargement — POST /api/upload le jette).
+                  recordId → Cascade, uploadedBy → SetNull.
+                  ⚠️ Deux lignes peuvent citer le MÊME fileName : c'est ce qui rend la
+                  duplication d'une carte gratuite. Le comptage de références est
+                  purgeOrphanUploads, qui recalcule l'ensemble des noms cités à chaque
+                  passage. ⚠️ AUCUN trashedAt — le retrait est DÉFINITIF (décision du
+                  08/08) : la purge borne sur l'âge du FICHIER, pas sur la date de retrait,
+                  donc un deletedAt supprimerait immédiatement tout document de plus de
+                  30 j qu'on détache et ne protégerait que ceux qu'on vient de poser.
 AppConfig       → réglages globaux de l'instance. Ligne UNIQUE id="app", uploadMaxMb.
                   Toujours via `lib/appConfig.ts` (upsert → jamais de ligne manquante).
 ```
@@ -166,6 +178,14 @@ AppConfig       → réglages globaux de l'instance. Ligne UNIQUE id="app", uplo
 - **Clôture d'un sprint (transaction unique)** : `PATCH {state:"completed", moveIncompleteToBacklog, statusPropertyId, doneStatusOptionId}` fait, atomiquement : passage à `completed`, **renvoi des issues non terminées au backlog** (`status != doneStatusOptionId` → `sprintId=null`), génération de `Sprint.releaseNotes` (markdown, **une seule fois** : `releaseNotes` déjà rempli = re-clôture idempotente), puis **append d'un bloc daté à la page « Patch notes »** mappée par `Database.patchNotesPageId`. Garde-fous : réconciliation d'exhaustivité (toute issue listée doit être terminée, sinon **rollback + 422**), page au contenu JSON illisible → **rollback + 422** (on n'écrase jamais la page), pas de page mappée → clôture OK avec un flag `patchNotesAppend` explicite. `Sprint.releaseNotes` est en **lecture seule côté UI**. Démarrer/terminer dispo depuis le backlog ET le board.
 - **Database.patchNotesPageId** : référence **LIBRE**, sans relation Prisma. La robustesse est assurée à l'écriture (le PATCH refuse une page d'un autre workspace ou inaccessible) ET à l'append (page existante, même workspace, non trashée, accessible à l'acteur — la visibility peut changer après le mapping). `null` = pas de mapping, ce n'est pas une erreur.
 - **Position** : Float, gap-based ordering (gap de 1000) via `lib/positions.ts > nextPosition()` — models `databaseProperty`, `record`, `view`, `sprint`, **et eux seuls**. Passer le client de `$transaction` pour que le MAX(position) et le create soient atomiques. ⚠️ **`Page` n'utilise PAS `nextPosition`** : `lib/pages.ts > createPage()` a son propre calcul (`MAX + 1`, scopé à la section pour les racines). Ne mélange pas les deux systèmes. `setPageSection()` applique le **même** calcul, mais **seulement si le rattachement change vraiment** (nouveau parent ou nouvelle section) : la page déplacée arrive en dernière position de sa nouvelle fratrie, alors qu'un PATCH qui ne déplace rien laisse la position intacte — sinon le drag & drop de la sidebar (qui envoie `position` seul) serait contredit.
+- **Pièces jointes (`RecordAttachment`)** — un document déposé sur une carte, servi par `GET /api/attachments/[id]`.
+  - ⚠️ **`POST /api/upload` reste IMAGE-ONLY, et la liste des types de pièces jointes est SÉPARÉE** (`ATTACHMENT_TYPES`). Élargir `ALLOWED` ouvrirait les documents aux trois éditeurs BlockNote — donc aux **pages** — et ils seraient alors servis par `GET /api/files/[name]`, qui ne vérifie qu'une session et n'est scopé à aucun espace. Le lot creuserait le trou qu'il ouvre une route scopée pour éviter. Conséquence assumée : glisser un PDF dans le **corps** d'une page échoue toujours en 415.
+  - ⚠️ **L'accès passe par la CARTE** (`checkRecordAccess`), pas par le nom du fichier — toute la différence avec `/api/files/[name]`. Perdre l'accès à la carte ferme le document. `Cache-Control: no-store` (un accès révoqué ne doit pas rester servi par le cache) et `Content-Disposition: attachment; filename*=UTF-8''` pour restituer le nom d'origine accentué.
+  - ⚠️ **Le téléchargement STREAME** (`createReadStream` → `Response`), contrairement au patron de `/api/files` qui charge le fichier entier en RAM. Avec des documents de plusieurs Mo sur un Pi arm64, recopier ce patron ferait un pic proportionnel au nombre de téléchargements simultanés.
+  - ⚠️ **`purgeOrphanUploads` a dû être ÉTENDUE**, et c'est l'étape qui pouvait détruire des données : elle ne scannait que `Page.content`, `Record.content` et `Record.sectionsBody`. Le `fileName` y est ajouté **directement**, jamais via `extractUploadRefs` — le champ contient `uuid.pdf`, pas `/api/files/uuid.pdf`, et la regex rendrait un ensemble **vide**, donc purgerait tout. La mèche est d'un mois (30 j sur le mtime du fichier) : aucun test manuel ni aucune recette ne l'aurait vue. Écrite AVANT les routes, avec ses tests.
+  - **La duplication d'une carte recopie les lignes et PARTAGE le fichier** : gratuit et sûr, parce que le `Set` de la purge EST le comptage de références. `uploadedBy` reste celui de l'original — la ligne dit qui a déposé.
+  - **Le retrait supprime la LIGNE, jamais le fichier** : un autre enregistrement peut le citer. C'est la purge qui libère l'octet.
+  - **Un seul plafond**, `AppConfig.uploadMaxMb`, partagé avec les images. ⚠️ Le proxy (NPM) plafonne à **25 Mo** (`client_max_body_size` dans `/data/nginx/custom/server_proxy.conf`) : au-delà, c'est nginx qui coupe, avant l'application, avec son propre 413.
 - **AppConfig** : ligne **singleton** (`id = "app"`). Toujours passer par `lib/appConfig.ts > getAppConfig()/setAppConfig()` (upsert → la ligne est créée à la volée avec ses défauts, jamais de `findUnique` qui renverrait null).
 - **Prisma 7** génère les types avec suffixe `Model` (RecordModel, ViewModel...). `lib/db.ts` les aliase. Le type natif TS `Record` est shadowé → importer comme `import type { Record as DbRecord }`.
 

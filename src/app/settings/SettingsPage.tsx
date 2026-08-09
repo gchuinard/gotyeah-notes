@@ -1015,16 +1015,19 @@ function StorageSection() {
     <div className="max-w-lg">
       <SectionTitle
         title="Stockage"
-        description="Fichiers et médias (captures d'écran collées dans l'éditeur)."
+        description="Images collées dans l'éditeur et documents joints aux cartes."
       />
 
       <div className="flex flex-col gap-5">
         <div>
           <p className="text-sm font-medium text-[var(--text)]">Disque local</p>
           <p className="text-xs text-[var(--text-muted)] mt-1">
-            Les images sont stockées sur le serveur (dossier <code>data/uploads</code>, sur le
-            volume Docker) et servies via <code>/api/files</code> avec session. Le stockage cloud
-            (S3/R2/GCS/B2) n&apos;est pas encore branché.
+            Tout est stocké sur le serveur (dossier <code>data/uploads</code>, sur le volume
+            Docker). Les images collées dans l&apos;éditeur sont servies par{" "}
+            <code>/api/files</code> — une session suffit. Les documents joints à une carte
+            passent par <code>/api/attachments</code>, qui vérifie l&apos;accès à{" "}
+            <strong>la carte</strong> : perdre celle-ci ferme aussi le document. Le stockage
+            cloud (S3/R2/GCS/B2) n&apos;est pas encore branché.
           </p>
         </div>
 
@@ -1045,7 +1048,10 @@ function StorageSection() {
             className={`${fieldClass} max-w-[160px]`}
           />
           <p className="text-xs text-[var(--text-muted)]">
-            Au-delà, l&apos;upload est refusé. Les fichiers orphelins sont purgés après 30 jours.
+            S&apos;applique aux images comme aux documents joints — un seul réglage. Au-delà,
+            le dépôt est refusé. Les fichiers que plus rien ne référence sont purgés après
+            30 jours. ⚠️ Le proxy plafonne de son côté à 25 Mo : au-delà, c&apos;est lui qui
+            coupe, avant l&apos;application.
           </p>
         </div>
 

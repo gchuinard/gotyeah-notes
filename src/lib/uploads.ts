@@ -38,6 +38,49 @@ export function mimeForName(name: string): string {
 }
 
 /**
+ * Types acceptés comme PIÈCE JOINTE d'une carte. Liste SÉPARÉE d'`ALLOWED`, et
+ * ce n'est pas une redite.
+ *
+ * ⚠️ Élargir `ALLOWED` ouvrirait `POST /api/upload` aux documents — donc les
+ * trois éditeurs BlockNote, donc aussi les PAGES — et ces documents seraient
+ * servis par `GET /api/files/[name]`, qui ne vérifie qu'une session et n'est
+ * scopé à aucun espace. Le lot creuserait ainsi de sa propre main le trou qu'il
+ * ouvre une route scopée pour éviter : deux chemins pour un même PDF, dont un
+ * non protégé, sans que la personne sache lequel elle a emprunté.
+ *
+ * Conséquence assumée : glisser un PDF dans le CORPS d'une page continue
+ * d'échouer en 415. C'est la zone « pièces jointes » de la carte qui l'accepte.
+ */
+export const ATTACHMENT_TYPES = new Map<string, string>([
+  ["application/pdf", "pdf"],
+  ["application/msword", "doc"],
+  ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", "docx"],
+  ["application/vnd.ms-excel", "xls"],
+  ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xlsx"],
+  ["application/vnd.ms-powerpoint", "ppt"],
+  ["application/vnd.openxmlformats-officedocument.presentationml.presentation", "pptx"],
+  ["text/plain", "txt"],
+  ["text/csv", "csv"],
+  ["application/zip", "zip"],
+  // Les images restent acceptables en pièce jointe : on joint parfois un scan.
+  ["image/png", "png"],
+  ["image/jpeg", "jpg"],
+  ["image/webp", "webp"],
+]);
+
+/**
+ * Extension d'un type de PIÈCE JOINTE, ou null si le type est refusé.
+ *
+ * ⚠️ L'extension vient du MIME, jamais du nom d'origine — et elle est simple :
+ * `isSafeUploadName` n'accepte que `[A-Za-z0-9_-]+\.[a-z0-9]+`. Un `.tar.gz`
+ * échouerait à être servi, ET serait sauté par la purge (qui applique le même
+ * test) : il deviendrait IMMORTEL sur le disque.
+ */
+export function attachmentExtForType(mime: string): string | null {
+  return ATTACHMENT_TYPES.get(mime) ?? null;
+}
+
+/**
  * Types qu'on accepte d'afficher DANS le navigateur. Tout le reste est renvoyé
  * en pièce jointe, donc téléchargé au lieu d'être rendu.
  *
@@ -100,8 +143,19 @@ export function extractUploadRefs(text: string | null): Set<string> {
 
 /**
  * Purge les fichiers d'upload ORPHELINS (non référencés) de plus de 30 j. Scanne
- * Page.content + Record.content/sectionsBody. Ne scanne le contenu QUE s'il existe
- * des fichiers assez vieux (borne le coût). Renvoie le nombre de fichiers purgés.
+ * Page.content + Record.content/sectionsBody + RecordAttachment.fileName. Ne
+ * scanne le contenu QUE s'il existe des fichiers assez vieux (borne le coût).
+ * Renvoie le nombre de fichiers purgés.
+ *
+ * ⚠️ TOUTE NOUVELLE FAÇON DE RÉFÉRENCER UN FICHIER DOIT ÊTRE AJOUTÉE ICI. La
+ * fonction est aveugle par construction : elle ne connaît que ce qu'on lui
+ * donne. Un fichier référencé ailleurs est vu comme orphelin et `unlink` — 30
+ * jours plus tard, donc jamais pendant une recette. `Record.coverUrl` est déjà
+ * dans ce cas (sans conséquence : aucune route ne l'écrit).
+ *
+ * ⚠️ La lecture des pages et des records NE FILTRE PAS `trashedAt` — c'est
+ * VOULU. Un élément en corbeille protège encore ses fichiers, sinon restaurer
+ * une carte rendrait ses images et ses pièces jointes mortes.
  */
 export async function purgeOrphanUploads(now: Date = new Date()): Promise<number> {
   const dir = uploadsDir();
@@ -126,15 +180,26 @@ export async function purgeOrphanUploads(now: Date = new Date()): Promise<number
   if (old.length === 0) return 0;
 
   const referenced = new Set<string>();
-  const [pages, records] = await Promise.all([
+  const [pages, records, attachments] = await Promise.all([
     prisma.page.findMany({ select: { content: true } }),
     prisma.record.findMany({ select: { content: true, sectionsBody: true } }),
+    prisma.recordAttachment.findMany({ select: { fileName: true } }),
   ]);
   for (const p of pages) for (const n of extractUploadRefs(p.content)) referenced.add(n);
   for (const r of records) {
     for (const n of extractUploadRefs(r.content)) referenced.add(n);
     for (const n of extractUploadRefs(r.sectionsBody)) referenced.add(n);
   }
+  // ⚠️ Le nom est ajouté DIRECTEMENT, jamais via extractUploadRefs : le champ
+  // contient `uuid.pdf`, pas `/api/files/uuid.pdf`. Passer par la regex rendrait
+  // un ensemble VIDE — et la fonction supprimerait alors toutes les pièces
+  // jointes de plus de 30 jours, en silence, un mois après leur dépôt.
+  //
+  // ⚠️ Cet ensemble EST le comptage de références du projet : recalculé en
+  // entier à chaque passage, jamais désynchronisé. C'est lui qui rend gratuite
+  // la duplication d'une carte — deux lignes citant le même fichier le
+  // protègent, la dernière retirée le libère.
+  for (const a of attachments) referenced.add(a.fileName);
 
   let purged = 0;
   for (const name of old) {

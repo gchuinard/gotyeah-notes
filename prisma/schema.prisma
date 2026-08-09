@@ -28,6 +28,7 @@ model User {
   ownedPages         Page[]                @relation("PageOwner")
   records            Record[]
   recordRevisions    RecordRevision[]
+  attachments        RecordAttachment[]
   notifications      Notification[]        @relation("NotificationRecipient")
   notificationsActed Notification[]        @relation("NotificationActor")
 }
@@ -275,11 +276,53 @@ model Record {
   // Piste d'audit qui/quoi/quand des modifications (onglet Historique de la carte).
   revisions RecordRevision[]
 
+  // Pièces jointes (documents déposés sur la carte).
+  attachments RecordAttachment[]
+
   // Composite : les records sont lus filtrés par databaseId ET triés par position.
   @@index([databaseId, position])
   @@index([createdBy])
   @@index([sprintId])
   @@index([trashedAt])
+}
+
+// Pièce jointe d'une carte : un document déposé dessus (contrat, devis, export…).
+//
+// ⚠️ Le FICHIER vit sur disque (UPLOAD_DIR), cette ligne n'en porte que la
+// référence. Deux lignes peuvent citer le MÊME fileName — c'est ce qui rend la
+// duplication d'une carte gratuite. Le comptage de références est fait par
+// purgeOrphanUploads, qui recalcule l'ensemble des noms cités à chaque passage :
+// un fichier cité par zéro ligne ET vieux de 30 j est supprimé du disque.
+//
+// ⚠️ AUCUN trashedAt : seuls Page et Record en ont un. Retirer une pièce jointe
+// est DÉFINITIF, et l'écran le dit. Un deletedAt n'achèterait rien ici — la
+// purge borne sur l'âge du FICHIER, pas sur la date de retrait : un document
+// joint il y a six mois et détaché par erreur serait supprimé au prochain
+// passage, et seuls ceux qu'on vient de poser survivraient. Décision de Gautier
+// du 08/08.
+model RecordAttachment {
+  id       String @id @default(cuid())
+  recordId String
+  record   Record @relation(fields: [recordId], references: [id], onDelete: Cascade)
+
+  // Nom sur disque : `<uuid>.<ext>`, servi par GET /api/attachments/[id].
+  // ⚠️ JAMAIS d'URL ici, seulement le nom : la purge lit ce champ DIRECTEMENT,
+  // sans passer par extractUploadRefs (dont la regex attend « /api/files/… » et
+  // rendrait un ensemble vide — donc purgerait tout).
+  fileName String
+  // Nom d'origine choisi par la personne, affiché à l'écran et au téléchargement.
+  // POST /api/upload le jette : sans ce champ, la carte montrerait un UUID.
+  name     String
+  mimeType String
+  size     Int
+
+  uploadedBy String?
+  uploader   User?   @relation(fields: [uploadedBy], references: [id], onDelete: SetNull)
+  createdAt  DateTime @default(now())
+
+  @@index([recordId, createdAt])
+  @@index([fileName])
+  @@index([uploadedBy])
 }
 
 // Historique des modifications d'un record (piste d'audit qui/quoi/quand).

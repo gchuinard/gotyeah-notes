@@ -12,6 +12,7 @@ import "@blocknote/mantine/style.css";
 import type { ParsedDatabaseProperty, ParsedRecord, PropertyValue, RecordSection } from "@/lib/db";
 import type { TransitionActor } from "@/lib/permissionRules";
 import Cell, { CellDisplay } from "@/components/databases/Cell";
+import RecordAttachments from "@/components/databases/RecordAttachments";
 import { useThemeMode } from "@/lib/client/useThemeMode";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { createDebouncedSaver, type DebouncedSaver } from "@/lib/client/debouncedSaver";
@@ -629,6 +630,12 @@ export default function RecordPanel({
               </BlockNoteView>
             )}
           </div>
+
+          {/* Documents — SOUS le corps, dans l'onglet Contenu plutôt que dans un
+              troisième onglet : une pièce jointe se consulte en même temps que
+              la carte, pas à côté. Et l'onglet Contenu reste monté (masqué) hors
+              sélection, donc la liste ne se recharge pas à chaque va-et-vient. */}
+          <RecordAttachments recordId={record.id} readOnly={readOnly} />
         </div>
 
         {/* Onglet Historique : monté à la demande → fetch paresseux des révisions. */}
