@@ -3,7 +3,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import useSWR, { mutate as globalMutate } from "swr";
 import {
   X, Type, Hash, ChevronDown, List, Calendar, CheckSquare, Link, Mail, Users,
-  LayoutTemplate, History,
+  LayoutTemplate, History, MessageSquare,
 } from "lucide-react";
 import { useCreateBlockNote } from "@blocknote/react";
 import { fr } from "@blocknote/core/locales";
@@ -13,6 +13,7 @@ import type { ParsedDatabaseProperty, ParsedRecord, PropertyValue, RecordSection
 import type { TransitionActor } from "@/lib/permissionRules";
 import Cell, { CellDisplay } from "@/components/databases/Cell";
 import RecordAttachments from "@/components/databases/RecordAttachments";
+import RecordComments from "@/components/databases/RecordComments";
 import { useThemeMode } from "@/lib/client/useThemeMode";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { createDebouncedSaver, type DebouncedSaver } from "@/lib/client/debouncedSaver";
@@ -398,7 +399,7 @@ export default function RecordPanel({
 
   // ── Onglets : « Contenu » (défaut) / « Historique » ──────────────────────────
   // L'onglet contenu reste sélectionné à l'ouverture ET à chaque changement de carte.
-  const [activeTab, setActiveTab] = useState<"content" | "history">("content");
+  const [activeTab, setActiveTab] = useState<"content" | "comments" | "history">("content");
   useEffect(() => {
     setActiveTab("content");
   }, [record.id]);
@@ -551,6 +552,7 @@ export default function RecordPanel({
         <div className="flex items-center gap-4 px-4 md:px-6 border-b border-[var(--border)] shrink-0">
           {([
             { key: "content", label: "Contenu", icon: null },
+            { key: "comments", label: "Commentaires", icon: <MessageSquare size={14} /> },
             { key: "history", label: "Historique", icon: <History size={14} /> },
           ] as const).map((tab) => (
             <button
@@ -637,6 +639,15 @@ export default function RecordPanel({
               sélection, donc la liste ne se recharge pas à chaque va-et-vient. */}
           <RecordAttachments recordId={record.id} readOnly={readOnly} />
         </div>
+
+        {/* Onglet Commentaires : monté à la demande → fetch paresseux du fil.
+            Pas de compteur sur l'étiquette : il exigerait de charger le fil à
+            chaque ouverture de carte, sur un Pi, pour un chiffre. */}
+        {activeTab === "comments" && (
+          <div className="flex-1 min-h-0">
+            <RecordComments recordId={record.id} readOnly={readOnly} />
+          </div>
+        )}
 
         {/* Onglet Historique : monté à la demande → fetch paresseux des révisions. */}
         {activeTab === "history" && (
