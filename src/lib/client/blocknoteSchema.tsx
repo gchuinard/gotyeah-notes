@@ -28,8 +28,7 @@ import {
   type ReactCustomInlineContentRenderProps,
 } from "@blocknote/react";
 import type { SearchResult } from "@/app/api/search/route";
-
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
+import { fetcher, noRetryOn4xx } from "@/lib/client/fetcher";
 
 // Inline content atomique (content "none") : ne porte que l'id de la page.
 const pageLinkConfig = {
@@ -45,10 +44,16 @@ function PageLinkComponent(
 ) {
   const router = useRouter();
   const { pageId } = props.inlineContent.props;
-  // Titre résolu à l'affichage. Sur 404 la réponse est `{ error }` → pas de title
-  // → fallback « page ». Même fetcher (json inconditionnel) que le reste de l'app,
-  // donc pas de tempête de retries SWR.
-  const { data } = useSWR<PageMeta>(pageId ? `/api/pages/${pageId}` : null, fetcher);
+  // ⚠️ SEUL endroit du dépôt où l'échec ne se REND PAS, et c'est voulu : un lien
+  // vers une page supprimée doit dégrader en libellé « page », pas barbouiller
+  // l'éditeur d'un message d'erreur au milieu d'un paragraphe. Le fetcher partagé
+  // lève, `data` reste undefined, le repli tient tout seul. `noRetryOn4xx` est ce
+  // qui empêche ce 404 définitif de tourner en boucle de requêtes.
+  const { data } = useSWR<PageMeta, unknown>(
+    pageId ? `/api/pages/${pageId}` : null,
+    fetcher,
+    noRetryOn4xx
+  );
   const title = data?.title?.trim() || "page";
 
   return (

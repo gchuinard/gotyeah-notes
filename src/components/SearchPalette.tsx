@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import useSWR from "swr";
 import { Search, FileText, Rows3 } from "lucide-react";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
+import { fetcher, HttpError, loadErrorMessage, noRetryOn4xx } from "@/lib/client/fetcher";
 import { searchResultPathSegments, truncatePathEnd, type FlatPage } from "@/lib/tree";
 
 type Result =
@@ -11,8 +12,6 @@ type Result =
   | { kind: "record"; id: string; pageId: string; title: string; icon: string | null };
 
 type Section = { id: string; name: string; icon: string | null };
-
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
 // Budget de caractères de la 2e ligne (chemin) : la palette est en max-w-lg.
 // Le rendu applique aussi `truncate` (ellipse CSS) comme garde-fou visuel.
@@ -35,6 +34,7 @@ export default function SearchPalette() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Result[]>([]);
+  const [searchError, setSearchError] = useState<unknown>(null);
   const [selected, setSelected] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
@@ -43,8 +43,19 @@ export default function SearchPalette() {
 
   // Mêmes clés SWR que Breadcrumb.tsx / la sidebar → cache dédupliqué, aucune
   // requête supplémentaire déclenchée par la palette pour calculer les chemins.
-  const { data: pages = [] } = useSWR<FlatPage[]>(wsId ? `/api/pages?workspaceId=${wsId}` : null, fetcher);
-  const { data: sections = [] } = useSWR<Section[]>(wsId ? `/api/sections?workspaceId=${wsId}` : null, fetcher);
+  const { data: pages = [], error: pagesError } = useSWR<FlatPage[]>(
+    wsId ? `/api/pages?workspaceId=${wsId}` : null,
+    fetcher,
+    noRetryOn4xx
+  );
+  const { data: sections = [], error: sectionsError } = useSWR<Section[]>(
+    wsId ? `/api/sections?workspaceId=${wsId}` : null,
+    fetcher,
+    noRetryOn4xx
+  );
+  // Les deux clés ne servent qu'à la 2e ligne (chemin d'accès) : leur échec
+  // n'invalide PAS les résultats, il les prive de leur localisation.
+  const pathError = pagesError ?? sectionsError;
 
   // Cmd+K / Ctrl+K + événement custom depuis la sidebar
   useEffect(() => {
@@ -69,6 +80,7 @@ export default function SearchPalette() {
     if (open) {
       setQuery("");
       setResults([]);
+      setSearchError(null);
       setSelected(0);
       setTimeout(() => inputRef.current?.focus(), 0);
     }
@@ -76,16 +88,36 @@ export default function SearchPalette() {
 
   // Recherche avec debounce
   useEffect(() => {
-    if (!query.trim()) { setResults([]); return; }
+    if (!query.trim()) { setResults([]); setSearchError(null); return; }
+    // Le nettoyage n'annule que le minuteur : une requête déjà partie continue.
+    // Sans ce drapeau, sa réponse — résultat périmé ou erreur périmée — écraserait
+    // celle de la frappe suivante.
+    let cancelled = false;
     const t = setTimeout(async () => {
       const params = new URLSearchParams({ q: query });
       if (activeWorkspace) params.set("workspaceId", activeWorkspace.id);
-      const res = await fetch(`/api/search?${params.toString()}`);
-      const data = await res.json();
-      setResults(data);
-      setSelected(0);
+      try {
+        const res = await fetch(`/api/search?${params.toString()}`);
+        if (!res.ok) throw new HttpError(res.status);
+        // ⚠️ Le parse est DANS le try, et tester `res.ok` seul ne suffirait pas :
+        // un 502 du proxy rend une page HTML, sur laquelle `res.json()` REJETTE.
+        // La promesse non rattrapée cassait alors le rendu au lieu de s'afficher.
+        const data: unknown = await res.json();
+        if (!Array.isArray(data)) throw new Error("Réponse de recherche inattendue");
+        if (cancelled) return;
+        setResults(data as Result[]);
+        setSearchError(null);
+        setSelected(0);
+      } catch (err) {
+        if (cancelled) return;
+        // On vide la liste EN MÊME TEMPS qu'on annonce l'échec : laisser les
+        // résultats de la frappe précédente sous une bannière d'erreur ferait
+        // passer une réponse périmée pour la réponse à la requête en cours.
+        setResults([]);
+        setSearchError(err);
+      }
     }, 150);
-    return () => clearTimeout(t);
+    return () => { cancelled = true; clearTimeout(t); };
   }, [query, activeWorkspace]);
 
   const navigate = (r: Result) => {
@@ -132,8 +164,15 @@ export default function SearchPalette() {
           </kbd>
         </div>
 
+        {/* ⚠️ L'échec PRIME sur la liste et sur « Aucun résultat » : annoncer zéro
+            trouvaille alors que la recherche n'a jamais abouti ferait chercher
+            ailleurs une page qui existe. */}
+        {searchError !== null && (
+          <p className="px-4 py-4 text-sm text-red-500 text-center">{loadErrorMessage(searchError)}</p>
+        )}
+
         {/* Résultats */}
-        {results.length > 0 && (
+        {searchError === null && results.length > 0 && (
           <ul className="max-h-72 overflow-y-auto py-1">
             {results.map((r, i) => {
               const path = pathLineFor(r, pages, sections);
@@ -172,13 +211,21 @@ export default function SearchPalette() {
           </ul>
         )}
 
-        {query.trim() && results.length === 0 && (
+        {/* Le chemin n'est qu'une aide au repérage : son absence n'invalide aucun
+            résultat, mais elle se dit — sinon on lirait « à la racine ». */}
+        {searchError === null && results.length > 0 && pathError !== undefined && (
+          <p className="px-4 py-2 text-xs text-red-500 border-t border-[var(--border)]">
+            Chemins d&apos;accès indisponibles : {loadErrorMessage(pathError)}
+          </p>
+        )}
+
+        {searchError === null && query.trim() && results.length === 0 && (
           <p className="px-4 py-4 text-sm text-[var(--text-muted)] text-center">
             Aucun résultat pour « {query} »
           </p>
         )}
 
-        {!query && (
+        {searchError === null && !query && (
           <p className="px-4 py-3 text-xs text-[var(--text-muted)] text-center">
             Tape pour rechercher dans tes pages et tes fiches
           </p>

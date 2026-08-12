@@ -4,9 +4,9 @@ import { useParams } from "next/navigation";
 import useSWR from "swr";
 import { ChevronRight } from "lucide-react";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
+import { fetcher, loadErrorMessage, noRetryOn4xx } from "@/lib/client/fetcher";
 import { buildBreadcrumb, type FlatPage } from "@/lib/tree";
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
 type Section = { id: string; name: string; icon: string | null };
 
 /**
@@ -21,10 +21,30 @@ export default function Breadcrumb() {
 
   const { activeWorkspace } = useWorkspace();
   const wsId = activeWorkspace?.id ?? null;
-  const { data: pages = [] } = useSWR<FlatPage[]>(wsId ? `/api/pages?workspaceId=${wsId}` : null, fetcher);
-  const { data: sections = [] } = useSWR<Section[]>(wsId ? `/api/sections?workspaceId=${wsId}` : null, fetcher);
+  // Mêmes clés que la sidebar : une session expirée les fait échouer toutes d'un
+  // coup, et `noRetryOn4xx` évite d'en faire une boucle de refus.
+  const { data: pages = [], error: pagesError } = useSWR<FlatPage[]>(
+    wsId ? `/api/pages?workspaceId=${wsId}` : null,
+    fetcher,
+    noRetryOn4xx
+  );
+  const { data: sections = [], error: sectionsError } = useSWR<Section[]>(
+    wsId ? `/api/sections?workspaceId=${wsId}` : null,
+    fetcher,
+    noRetryOn4xx
+  );
 
   if (!pageId) return null;
+
+  // ⚠️ L'échec passe AVANT le fil vide. Le fil naît du croisement des deux clés :
+  // l'une manquante et `buildBreadcrumb` ne rend plus rien, donc l'en-tête aurait
+  // exactement l'air d'une page sans emplacement au lieu d'un chargement raté.
+  // On rend un message, jamais un écran mort : la navigation reste entière.
+  const loadError = pagesError ?? sectionsError;
+  if (loadError) {
+    return <p className="min-w-0 truncate text-sm text-red-500">{loadErrorMessage(loadError)}</p>;
+  }
+
   const crumbs = buildBreadcrumb(pages, sections, pageId);
   if (crumbs.length === 0) return null;
 

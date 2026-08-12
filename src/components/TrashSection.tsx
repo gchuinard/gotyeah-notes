@@ -4,8 +4,7 @@ import useSWR, { mutate } from "swr";
 import { ChevronDown, ChevronRight, FileText, RotateCcw, Trash2, X } from "lucide-react";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { useDialog } from "@/contexts/DialogContext";
-
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
+import { fetcher, loadErrorMessage, noRetryOn4xx } from "@/lib/client/fetcher";
 
 type TrashPage = { id: string; title: string; icon: string | null; trashedAt: string };
 type TrashRecord = TrashPage & { pageId: string };
@@ -54,12 +53,31 @@ export default function TrashSection() {
   const wsId = activeWorkspace?.id ?? null;
   // Un lecteur ne peut ni restaurer ni purger : rien d'actionnable, on n'affiche pas.
   const key = wsId && !isViewer ? `/api/trash?workspaceId=${wsId}` : null;
-  const { data } = useSWR<TrashData>(key, fetcher);
+  // La clé ne dépend PAS du repli : le compte du badge doit être connu avant
+  // d'ouvrir. Elle peut donc échouer alors que rien n'est déplié.
+  const { data, error } = useSWR<TrashData>(key, fetcher, noRetryOn4xx);
   const { confirm } = useDialog();
   const [open, setOpen] = useState(false);
 
   const count = (data?.pages.length ?? 0) + (data?.records.length ?? 0);
-  if (isViewer || count === 0) return null;
+  if (isViewer) return null;
+
+  // ⚠️ AVANT le repli sur `count === 0` : un chargement raté laisse `data`
+  // indéfini, donc un compte à zéro, donc une corbeille qui DISPARAÎT — l'exact
+  // contraire de ce qu'on veut dire à qui cherche à récupérer une page.
+  if (error) {
+    return (
+      <div className="px-2">
+        <div className="flex items-center gap-1.5 px-2 py-2.5 md:py-1 text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">
+          <Trash2 size={11} />
+          Corbeille
+        </div>
+        <p className="px-2 pb-1 text-xs text-red-500">{loadErrorMessage(error)}</p>
+      </div>
+    );
+  }
+
+  if (count === 0) return null;
 
   const refresh = () => {
     mutate(key);

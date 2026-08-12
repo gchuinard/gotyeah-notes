@@ -5,6 +5,7 @@ import { Plus, Trash2, ArrowLeft, X } from "lucide-react";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { useDialog } from "@/contexts/DialogContext";
 import { SELECT_COLORS } from "@/lib/propertyColors";
+import { fetcher, loadErrorMessage, noRetryOn4xx } from "@/lib/client/fetcher";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -33,7 +34,6 @@ const COLUMN_TYPES = ["text", "number", "select", "multiselect", "date", "checkb
 // par la validation serveur, rendant les options d'une DB scaffoldée non éditables.
 const OPTION_COLORS: readonly string[] = SELECT_COLORS;
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
 const rid = () => crypto.randomUUID().slice(0, 8);
 
 function buildConfig(col: ColForm): Record<string, unknown> {
@@ -62,7 +62,10 @@ export default function TemplatesManager() {
   const { confirm } = useDialog();
   const wsId = activeWorkspace?.id ?? null;
   const key = wsId ? `/api/templates?workspaceId=${wsId}` : null;
-  const { data: templates = [], mutate } = useSWR<Template[]>(key, fetcher);
+  // `loadError` est l'échec de LECTURE de la liste ; `error` plus bas reste celui
+  // des MUTATIONS. Deux causes distinctes, deux messages — les confondre ferait
+  // qu'un enregistrement raté effacerait la bannière d'un chargement mort.
+  const { data: templates = [], error: loadError, mutate } = useSWR<Template[]>(key, fetcher, noRetryOn4xx);
 
   const [form, setForm] = useState<Form | null>(null);
   const [saving, setSaving] = useState(false);
@@ -297,50 +300,57 @@ export default function TemplatesManager() {
 
       {error && <p className="mb-3 text-sm text-red-500">{error}</p>}
 
-      <div className="flex flex-col gap-1.5">
-        {templates.map((t) => (
-          <div
-            key={t.id}
-            className="flex items-center gap-3 px-4 py-3 rounded border border-[var(--border)] bg-[var(--surface)]"
-          >
-            <div className="flex-1 min-w-0">
-              <div className="font-medium">
-                {t.name}
-                {t.builtin && <span className="ml-2 text-xs text-[var(--text-muted)]">fourni</span>}
+      {/* ⚠️ L'échec de LECTURE prime sur la liste : afficher zéro ligne quand rien
+          n'a pu être chargé se lirait « il n'y a aucun modèle », et on cliquerait
+          « Nouveau modèle » pour recréer ce qui existe déjà. */}
+      {loadError ? (
+        <p className="text-sm text-red-500">{loadErrorMessage(loadError)}</p>
+      ) : (
+        <div className="flex flex-col gap-1.5">
+          {templates.map((t) => (
+            <div
+              key={t.id}
+              className="flex items-center gap-3 px-4 py-3 rounded border border-[var(--border)] bg-[var(--surface)]"
+            >
+              <div className="flex-1 min-w-0">
+                <div className="font-medium">
+                  {t.name}
+                  {t.builtin && <span className="ml-2 text-xs text-[var(--text-muted)]">fourni</span>}
+                </div>
+                <div className="text-xs text-[var(--text-muted)] truncate">
+                  {t.columns.length} colonne(s) · {t.sections.length} section(s)
+                </div>
               </div>
-              <div className="text-xs text-[var(--text-muted)] truncate">
-                {t.columns.length} colonne(s) · {t.sections.length} section(s)
-              </div>
+              {!t.builtin && !isViewer && (
+                <button
+                  onClick={() => startEdit(t)}
+                  className="shrink-0 py-2 md:py-0 text-sm text-[var(--text-muted)] hover:text-[var(--text)]"
+                >
+                  Éditer
+                </button>
+              )}
+              {!t.builtin && isAdmin && (
+                <button
+                  onClick={() => remove(t.id)}
+                  className="shrink-0 flex h-10 w-10 items-center justify-center text-[var(--text-muted)] hover:text-[var(--text)] md:h-auto md:w-auto md:p-1.5"
+                  title="Supprimer le modèle (définitif)"
+                >
+                  <Trash2 size={15} />
+                </button>
+              )}
+              {t.builtin && !isViewer && (
+                <button
+                  onClick={() => startEdit(t)}
+                  className="shrink-0 py-2 md:py-0 text-sm text-[var(--text-muted)] hover:text-[var(--text)]"
+                  title="Voir (lecture seule — enregistrer créera une copie)"
+                >
+                  Voir
+                </button>
+              )}
             </div>
-            {!t.builtin && !isViewer && (
-              <button
-                onClick={() => startEdit(t)}
-                className="shrink-0 py-2 md:py-0 text-sm text-[var(--text-muted)] hover:text-[var(--text)]"
-              >
-                Éditer
-              </button>
-            )}
-            {!t.builtin && isAdmin && (
-              <button
-                onClick={() => remove(t.id)}
-                className="shrink-0 flex h-10 w-10 items-center justify-center text-[var(--text-muted)] hover:text-[var(--text)] md:h-auto md:w-auto md:p-1.5"
-                title="Supprimer le modèle (définitif)"
-              >
-                <Trash2 size={15} />
-              </button>
-            )}
-            {t.builtin && !isViewer && (
-              <button
-                onClick={() => startEdit(t)}
-                className="shrink-0 py-2 md:py-0 text-sm text-[var(--text-muted)] hover:text-[var(--text)]"
-                title="Voir (lecture seule — enregistrer créera une copie)"
-              >
-                Voir
-              </button>
-            )}
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

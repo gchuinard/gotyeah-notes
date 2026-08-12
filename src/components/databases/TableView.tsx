@@ -21,6 +21,7 @@ import {
 } from "@dnd-kit/sortable";
 import type { ParsedDatabaseProperty, ParsedRecord, ParsedView, PropertyValue } from "@/lib/db";
 import { applyViewConfig, deriveSeedFromFilters } from "@/lib/client/viewFilters";
+import { fetcher } from "@/lib/client/fetcher";
 import { useDialog } from "@/contexts/DialogContext";
 import Cell, { CellDisplay } from "@/components/databases/Cell";
 import AddPropertyModal from "@/components/databases/AddPropertyModal";
@@ -74,12 +75,6 @@ type Props = {
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-const fetcher = (url: string) =>
-  fetch(url).then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    return r.json();
-  });
 
 function sortProperties(properties: ParsedDatabaseProperty[]): ParsedDatabaseProperty[] {
   const title = properties.find((p) => p.type === "title");

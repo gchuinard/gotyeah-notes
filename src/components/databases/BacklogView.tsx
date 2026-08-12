@@ -34,6 +34,7 @@ import type {
 import { SelectBadge, CellDisplay } from "@/components/databases/Cell";
 import type { TransitionActor } from "@/lib/permissionRules";
 import { applyViewConfig } from "@/lib/client/viewFilters";
+import { fetcher } from "@/lib/client/fetcher";
 import { useDialog } from "@/contexts/DialogContext";
 import Portal from "@/components/databases/portal";
 import CardActions from "@/components/databases/CardActions";
@@ -69,12 +70,6 @@ type Lane = {
 type SprintPatch = Partial<
   Pick<ParsedSprint, "name" | "goal" | "startDate" | "endDate" | "state" | "position">
 >;
-
-const fetcher = (url: string) =>
-  fetch(url).then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    return r.json();
-  });
 
 const DATE_FMT = new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "short" });
 

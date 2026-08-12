@@ -15,6 +15,7 @@ import type { TransitionActor } from "@/lib/permissionRules";
 import Cell, { CellDisplay } from "@/components/databases/Cell";
 import RecordAttachments from "@/components/databases/RecordAttachments";
 import RecordComments from "@/components/databases/RecordComments";
+import { fetcher, loadErrorMessage, noRetryOn4xx } from "@/lib/client/fetcher";
 import { useThemeMode } from "@/lib/client/useThemeMode";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { createDebouncedSaver, type DebouncedSaver } from "@/lib/client/debouncedSaver";
@@ -34,8 +35,6 @@ const PROP_ICONS: Record<string, React.ReactNode> = {
   email:       <Mail size={14} />,
   user:        <Users size={14} />,
 };
-
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
 type TemplateLite = {
   id: string;
@@ -121,9 +120,12 @@ function RevisionHistory({
   recordId: string;
   properties: ParsedDatabaseProperty[];
 }) {
-  const { data: revisions, isLoading } = useSWR<RevisionEntry[]>(
+  // La carte peut avoir été mise à la corbeille (404) ou la session expirer (401)
+  // pendant que le panneau est ouvert : ce sont des refus, pas des pannes.
+  const { data: revisions, isLoading, error } = useSWR<RevisionEntry[]>(
     `/api/records/${recordId}/revisions`,
-    fetcher
+    fetcher,
+    noRetryOn4xx
   );
 
   const fieldLabel = (field: string): string => {
@@ -140,6 +142,13 @@ function RevisionHistory({
     field === "sectionsBody" ||
     (field !== "title" && !properties.some((p) => p.id === field));
 
+  // ⚠️ L'échec PRIME sur le vide : « aucune modification » sur un chargement raté
+  // ferait passer une piste d'audit inaccessible pour une piste d'audit vierge.
+  if (error) {
+    return (
+      <p className="px-4 md:px-6 py-4 text-sm text-red-500">{loadErrorMessage(error)}</p>
+    );
+  }
   if (isLoading) {
     return <p className="px-4 md:px-6 py-4 text-sm text-[var(--text-muted)]">Chargement…</p>;
   }
@@ -420,9 +429,10 @@ export default function RecordPanel({
 
   // ── Menu de template (par carte) ─────────────────────────────────────────────
   const [tplMenuOpen, setTplMenuOpen] = useState(false);
-  const { data: templates = [] } = useSWR<TemplateLite[]>(
+  const { data: templates = [], error: templatesError } = useSWR<TemplateLite[]>(
     tplMenuOpen && wsId ? `/api/templates?workspaceId=${wsId}` : null,
-    fetcher
+    fetcher,
+    noRetryOn4xx
   );
 
   const applyTemplate = async (tpl: TemplateLite | null) => {
@@ -588,18 +598,28 @@ export default function RecordPanel({
                   <div className="fixed inset-0 z-[60]" onClick={() => setTplMenuOpen(false)} />
                   <div className="absolute right-0 top-full mt-1 z-[61] w-60 bg-[var(--surface)] border border-[var(--border)] rounded-md shadow-lg py-1 text-sm max-h-80 overflow-y-auto">
                     <div className="px-3 py-1 text-xs text-[var(--text-muted)] uppercase tracking-wide">Appliquer un modèle</div>
-                    {templates.map((tpl) => (
-                      <button
-                        key={tpl.id}
-                        onClick={() => applyTemplate(tpl)}
-                        className="w-full text-left px-3 py-1.5 hover:bg-[var(--surface-hover)] text-[var(--text)]"
-                      >
-                        {tpl.name}
-                        {tpl.builtin && (
-                          <span className="ml-1 text-xs text-[var(--text-muted)]">(fourni)</span>
-                        )}
-                      </button>
-                    ))}
+                    {/* ⚠️ L'échec prime sur la liste : la réponse porte TOUJOURS les
+                        modèles fournis, donc un menu vide ne peut venir que d'un
+                        chargement raté — le laisser vide dirait « aucun modèle ».
+                        « Corps libre » reste proposé : il ne dépend d'aucun fetch. */}
+                    {templatesError ? (
+                      <p className="px-3 py-1.5 text-xs text-red-500">
+                        {loadErrorMessage(templatesError)}
+                      </p>
+                    ) : (
+                      templates.map((tpl) => (
+                        <button
+                          key={tpl.id}
+                          onClick={() => applyTemplate(tpl)}
+                          className="w-full text-left px-3 py-1.5 hover:bg-[var(--surface-hover)] text-[var(--text)]"
+                        >
+                          {tpl.name}
+                          {tpl.builtin && (
+                            <span className="ml-1 text-xs text-[var(--text-muted)]">(fourni)</span>
+                          )}
+                        </button>
+                      ))
+                    )}
                     <div className="border-t border-[var(--border)] my-1" />
                     <button
                       onClick={() => applyTemplate(null)}

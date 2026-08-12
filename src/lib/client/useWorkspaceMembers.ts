@@ -1,5 +1,6 @@
 "use client";
 import useSWR from "swr";
+import { fetcher } from "@/lib/client/fetcher";
 
 /** Forme renvoyée par GET /api/workspaces/[id]/members (clé `userId`, pas `id`). */
 export type WorkspaceMember = {
@@ -9,12 +10,6 @@ export type WorkspaceMember = {
   displayName: string;
   createdAt: string;
 };
-
-const fetcher = (url: string) =>
-  fetch(url).then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    return r.json();
-  });
 
 /**
  * Membres de l'espace, pour les cellules et filtres « utilisateur ».

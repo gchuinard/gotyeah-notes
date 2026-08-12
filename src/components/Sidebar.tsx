@@ -28,12 +28,11 @@ import { useDialog } from "@/contexts/DialogContext";
 import WorkspaceSelector from "@/components/WorkspaceSelector";
 import TrashSection from "@/components/TrashSection";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
+import { fetcher, loadErrorMessage, noRetryOn4xx } from "@/lib/client/fetcher";
 import type { SessionUser } from "@/lib/session";
 
 type Section = { id: string; name: string; type: string; icon: string | null; position: number };
 type RecentPage = { id: string; title: string; icon: string | null };
-
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
 const SIDEBAR_DEFAULT_WIDTH = 256; // = l'ancien w-64
 const SIDEBAR_MIN_WIDTH = 180;
@@ -57,9 +56,17 @@ export default function Sidebar({
   const sectionsKey = workspaceId ? `/api/sections?workspaceId=${workspaceId}` : null;
   const recentKey = workspaceId ? `/api/pages/recent?workspaceId=${workspaceId}` : null;
 
-  const { data: pages = [] } = useSWR<FlatPage[]>(pagesKey, fetcher);
-  const { data: sections = [] } = useSWR<Section[]>(sectionsKey, fetcher);
-  const { data: recent = [] } = useSWR<RecentPage[]>(recentKey, fetcher);
+  // La barre latérale est montée en permanence : une session expirée fait échouer
+  // ces trois clés d'un coup, et `noRetryOn4xx` évite d'en faire une boucle de
+  // requêtes refusées qui ne guériront pas.
+  const { data: pages = [], error: pagesError } = useSWR<FlatPage[]>(pagesKey, fetcher, noRetryOn4xx);
+  const { data: sections = [], error: sectionsError } = useSWR<Section[]>(sectionsKey, fetcher, noRetryOn4xx);
+  const { data: recent = [], error: recentError } = useSWR<RecentPage[]>(recentKey, fetcher, noRetryOn4xx);
+
+  // L'arborescence naît du CROISEMENT des deux clés : sans les sections il n'y a
+  // aucun bloc, sans les pages chaque bloc s'affiche vide et invite à « Nouvelle
+  // page ». Un seul des deux échecs suffit donc à faire mentir l'arbre.
+  const treeError = sectionsError ?? pagesError;
 
   const router = useRouter();
   const params = useParams<{ id?: string }>();
@@ -82,9 +89,12 @@ export default function Sidebar({
   // (colonnes + kanban + sections). Cf. POST /api/databases { templateId }.
   const [creatingDb, setCreatingDb] = useState(false);
   const [dbMenuOpen, setDbMenuOpen] = useState(false);
-  const { data: templates = [] } = useSWR<{ id: string; name: string; builtin: boolean }[]>(
+  const { data: templates = [], error: templatesError } = useSWR<
+    { id: string; name: string; builtin: boolean }[]
+  >(
     dbMenuOpen && workspaceId ? `/api/templates?workspaceId=${workspaceId}` : null,
-    fetcher
+    fetcher,
+    noRetryOn4xx
   );
   const createDatabaseFromTemplate = async (templateId: string, name: string) => {
     if (!workspaceId || creatingDb) return;
@@ -255,16 +265,22 @@ export default function Sidebar({
             <>
               <div className="fixed inset-0 z-40" onClick={() => setDbMenuOpen(false)} />
               <div className="absolute left-1 right-1 top-full mt-0.5 z-50 bg-[var(--surface)] border border-[var(--border)] rounded-md shadow-lg py-1 max-h-72 overflow-y-auto">
-                {templates.map((t) => (
-                  <button
-                    key={t.id}
-                    onClick={() => createDatabaseFromTemplate(t.id, t.name)}
-                    className="w-full text-left px-3 py-2.5 md:py-1.5 hover:bg-[var(--surface-hover)] text-[var(--text)]"
-                  >
-                    {t.name}
-                    {t.builtin && <span className="ml-1 text-xs text-[var(--text-muted)]">(fourni)</span>}
-                  </button>
-                ))}
+                {/* Les modèles fournis existent TOUJOURS : une liste vide ne peut venir
+                    que d'un chargement raté, jamais d'une absence de modèle. */}
+                {templatesError ? (
+                  <p className="px-3 py-2 text-xs text-red-500">{loadErrorMessage(templatesError)}</p>
+                ) : (
+                  templates.map((t) => (
+                    <button
+                      key={t.id}
+                      onClick={() => createDatabaseFromTemplate(t.id, t.name)}
+                      className="w-full text-left px-3 py-2.5 md:py-1.5 hover:bg-[var(--surface-hover)] text-[var(--text)]"
+                    >
+                      {t.name}
+                      {t.builtin && <span className="ml-1 text-xs text-[var(--text-muted)]">(fourni)</span>}
+                    </button>
+                  ))
+                )}
                 <div className="border-t border-[var(--border)] my-1" />
                 <Link
                   href="/templates"
@@ -280,14 +296,18 @@ export default function Sidebar({
         )}
       </div>
 
-      {/* Récents */}
-      {recent.length > 0 && (
+      {/* Récents — le bloc est masqué quand la liste est vide, donc un échec
+          silencieux se lirait « tu n'as rien ouvert récemment ». On le montre. */}
+      {(recentError || recent.length > 0) && (
         <div className="mb-2">
           <div className="flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-[var(--text-muted)] uppercase tracking-wide">
             <Clock size={11} />
             Récents
           </div>
-          {recent.map((page) => (
+          {recentError && (
+            <p className="px-2 py-1 text-xs text-red-500">{loadErrorMessage(recentError)}</p>
+          )}
+          {!recentError && recent.map((page) => (
             <Link
               key={page.id}
               href={`/pages/${page.id}`}
@@ -307,37 +327,46 @@ export default function Sidebar({
       )}
 
       <div className="flex-1 flex flex-col gap-3 overflow-y-auto">
-        {/* Section privée */}
-        {privateSection && (
-          <SectionBlock
-            key={privateSection.id}
-            section={privateSection}
-            icon={<Lock size={11} />}
-            tree={tree.filter((n) => n.sectionId === privateSection.id)}
-            pages={pages}
-            pagesKey={pagesKey}
-            params={params}
-            onCreate={createPage}
-            onDragEnd={handleDragEnd(privateSection.id)}
-            readOnly={isViewer}
-          />
-        )}
+        {/* ⚠️ L'erreur PRIME sur l'arbre : un espace qui s'affiche vide alors que le
+            chargement a échoué se lit « mes pages ont disparu », et l'invitation à
+            en créer une nouvelle achèverait de le faire croire. */}
+        {treeError ? (
+          <p className="px-2 py-1 text-xs text-red-500">{loadErrorMessage(treeError)}</p>
+        ) : (
+          <>
+            {/* Section privée */}
+            {privateSection && (
+              <SectionBlock
+                key={privateSection.id}
+                section={privateSection}
+                icon={<Lock size={11} />}
+                tree={tree.filter((n) => n.sectionId === privateSection.id)}
+                pages={pages}
+                pagesKey={pagesKey}
+                params={params}
+                onCreate={createPage}
+                onDragEnd={handleDragEnd(privateSection.id)}
+                readOnly={isViewer}
+              />
+            )}
 
-        {/* Sections équipe */}
-        {teamSections.map((section) => (
-          <SectionBlock
-            key={section.id}
-            section={section}
-            icon={<Users size={11} />}
-            tree={tree.filter((n) => n.sectionId === section.id)}
-            pages={pages}
-            pagesKey={pagesKey}
-            params={params}
-            onCreate={createPage}
-            onDragEnd={handleDragEnd(section.id)}
-            readOnly={isViewer}
-          />
-        ))}
+            {/* Sections équipe */}
+            {teamSections.map((section) => (
+              <SectionBlock
+                key={section.id}
+                section={section}
+                icon={<Users size={11} />}
+                tree={tree.filter((n) => n.sectionId === section.id)}
+                pages={pages}
+                pagesKey={pagesKey}
+                params={params}
+                onCreate={createPage}
+                onDragEnd={handleDragEnd(section.id)}
+                readOnly={isViewer}
+              />
+            ))}
+          </>
+        )}
       </div>
 
       {/* Corbeille (pages/records supprimés, restaurables — purge auto 30 j) */}
