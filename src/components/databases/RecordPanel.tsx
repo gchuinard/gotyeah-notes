@@ -10,6 +10,7 @@ import { fr } from "@blocknote/core/locales";
 import { BlockNoteView } from "@blocknote/mantine";
 import "@blocknote/mantine/style.css";
 import type { ParsedDatabaseProperty, ParsedRecord, PropertyValue, RecordSection } from "@/lib/db";
+import { serializeSectionsBody } from "@/lib/db";
 import type { TransitionActor } from "@/lib/permissionRules";
 import Cell, { CellDisplay } from "@/components/databases/Cell";
 import RecordAttachments from "@/components/databases/RecordAttachments";
@@ -215,26 +216,85 @@ export default function RecordPanel({
   }, []);
 
   // ── Autosave debouncé, flushé à la fermeture / au démontage ───────────────────
+  //
+  // ⚠️ CHAQUE ENREGISTREMENT DU CORPS DOIT RÉCONCILIER LE CACHE SWR. C'est le
+  // correctif du 09/08/2026, et l'absence de cette réconciliation était la cause
+  // du « ça ne s'enregistre pas toujours » rapporté en production.
+  //
+  // Le panneau resème ses éditeurs depuis le cache à CHAQUE montage
+  // (`useCreateBlockNote({ initialContent })` ne lit sa graine qu'une fois, et
+  // `sections` s'initialise dans un `useState`), et les cinq vues le montent avec
+  // `key={record.id}` — rouvrir une carte est donc un montage neuf. Sans cette
+  // réconciliation, fermer puis rouvrir SANS recharger réaffichait le corps
+  // d'AVANT la saisie : le texte était bien en base, c'est l'écran qui mentait.
+  //
+  // ⚠️ Et le second temps détruisait pour de bon : taper dans cet éditeur périmé
+  // renvoyait le document périmé en REMPLACEMENT TOTAL — sur une carte
+  // sectionnée, toutes les sections d'un coup, « 🗣️ Notes de Gautier » comprise.
+  //
+  // `saveTitle` et `saveProperty` réconciliaient déjà ; le corps, non. C'était la
+  // seule écriture du panneau à laisser le cache mentir.
+  //
+  // ⚠️ Réconciliation LOCALE (`revalidate: false`) et non un refetch : la clé
+  // records rend TOUS les records de la database, corps compris — plusieurs
+  // centaines de kilo-octets sur un board réel. Relire ça toutes les 500 ms de
+  // frappe, sur un Pi, remplacerait un bug par une lenteur. On écrit dans le
+  // cache exactement ce que le serveur vient d'accepter.
+  const [saving, setSaving] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const markSaved = () => {
+    setSaving("saved");
+    setTimeout(() => setSaving((s) => (s === "saved" ? "idle" : s)), 1200);
+  };
+
   const contentSaverRef = useRef<DebouncedSaver<string> | null>(null);
   if (!contentSaverRef.current) {
-    contentSaverRef.current = createDebouncedSaver<string>(500, (content) => {
-      fetch(`/api/records/${record.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content }),
-        keepalive: true,
-      });
+    contentSaverRef.current = createDebouncedSaver<string>(500, async (content) => {
+      try {
+        const res = await fetch(`/api/records/${record.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content }),
+          keepalive: true,
+        });
+        // ⚠️ Un échec ne doit JAMAIS toucher le cache : il ferait croire à une
+        // sauvegarde qui n'a pas eu lieu, et la réouverture servirait ce mensonge.
+        if (!res.ok) return setSaving("error");
+        globalMutate(
+          recordsKey,
+          (prev: ParsedRecord[] | undefined) =>
+            prev?.map((r) => (r.id === record.id ? { ...r, content } : r)),
+          { revalidate: false }
+        );
+        markSaved();
+      } catch {
+        setSaving("error");
+      }
     });
   }
   const sectionsSaverRef = useRef<DebouncedSaver<RecordSection[]> | null>(null);
   if (!sectionsSaverRef.current) {
-    sectionsSaverRef.current = createDebouncedSaver<RecordSection[]>(600, (body) => {
-      fetch(`/api/records/${record.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sectionsBody: body }),
-        keepalive: true,
-      });
+    sectionsSaverRef.current = createDebouncedSaver<RecordSection[]>(600, async (body) => {
+      try {
+        const res = await fetch(`/api/records/${record.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sectionsBody: body }),
+          keepalive: true,
+        });
+        if (!res.ok) return setSaving("error");
+        // Le cache porte la forme SÉRIALISÉE (`ParsedRecord.sectionsBody` est la
+        // chaîne brute) : c'est ce que `parseSections` relira au prochain montage.
+        const serialized = serializeSectionsBody(body);
+        globalMutate(
+          recordsKey,
+          (prev: ParsedRecord[] | undefined) =>
+            prev?.map((r) => (r.id === record.id ? { ...r, sectionsBody: serialized } : r)),
+          { revalidate: false }
+        );
+        markSaved();
+      } catch {
+        setSaving("error");
+      }
     });
   }
   const flushSaves = () => {
@@ -248,6 +308,20 @@ export default function RecordPanel({
   // Flush des saisies en attente si le panneau se démonte par un chemin quelconque.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => () => flushSaves(), []);
+
+  // ⚠️ Fermer l'onglet, recharger (F5) ou quitter le site ne DÉMONTE PAS React :
+  // le nettoyage ci-dessus ne s'exécute pas, et tout ce qui est plus récent que
+  // le dernier PATCH (≤ 500-600 ms de frappe) partait avec l'onglet, en silence.
+  // `pagehide` plutôt que `beforeunload` : il couvre aussi la mise en cache
+  // arrière des navigateurs mobiles, où `beforeunload` ne se déclenche pas.
+  // C'est le `keepalive: true` des savers qui rend cet envoi de dernière seconde
+  // réellement délivrable — sans lui le navigateur annulerait la requête.
+  useEffect(() => {
+    const onHide = () => flushSaves();
+    window.addEventListener("pagehide", onHide);
+    return () => window.removeEventListener("pagehide", onHide);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── Fermeture par Échap : uniquement hors champ/éditeur, après flush ─────────
   useEffect(() => {
@@ -340,6 +414,7 @@ export default function RecordPanel({
     if (readOnly) return;
     const next = sectionsRef.current.map((s) => (s.id === id ? { ...s, content } : s));
     setSections(next);
+    setSaving("saving");
     sectionsSaverRef.current?.schedule(next);
   };
 
@@ -569,6 +644,22 @@ export default function RecordPanel({
               {tab.label}
             </button>
           ))}
+          {/* État d'enregistrement du CORPS, comme l'éditeur de pages en a un.
+              Son absence est ce qui a laissé vivre le défaut de cache : rien ne
+              contredisait l'utilisateur qui croyait avoir perdu son texte.
+              ⚠️ L'échec est ROUGE et PERSISTANT — pas de retour à « idle » :
+              une sauvegarde qui n'a pas eu lieu doit rester visible à l'écran. */}
+          <span
+            data-save-state={saving}
+            className={[
+              "ml-auto text-xs shrink-0",
+              saving === "error" ? "text-red-500" : "text-[var(--text-muted)]",
+            ].join(" ")}
+          >
+            {saving === "saving" && "Enregistrement…"}
+            {saving === "saved" && "Enregistré ✓"}
+            {saving === "error" && "Non enregistré — recharge la page"}
+          </span>
         </div>
 
         {/* Onglet Contenu : properties + corps. Masqué (non démonté) hors onglet
@@ -625,6 +716,7 @@ export default function RecordPanel({
                 theme={themeMode}
                 onChange={() => {
                   if (readOnly) return;
+                  setSaving("saving");
                   contentSaverRef.current?.schedule(JSON.stringify(editor.document));
                 }}
               >
