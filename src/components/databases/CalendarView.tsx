@@ -5,6 +5,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { ParsedDatabaseProperty, ParsedRecord, ParsedView, SelectOption } from "@/lib/db";
 import type { TransitionActor } from "@/lib/permissionRules";
 import { applyViewConfig } from "@/lib/client/viewFilters";
+import { fetcher } from "@/lib/client/fetcher";
 import { colorClass } from "@/components/databases/Cell";
 import CardActions from "@/components/databases/CardActions";
 import RecordPanel from "@/components/databases/RecordPanel";
@@ -18,12 +19,6 @@ const MAX_PILLS = 3;
 const MONTH_FMT = new Intl.DateTimeFormat("fr-FR", { month: "long", year: "numeric" });
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-const fetcher = (url: string) =>
-  fetch(url).then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    return r.json();
-  });
 
 /** "2026-04-17" from a date value stored in a record property (avoid TZ issues). */
 function extractDateKey(raw: unknown): string | null {

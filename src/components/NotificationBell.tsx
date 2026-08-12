@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import useSWR, { mutate as globalMutate } from "swr";
 import { Bell, Check, X } from "lucide-react";
 import Portal from "./databases/portal";
+import { fetcher } from "@/lib/client/fetcher";
 
 /**
  * La cloche. Deux clés SWR distinctes, à dessein :
@@ -26,12 +27,6 @@ type Notification = {
   invitationId: string | null;
   invitationRole: string | null;
 };
-
-const fetcher = (url: string) =>
-  fetch(url).then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    return r.json();
-  });
 
 const ROLE_LABELS: Record<string, string> = {
   admin: "admin",

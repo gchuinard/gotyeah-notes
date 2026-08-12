@@ -31,6 +31,7 @@ import type {
 import Cell, { SelectBadge, CellDisplay, UserBadge } from "@/components/databases/Cell";
 import { withoutUnknownIds } from "@/lib/db";
 import { applyViewConfig, deriveSeedFromFilters } from "@/lib/client/viewFilters";
+import { fetcher } from "@/lib/client/fetcher";
 import {
   groupValueOnDrop,
   initialGroupValue,
@@ -100,12 +101,6 @@ type KanbanCol = KanbanColumn<ParsedRecord> & {
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-const fetcher = (url: string) =>
-  fetch(url).then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    return r.json();
-  });
 
 function colOf(cols: KanbanCol[], dndId: string): KanbanCol | null {
   const { colId } = parseDndId(dndId);

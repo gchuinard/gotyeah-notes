@@ -2,6 +2,7 @@
 import { useState } from "react";
 import useSWR from "swr";
 import { Send } from "lucide-react";
+import { fetcher, loadErrorMessage, noRetryOn4xx } from "@/lib/client/fetcher";
 
 /**
  * Fil de discussion d'une carte.
@@ -22,8 +23,6 @@ type Comment = {
   author: string | null;
 };
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
-
 /** Date et heure lisibles. Intl est natif — aucune dépendance ajoutée. */
 const horodatage = new Intl.DateTimeFormat("fr-FR", {
   dateStyle: "medium",
@@ -38,9 +37,17 @@ export default function RecordComments({
   readOnly: boolean;
 }) {
   const key = `/api/records/${recordId}/comments`;
-  const { data: items = [], mutate } = useSWR<Comment[]>(key, fetcher);
+  // La clé répond 404 dès que la carte part à la corbeille sous les yeux du
+  // lecteur : c'est un refus définitif, pas une panne — on ne le réessaie pas.
+  const {
+    data: items = [],
+    mutate,
+    error: loadError,
+  } = useSWR<Comment[]>(key, fetcher, noRetryOn4xx);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
+  // ⚠️ DISTINCT de `loadError` : ici c'est le refus du serveur à la PUBLICATION,
+  // avec son propre message. Les confondre écraserait l'un par l'autre.
   const [error, setError] = useState<string | null>(null);
 
   async function publier() {
@@ -114,7 +121,13 @@ export default function RecordComments({
       )}
 
       <div className="flex-1 min-h-0 overflow-y-auto px-4 md:px-6 py-3">
-        {items.length === 0 ? (
+        {loadError ? (
+          // ⚠️ L'échec de LECTURE passe AVANT « Aucun commentaire » : un fil vide
+          // se lit comme un fil sans message, alors que le serveur n'a rien
+          // répondu. Annoncer le vide ici serait un second mensonge, pas un
+          // correctif.
+          <p className="text-xs text-red-500">{loadErrorMessage(loadError)}</p>
+        ) : items.length === 0 ? (
           <p className="text-xs text-[var(--text-muted)]">
             Aucun commentaire.
             {readOnly ? "" : " Une remarque posée ici ne risque pas d'être écrasée par une mise à jour du corps."}

@@ -3,6 +3,7 @@ import { useRef, useState } from "react";
 import useSWR from "swr";
 import { Download, Paperclip, Trash2, Upload } from "lucide-react";
 import { useDialog } from "@/contexts/DialogContext";
+import { fetcher, loadErrorMessage, noRetryOn4xx } from "@/lib/client/fetcher";
 
 /**
  * Pièces jointes d'une carte — dépôt, téléchargement, retrait.
@@ -23,8 +24,6 @@ type Attachment = {
   uploadedBy: string | null;
 };
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
-
 /** Taille lisible. Intl est natif — aucune dépendance ajoutée. */
 function tailleLisible(octets: number): string {
   if (octets < 1024) return `${octets} o`;
@@ -41,8 +40,16 @@ export default function RecordAttachments({
   readOnly: boolean;
 }) {
   const key = `/api/records/${recordId}/attachments`;
-  const { data: items = [], mutate } = useSWR<Attachment[]>(key, fetcher);
+  // La clé répond 404 dès que la carte part à la corbeille sous les yeux du
+  // lecteur : c'est un refus définitif, pas une panne — on ne le réessaie pas.
+  const {
+    data: items = [],
+    mutate,
+    error: loadError,
+  } = useSWR<Attachment[]>(key, fetcher, noRetryOn4xx);
   const [busy, setBusy] = useState(false);
+  // ⚠️ DISTINCT de `loadError` : ici c'est le refus du serveur au DÉPÔT ou au
+  // RETRAIT, avec son propre message (type, taille). Les confondre l'écraserait.
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const { confirm } = useDialog();
@@ -114,7 +121,13 @@ export default function RecordAttachments({
 
       {error && <p className="mb-2 text-xs text-red-500">{error}</p>}
 
-      {items.length === 0 ? (
+      {loadError ? (
+        // ⚠️ L'échec de LECTURE passe AVANT « Aucun document ». Ce composant vient
+        // d'apprendre à l'utilisateur qu'un retrait est DÉFINITIF : une liste
+        // vide affichée alors que le serveur n'a pas répondu se lirait comme une
+        // suppression, et il chercherait un document que personne n'a retiré.
+        <p className="text-xs text-red-500">{loadErrorMessage(loadError)}</p>
+      ) : items.length === 0 ? (
         // Une ligne, pas une zone de dépôt en pointillés : c'est l'état le plus
         // fréquent, il ne doit pas occuper le tiers du panneau.
         <p className="text-xs text-[var(--text-muted)]">Aucun document.</p>

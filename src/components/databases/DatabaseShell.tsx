@@ -21,6 +21,7 @@ import { CSS } from "@dnd-kit/utilities";
 import type { ParsedDatabaseProperty, ParsedRecord, ParsedView } from "@/lib/db";
 import { applyViewConfig } from "@/lib/client/viewFilters";
 import { intermediatePosition } from "@/lib/client/reorder";
+import { fetcher, loadErrorMessage, noRetryOn4xx } from "@/lib/client/fetcher";
 import { useDialog } from "@/contexts/DialogContext";
 import TableView from "@/components/databases/TableView";
 import KanbanView from "@/components/databases/KanbanView";
@@ -60,14 +61,6 @@ const VIEW_TYPE_ICONS: Record<string, React.ReactNode> = {
   gallery:  <LayoutGrid size={13} />,
   backlog:  <ListChecks size={13} />,
 };
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-const fetcher = (url: string) =>
-  fetch(url).then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    return r.json();
-  });
 
 // ─── TabMenu ──────────────────────────────────────────────────────────────────
 
@@ -396,13 +389,15 @@ export default function DatabaseShell({
 
   const { data, error, isLoading, mutate } = useSWR<DatabaseData>(
     `/api/databases/${databaseId}`,
-    fetcher
+    fetcher,
+    noRetryOn4xx
   );
 
   // Share SWR cache with view components — same key, no extra fetch
-  const { data: records } = useSWR<ParsedRecord[]>(
+  const { data: records, error: recordsError } = useSWR<ParsedRecord[]>(
     data ? `/api/databases/${databaseId}/records` : null,
-    fetcher
+    fetcher,
+    noRetryOn4xx
   );
 
   const [showAddView, setShowAddView] = useState(false);
@@ -495,18 +490,23 @@ export default function DatabaseShell({
     [data, mutate]
   );
 
-  if (isLoading) {
+  // ⚠️ L'erreur passe AVANT le chargement, et ce n'est pas cosmétique : sur un
+  // refus définitif (404 page en corbeille, 401 session expirée) `noRetryOn4xx`
+  // arrête les tentatives, mais SWR remet `isLoading` à vrai à chaque
+  // revalidation d'onglet — tester le chargement d'abord ferait clignoter un
+  // « Chargement… » qui ne se résoudra jamais, par-dessus le motif du refus.
+  if (error) {
     return (
-      <div className="flex items-center justify-center h-48 text-[var(--text-muted)] text-sm">
-        Chargement…
+      <div className="flex items-center justify-center h-48 text-red-500 text-sm">
+        {loadErrorMessage(error)}
       </div>
     );
   }
 
-  if (error || !data) {
+  if (isLoading || !data) {
     return (
-      <div className="flex items-center justify-center h-48 text-red-500 text-sm">
-        Impossible de charger la base de données.
+      <div className="flex items-center justify-center h-48 text-[var(--text-muted)] text-sm">
+        Chargement…
       </div>
     );
   }
@@ -663,9 +663,18 @@ export default function DatabaseShell({
             <FilterControls view={activeView} properties={data.properties} databaseId={databaseId} workspaceId={data.workspaceId} />
           </>
         )}
-        <span className="ml-auto text-xs text-[var(--text-muted)] tabular-nums">
-          {countLabel}
-        </span>
+        {/* ⚠️ Un compteur ne se rend PAS sur une liste qu'on n'a pas pu charger :
+            `records` vaut alors `undefined`, donc « 0 élément » — un board plein
+            annoncé vide. Le motif du refus prend sa place. */}
+        {recordsError ? (
+          <span className="ml-auto text-xs text-red-500">
+            {loadErrorMessage(recordsError)}
+          </span>
+        ) : (
+          <span className="ml-auto text-xs text-[var(--text-muted)] tabular-nums">
+            {countLabel}
+          </span>
+        )}
       </div>
 
       {/* View content */}

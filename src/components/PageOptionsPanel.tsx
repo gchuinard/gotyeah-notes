@@ -4,6 +4,7 @@ import useSWR, { mutate } from "swr";
 import { Table2 } from "lucide-react";
 import Portal from "@/components/databases/portal";
 import TransitionRulesEditor from "@/components/databases/TransitionRulesEditor";
+import { fetcher, loadErrorMessage, noRetryOn4xx } from "@/lib/client/fetcher";
 import type { ParsedDatabaseProperty } from "@/lib/db";
 import type { TreeNode } from "@/lib/tree";
 
@@ -21,8 +22,6 @@ import type { TreeNode } from "@/lib/tree";
  * pas de drapeau : cette clé SWR est partagée, et la conversion en database ne
  * la revalide pas — le drapeau serait faux jusqu'au prochain rechargement.
  */
-
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
 type PageDetail = { id: string; database: { id: string } | null };
 type DatabaseDetail = {
@@ -53,11 +52,16 @@ export default function PageOptionsPanel({
   const [saving, setSaving] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const { data: page } = useSWR<PageDetail>(`/api/pages/${node.id}`, fetcher);
+  const { data: page, error: pageError } = useSWR<PageDetail>(
+    `/api/pages/${node.id}`,
+    fetcher,
+    noRetryOn4xx
+  );
   const databaseId = page?.database?.id ?? null;
-  const { data: database } = useSWR<DatabaseDetail>(
+  const { data: database, error: databaseError } = useSWR<DatabaseDetail>(
     databaseId ? `/api/databases/${databaseId}` : null,
-    fetcher
+    fetcher,
+    noRetryOn4xx
   );
 
   // Le focus entre dans le panneau à l'ouverture, et le champ de renommage est
@@ -122,6 +126,16 @@ export default function PageOptionsPanel({
         />
       </div>
 
+      {/* ⚠️ C'est ce chargement qui dit si la page est un TABLEAU. Échoué, il ne
+          rend rien : la section « Tableau » et ses règles d'accès disparaissent
+          sans un mot, et l'utilisateur en conclut que la fonctionnalité n'existe
+          pas — le mode de panne le plus coûteux du projet. */}
+      {pageError && (
+        <p className="px-3 pb-3 text-[11px] leading-snug text-red-500">
+          {loadErrorMessage(pageError)}
+        </p>
+      )}
+
       {/* ⚠️ PAS de ligne « page privée / page d'équipe » ici, et ce n'est pas un
           oubli. L'écrire demandait de tester la confidentialité à la main, ce que
           le méta-test de service-account.test.ts interdit hors de lib/workspace.ts
@@ -146,6 +160,17 @@ export default function PageOptionsPanel({
             <p className="px-3 pb-3 text-[11px] leading-snug text-[var(--text-muted)]">
               Les règles d&apos;accès aux colonnes sont réservées aux administrateurs
               de cet espace.
+            </p>
+          ) : databaseError ? (
+            // ⚠️ AVANT l'état vide : sans le schéma, `selectProps` est vide et
+            // « Aucune colonne à options » se lirait comme un constat vérifié —
+            // on enverrait créer une colonne qui existe déjà.
+            <p className="px-3 pb-3 text-[11px] leading-snug text-red-500">
+              {loadErrorMessage(databaseError)}
+            </p>
+          ) : !database ? (
+            <p className="px-3 pb-3 text-[11px] leading-snug text-[var(--text-muted)]">
+              Chargement…
             </p>
           ) : selectProps.length === 0 ? (
             <p className="px-3 pb-3 text-[11px] leading-snug text-[var(--text-muted)]">

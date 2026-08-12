@@ -5,18 +5,13 @@ import { Plus } from "lucide-react";
 import type { ParsedDatabaseProperty, ParsedRecord, ParsedView } from "@/lib/db";
 import type { TransitionActor } from "@/lib/permissionRules";
 import { applyViewConfig, deriveSeedFromFilters } from "@/lib/client/viewFilters";
+import { fetcher } from "@/lib/client/fetcher";
 import { CellDisplay } from "@/components/databases/Cell";
 import CardActions from "@/components/databases/CardActions";
 import RecordPanel from "@/components/databases/RecordPanel";
 import { useRecordDeepLink } from "@/lib/client/useRecordDeepLink";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-const fetcher = (url: string) =>
-  fetch(url).then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    return r.json();
-  });
 
 function previewProperties(
   properties: ParsedDatabaseProperty[],
