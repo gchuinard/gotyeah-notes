@@ -20,12 +20,26 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
+      # Sans empreinte, appleboy/ssh-action désactive la vérification de l'hôte
+      # en silence : on refuse donc de déployer si le secret est vide.
+      - name: Vérifier que l'empreinte du Pi est configurée
+        env:
+          SSH_HOST_FINGERPRINT: ${{ secrets.SSH_HOST_FINGERPRINT }}
+        run: |
+          if [ -z "$SSH_HOST_FINGERPRINT" ]; then
+            echo "::error::Secret SSH_HOST_FINGERPRINT absent : sans lui, le déploiement accepterait n'importe quel hôte."
+            exit 1
+          fi
+
       - name: Deploy via SSH
         uses: appleboy/ssh-action@7eaf76671a0d7eec5d98ee897acda4f968735a17 # v1.2.0
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
+          # Empreinte ECDSA du Pi (secret, jamais en clair dans ce dépôt public) :
+          # un hôte qui présente une autre clé fait échouer la connexion (24/09).
+          fingerprint: ${{ secrets.SSH_HOST_FINGERPRINT }}
           script_stop: true
           command_timeout: 20m
           script: |
