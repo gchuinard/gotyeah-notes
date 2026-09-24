@@ -100,6 +100,10 @@ services:
     volumes:
       - gotyeah-db:/data
     restart: unless-stopped
+    # Plafond mémoire posé à la main sur le Pi le 28/08 (640m). Versionné ici car
+    # le `git reset --hard` du workflow Deploy l'a effacé le 24/09. Pic mesuré le
+    # 24/09 : ~181 Mio, soit moins de 30 % du plafond.
+    mem_limit: 640m
     # Sonde lue par le workflow Deploy (.State.Health.Status). Node 24 expose
     # fetch globalement ; on accepte tout statut < 500 (l'app répond, même via
     # une redirection / vers /login).
