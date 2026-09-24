@@ -48,7 +48,7 @@ jobs:
           fi
 
       - name: Baseline via SSH
-        uses: appleboy/ssh-action@v1.2.0
+        uses: appleboy/ssh-action@7eaf76671a0d7eec5d98ee897acda4f968735a17 # v1.2.0
         env:
           TARGET_REF: ${{ github.event.inputs.ref }}
         with:
