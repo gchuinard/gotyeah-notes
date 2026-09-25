@@ -45,6 +45,22 @@ npm run test:e2e  # tests end-to-end (Playwright)
   `pull_request` n'a aucun filtre et couvre donc **toutes** les branches. ⚠️ Une branche
   nommée hors de ces préfixes ne déclenche rien au push : sa CI n'arrive qu'à la PR.
 
+## Overrides npm
+
+`package.json` ne peut pas porter de commentaire : la raison de chaque entrée de
+`overrides` est donc ici. Chacune est limitée au paquet qui tire la dépendance, et
+se retire quand ce paquet publie une version qui n'en a plus besoin.
+
+- `@blocknote/core` → `uuid` `^11.1.1` : BlockNote 0.48 déclare `uuid@^8`, touché par
+  GHSA-w5hq-g745-h8pq (livré dans le bundle de l'éditeur). BlockNote n'appelle que
+  `v4()`, dont l'API n'a pas changé entre 8 et 11. À retirer en montant BlockNote
+  (0.55 ne dépend plus de `uuid`).
+- `@prisma/dev` → `@hono/node-server` `^1.19.15` et `prisma` → `mysql2` `^3.22.0` :
+  le CLI Prisma 7.7 épingle des versions exactes vulnérables. Ni l'un ni l'autre
+  ne sert ici (le premier pour `prisma dev`, le second pour Prisma Studio sur une
+  base MySQL), mais le CLI est présent dans l'image `migrate` (étape `builder`).
+  À retirer quand Prisma les monte lui-même.
+
 ## Configuration
 
 Copier `.env.example` en `.env` :
