@@ -110,12 +110,12 @@ des `DROP` destructifs).
   historiquement par `db push`, sans historique de migration. Avant le tout premier
   `migrate deploy`, il faut la « baseliner » **une seule fois** (marque `0_init` comme
   déjà appliqué, sans le rejouer). Jusqu'au 25/09/2026, ce README conseillait de passer
-  par le workflow dédié `.github/workflows/baseline-prisma.yml` (`workflow_dispatch`,
+  par un workflow dédié, `.github/workflows/baseline-prisma.yml` (`workflow_dispatch`,
   saisie de confirmation obligatoire : snapshot SQLite, `resolve`, puis vérification
-  qu'il ne reste aucune migration en attente). ⚠️ **Il ne peut plus servir** : sa clé
-  `SSH_KEY` est désormais forcée côté Pi sur le seul déploiement, qui refuse son script
-  sans rien exécuter. Il n'a d'ailleurs jamais été lancé (la baseline de la prod a été
-  faite à la main). Reste la procédure manuelle en SSH, avec un accès shell au Pi :
+  qu'il ne reste aucune migration en attente). Il a été **retiré le 25/09/2026** : sa clé
+  `SSH_KEY` est désormais forcée côté Pi sur le seul déploiement, qui refusait son script
+  sans rien exécuter, et il n'avait jamais été lancé (la baseline de la prod a été faite
+  à la main). Reste la procédure manuelle en SSH, avec un accès shell au Pi :
   ```bash
   cd /home/pi/sites/gotyeah-notes
   git fetch && git checkout feat/prisma-migrations   # amène les fichiers de migration
