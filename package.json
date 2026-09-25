@@ -46,7 +46,7 @@
     "@types/react-dom": "^19.2.3",
     "autoprefixer": "^10.4.27",
     "postcss": "^8.5.9",
-    "prisma": "^7.7.0",
+    "prisma": "^7.10.0",
     "tailwindcss": "^4.2.2",
     "typescript": "^6.0.2",
     "vite-tsconfig-paths": "^6.1.1",
