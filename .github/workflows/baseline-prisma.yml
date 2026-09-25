@@ -9,6 +9,15 @@ name: Baseline Prisma (one-shot)
 #
 # Déclenchement manuel uniquement, avec saisie de confirmation. Aucun schéma
 # n'est modifié : seule la table `_prisma_migrations` est renseignée.
+#
+# ⚠️ INUTILISABLE DEPUIS LE 25/09/2026, laissé en place en attendant une décision
+# (garder, supprimer ou convertir : cf. CLAUDE.md, migrations Prisma). SSH_KEY est
+# désormais une clé que le Pi force, dans authorized_keys, sur
+# « /usr/local/sbin/gotyeah-deploy notes » : elle n'accepte que « deploy » ou
+# « deploy <sha> ». Le script envoyé plus bas est donc refusé (« commande inconnue »)
+# et rien n'est exécuté sur le Pi. Ce workflow n'a jamais été lancé : la baseline de
+# la prod a été faite à la main le 05/08/2026. Une re-baseline éventuelle passe par la
+# procédure manuelle du README (« Migrations »), avec un accès shell au Pi.
 
 on:
   workflow_dispatch:

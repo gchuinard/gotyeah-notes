@@ -63,10 +63,17 @@ Conteneurisé (Docker Compose) derrière Nginx Proxy Manager. Déploiement conti
 déploiement SSH sur le serveur (`git reset --hard` sur le commit testé + `docker compose up -d --build`)
 avec attente du healthcheck. Jusqu'au 25/09/2026, le déploiement partait dès le push, en
 parallèle de la CI : un commit aux tests rouges partait donc aussi en production.
-Si seuls des `.md` ont changé depuis la version en ligne, le script s'arrête sans reconstruire
-(rôle tenu auparavant par un `paths-ignore: ["**.md"]` sur le push ; un commit mêlant doc et
-code déploie toujours). Si `main` a avancé depuis le commit testé, il ne fait rien : le commit
-suivant sera déployé après sa propre CI.
+
+Depuis le 25/09/2026, la clé SSH du workflow (secret `SSH_KEY`) est propre à ce dépôt : sur
+le Pi, `authorized_keys` la force sur `/usr/local/sbin/gotyeah-deploy notes`. Le workflow
+n'envoie que `deploy <commit testé>` ; le Pi fait le `git fetch`, puis lance
+`deploy/pi-deploy.sh` **lu dans ce commit**, qui porte toutes les étapes. Elles vivaient
+jusque-là dans le `script:` de `deploy.yml`, envoyé avec une clé sans restriction (root de
+fait sur le Pi). Pour changer le déploiement, c'est donc `deploy/pi-deploy.sh` qu'on modifie.
+Si seuls des `.md` ont changé depuis la version en ligne, `deploy/pi-deploy.sh` s'arrête sans
+reconstruire (rôle tenu auparavant par un `paths-ignore: ["**.md"]` sur le push ; un commit
+mêlant doc et code déploie toujours). Si `main` a avancé depuis le commit testé,
+`gotyeah-deploy` ne fait rien : le commit suivant sera déployé après sa propre CI.
 Le schéma Prisma est appliqué par le service one-shot `migrate` via **`prisma migrate deploy`**
 (migrations versionnées, jamais de `db push` en prod).
 
@@ -86,17 +93,21 @@ des `DROP` destructifs).
   La base de prod avait été créée
   historiquement par `db push`, sans historique de migration. Avant le tout premier
   `migrate deploy`, il faut la « baseliner » **une seule fois** (marque `0_init` comme
-  déjà appliqué, sans le rejouer). Le plus sûr est de passer par le workflow dédié
-  `.github/workflows/baseline-prisma.yml` (`workflow_dispatch`, saisie de confirmation
-  obligatoire) : il prend un snapshot SQLite, joue le `resolve`, puis vérifie qu'il ne
-  reste aucune migration en attente. Équivalent manuel en SSH :
+  déjà appliqué, sans le rejouer). Jusqu'au 25/09/2026, ce README conseillait de passer
+  par le workflow dédié `.github/workflows/baseline-prisma.yml` (`workflow_dispatch`,
+  saisie de confirmation obligatoire : snapshot SQLite, `resolve`, puis vérification
+  qu'il ne reste aucune migration en attente). ⚠️ **Il ne peut plus servir** : sa clé
+  `SSH_KEY` est désormais forcée côté Pi sur le seul déploiement, qui refuse son script
+  sans rien exécuter. Il n'a d'ailleurs jamais été lancé (la baseline de la prod a été
+  faite à la main). Reste la procédure manuelle en SSH, avec un accès shell au Pi :
   ```bash
   cd /home/pi/sites/gotyeah-notes
   git fetch && git checkout feat/prisma-migrations   # amène les fichiers de migration
   docker compose build migrate
 
-  # 1. Snapshot de sécurité — la commande n'est pas ailleurs dans ce README,
-  #    elle est reprise telle quelle de .github/workflows/deploy.yml.
+  # 1. Snapshot de sécurité : la commande n'est pas ailleurs dans ce README,
+  #    elle est reprise telle quelle de deploy/pi-deploy.sh (avant le 25/09/2026,
+  #    du script de .github/workflows/deploy.yml).
   BACKUP_DIR=/home/pi/backups/gotyeah-notes; STAMP=$(date +%Y%m%d-%H%M%S); mkdir -p "$BACKUP_DIR"
   DB_VOL=$(docker volume ls -q | grep -E '(^|_)gotyeah-db$' | head -1)
   docker run --rm --user 0:0 -v "$DB_VOL":/data:ro -v "$BACKUP_DIR":/backup     keinos/sqlite3:latest sqlite3 /data/dev.db ".backup '/backup/pre-baseline-$STAMP.db'"
@@ -119,8 +130,8 @@ des `DROP` destructifs).
 
 ### Sauvegardes
 
-Le déploiement prend un **snapshot de la DB SQLite AVANT chaque MEP** (étape dans
-`deploy.yml`). Le snapshot utilise `sqlite3 .backup` (et non `cp`) → copie cohérente
+Le déploiement prend un **snapshot de la DB SQLite AVANT chaque MEP** (étape de
+`deploy/pi-deploy.sh`, dans `deploy.yml` jusqu'au 25/09/2026). Le snapshot utilise `sqlite3 .backup` (et non `cp`) → copie cohérente
 même sous WAL / écritures concurrentes, puis un `PRAGMA integrity_check`. **Un échec
 du snapshot ou de son contrôle d'intégrité arrête le déploiement** : jamais de mise en
 production sans sauvegarde vérifiée.
@@ -133,10 +144,13 @@ production sans sauvegarde vérifiée.
   # /etc/cron.daily/gotyeah-backup-rotate (chmod +x)
   find /home/pi/backups/gotyeah-notes -name 'dev-*.db' -mtime +7 -delete
   ```
-  > La rotation et la réplication ne sont **volontairement pas** dans `deploy.yml` :
-  > le client SSH (`appleboy/ssh-action`, `script_stop`) arrête la MEP au moindre code
-  > non nul, quelles que soient les gardes shell. Le déploiement se limite donc au
-  > snapshot bloquant + la MEP.
+  > La rotation et la réplication ne sont **volontairement pas** dans le déploiement
+  > (`deploy/pi-deploy.sh`) : il se limite au snapshot bloquant + la MEP. Jusqu'au
+  > 25/09/2026, la raison donnée ici était que le client SSH (`appleboy/ssh-action`,
+  > `script_stop`) arrêtait la MEP au moindre code non nul, quelles que soient les
+  > gardes shell. Elle ne vaut plus : le script tourne désormais sur le Pi en bash sous
+  > `set -euo pipefail`, où un `|| true` est respecté. Le choix de garder le chemin
+  > critique minimal, lui, demeure.
 - **Restauration** :
   ```bash
   cd /home/pi/sites/gotyeah-notes
@@ -148,10 +162,10 @@ production sans sauvegarde vérifiée.
   ```
 
 **Réplication hors-Pi (recommandée, à mettre en place à la main).** Il n'y a **aucune**
-étape de réplication dans `deploy.yml` — elle en a été retirée (commit `8256218`) pour la
-même raison que la rotation : `appleboy/ssh-action` (`script_stop`) arrête la MEP au
-moindre code de retour non nul, quelles que soient les gardes shell. Le déploiement se
-limite donc au snapshot bloquant.
+étape de réplication dans le déploiement : elle a été retirée de `deploy.yml` (commit
+`8256218`) pour la même raison que la rotation, `appleboy/ssh-action` (`script_stop`)
+arrêtant alors la MEP au moindre code de retour non nul. Cette raison ne vaut plus depuis
+le 25/09/2026 (voir ci-dessus), mais le déploiement se limite toujours au snapshot bloquant.
 
 Pour répliquer les snapshots hors du Pi, ajouter un **cron dédié** (hors du chemin
 critique de déploiement), par exemple avec restic :

@@ -34,12 +34,17 @@ jobs:
     steps:
       # Sans empreinte, appleboy/ssh-action désactive la vérification de l'hôte
       # en silence : on refuse donc de déployer si le secret est vide.
-      - name: Vérifier que l'empreinte du Pi est configurée
+      - name: Vérifier que l'empreinte du Pi et la clé de déploiement sont configurées
         env:
           SSH_HOST_FINGERPRINT: ${{ secrets.SSH_HOST_FINGERPRINT }}
+          SSH_KEY: ${{ secrets.SSH_KEY }}
         run: |
           if [ -z "$SSH_HOST_FINGERPRINT" ]; then
             echo "::error::Secret SSH_HOST_FINGERPRINT absent : sans lui, le déploiement accepterait n'importe quel hôte."
+            exit 1
+          fi
+          if [ -z "$SSH_KEY" ]; then
+            echo "::error::Secret SSH_KEY absent."
             exit 1
           fi
 
@@ -65,68 +70,20 @@ jobs:
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
+          # Clé dédiée à Notes depuis le 25/09/2026 (jusque-là, une clé sans restriction :
+          # root de fait sur le Pi). Sur le Pi, authorized_keys la force sur
+          # « /usr/local/sbin/gotyeah-deploy notes » : git fetch, contrôle que DEPLOY_SHA est
+          # encore la pointe de main (sinon « main a avancé… » et succès, la prod ne recule
+          # jamais), puis deploy/pi-deploy.sh lu dans ce commit. Elle ne peut rien faire d'autre.
           key: ${{ secrets.SSH_KEY }}
           # Empreinte ECDSA du Pi (secret, jamais en clair dans ce dépôt public) :
           # un hôte qui présente une autre clé fait échouer la connexion (24/09).
           fingerprint: ${{ secrets.SSH_HOST_FINGERPRINT }}
-          script_stop: true
+          # Le build tourne sur le Pi, et gotyeah-deploy peut attendre jusqu'à 15 min le
+          # verrou d'un déploiement de notes déjà en cours.
           command_timeout: 20m
-          envs: DEPLOY_SHA
-          script: |
-            set -euo pipefail
-            cd /home/pi/sites/gotyeah-notes
-            git fetch --prune origin
-            # Deux CI peuvent finir dans le désordre : on ne déploie le commit testé
-            # que s'il est encore la pointe de main. Sinon, le commit suivant sera
-            # déployé après sa propre CI, et la prod ne recule jamais.
-            if [ "$(git rev-parse origin/main)" != "$DEPLOY_SHA" ]; then echo "main a avancé depuis $DEPLOY_SHA : rien à déployer ici."; exit 0; fi
-            EN_LIGNE=$(git rev-parse HEAD)
-            git reset --hard "$DEPLOY_SHA"
-            # Reprend l'ancien « paths-ignore: **.md » du déclencheur push : si seuls
-            # des .md ont changé depuis la version en ligne, rien à reconstruire (le
-            # build sur le Pi est lourd). Un redéploiement du même commit, lui, va au bout.
-            HORS_MD=$(git diff --name-only "$EN_LIGNE" "$DEPLOY_SHA" -- ':(exclude)*.md')
-            if [ "$EN_LIGNE" != "$DEPLOY_SHA" ] && [ -z "$HORS_MD" ]; then echo "Seuls des fichiers .md ont changé : pas de reconstruction."; exit 0; fi
-
-            # ── Filet de sécurité : SNAPSHOT de la DB SQLite AVANT tout déploiement ──
-            # sqlite3 .backup (pas cp) = cohérent même sous WAL / écritures concurrentes.
-            # Un échec ARRÊTE le déploiement (set -e) : jamais de MEP sans backup vérifié.
-            BACKUP_DIR=/home/pi/backups/gotyeah-notes
-            STAMP=$(date +%Y%m%d-%H%M%S)
-            mkdir -p "$BACKUP_DIR"
-            # Résout le volume réel (…_gotyeah-db) sans coder en dur le préfixe de projet :
-            # une divergence de nom bloquerait sinon TOUS les déploiements.
-            DB_VOL=$(docker volume ls -q | grep -E '(^|_)gotyeah-db$' | head -1)
-            [ -n "$DB_VOL" ] || { echo "Volume gotyeah-db introuvable — abandon."; exit 1; }
-            # --user 0:0 : le dossier de backup appartient à l'utilisateur hôte (pi) ;
-            # l'image keinos tourne en non-root et ne pouvait pas y écrire (« cannot open »).
-            # root lit le volume (world-readable) ET écrit dans le dossier hôte (bypass DAC).
-            docker run --rm --user 0:0 \
-              -v "$DB_VOL":/data:ro \
-              -v "$BACKUP_DIR":/backup \
-              keinos/sqlite3:latest \
-              sqlite3 /data/dev.db ".backup '/backup/dev-$STAMP.db'"
-            # Vérif d'intégrité du snapshot (grep -q échoue → set -e arrête le déploiement).
-            docker run --rm --user 0:0 -v "$BACKUP_DIR":/backup keinos/sqlite3:latest \
-              sh -c "sqlite3 /backup/dev-$STAMP.db 'PRAGMA integrity_check' | grep -q '^ok$'"
-            echo "Snapshot OK: $BACKUP_DIR/dev-$STAMP.db"
-            # IMPORTANT : le client SSH (appleboy/ssh-action, script_stop:true) stoppe le
-            # déploiement au moindre code de retour non nul d'une commande — indépendamment
-            # de `set +e`/`|| true` dans le shell distant. On ne met donc AUCUNE étape
-            # best-effort ici. Rotation des snapshots (7 j) et réplication hors-Pi (restic)
-            # sont à planifier via un cron dédié sur le Pi, HORS du chemin critique de MEP
-            # (voir README « Sauvegardes »). Seul le snapshot vérifié ci-dessus bloque une MEP.
-
-            docker compose up -d --build
-            for i in $(seq 1 60); do
-              health=$(docker inspect --format '{{.State.Health.Status}}' gotyeah_notes 2>/dev/null || echo missing)
-              if [ "$health" = "healthy" ]; then
-                echo "App healthy."
-                exit 0
-              fi
-              echo "Waiting for app to be healthy (health=$health)..."
-              sleep 2
-            done
-            echo "App did not become healthy in time."
-            docker logs --tail 200 gotyeah_notes || true
-            exit 1
+          # Seule commande que le Pi accepte avec cette clé : « deploy <sha40> ». Les étapes
+          # (reset, garde .md, snapshot SQLite vérifié, migrations, rebuild, attente healthy)
+          # vivent dans deploy/pi-deploy.sh. Plus de script_stop ni d'envs : l'action
+          # ajouterait des lignes à la commande, et le Pi la refuserait.
+          script: deploy ${{ env.DEPLOY_SHA }}
