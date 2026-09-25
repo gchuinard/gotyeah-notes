@@ -103,7 +103,11 @@ jobs:
 
   e2e:
     name: Tests E2E (Playwright)
-    runs-on: ubuntu-latest
+    # Version figée : ubuntu-latest passe à Ubuntu 26 le 19/10/2026, et
+    # `playwright install --with-deps` installe par apt des paquets dont les noms
+    # changent d'une version d'Ubuntu à l'autre (libasound2 devenu libasound2t64
+    # en 24.04). La monter est un choix, pas une surprise.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -118,8 +122,9 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Playwright E2E
         run: npm run test:e2e
+      # v6 : première version en Node 24 (la v5 tourne encore en Node 20).
       - name: Upload Playwright report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         if: ${{ !cancelled() }}
         with:
           name: playwright-report

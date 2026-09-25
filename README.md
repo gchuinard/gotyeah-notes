@@ -59,10 +59,14 @@ cp .env.example .env
 ## Déploiement
 
 Conteneurisé (Docker Compose) derrière Nginx Proxy Manager. Déploiement continu via
-`.github/workflows/deploy.yml` : **un push sur `main`** déclenche un déploiement SSH sur
-le serveur (`git reset --hard` + `docker compose up -d --build`) avec attente du healthcheck.
-Seule exception : `paths-ignore: ["**.md"]` — un push ne touchant que des `.md` ne déploie
-pas (un commit mêlant doc et code, si).
+`.github/workflows/deploy.yml` : **un push sur `main` dont la CI réussit** déclenche un
+déploiement SSH sur le serveur (`git reset --hard` sur le commit testé + `docker compose up -d --build`)
+avec attente du healthcheck. Jusqu'au 25/09/2026, le déploiement partait dès le push, en
+parallèle de la CI : un commit aux tests rouges partait donc aussi en production.
+Si seuls des `.md` ont changé depuis la version en ligne, le script s'arrête sans reconstruire
+(rôle tenu auparavant par un `paths-ignore: ["**.md"]` sur le push ; un commit mêlant doc et
+code déploie toujours). Si `main` a avancé depuis le commit testé, il ne fait rien : le commit
+suivant sera déployé après sa propre CI.
 Le schéma Prisma est appliqué par le service one-shot `migrate` via **`prisma migrate deploy`**
 (migrations versionnées, jamais de `db push` en prod).
 
