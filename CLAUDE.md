@@ -73,7 +73,7 @@ Les signatures font foi dans le code, et tsc strict les vérifie. À savoir en p
 
 ## Avant de toucher à…
 
-La doctrine (`docs/doctrine/<domaine>.md`) donne le détail de chaque domaine. Elle ne se charge jamais seule : lis-la avant de toucher au domaine concerné. Le pourquoi daté est dans `docs/adr/`.
+La doctrine (`docs/doctrine/<domaine>.md`) donne le détail de chaque domaine. Elle ne se charge jamais seule : lis-la avant de toucher au domaine concerné. Le pourquoi daté est dans `docs/adr/`. Les rules de `.claude/rules/` (une par doctrine, même nom, seul sous-dossier de `.claude/` suivi par git) rappellent les invariants du domaine dès qu'un de ses fichiers est lu : elles ne dispensent pas de lire la doctrine.
 
 | Si tu touches à… | Lis d'abord `docs/doctrine/…` |
 |---|---|
