@@ -34,7 +34,7 @@ npm run test:e2e  # tests end-to-end (Playwright)
 
 - **Unitaires + API** : Vitest (`npm test`). Les tests API importent les Route
   Handlers et tournent contre une **DB SQLite jetable** (`tests/.tmp/vitest.db`,
-  créée par `tests/setup/global-setup.ts`) — jamais la `dev.db`. L'auth est mockée
+  créée par `tests/setup/global-setup.ts`), jamais la `dev.db`. L'auth est mockée
   (`vi.mock("@/lib/session")`) ; le seed des données passe par `tests/helpers/seed.ts`.
 - **E2E** : Playwright (`npm run test:e2e`). `tests/e2e-server.mjs` démarre `next dev`
   sur une DB jetable **hors du dossier projet** (le cookie de session n'est `secure`
@@ -69,8 +69,8 @@ Copier `.env.example` en `.env` :
 cp .env.example .env
 ```
 
-- `DATABASE_URL` — connexion SQLite (dev local uniquement ; en conteneur, fixée par le compose).
-- `MCP_SHARED_SECRET` — secret du pont MCP (voir ci-dessous). Vide = désactivé.
+- `DATABASE_URL` : connexion SQLite (dev local uniquement ; en conteneur, fixée par le compose).
+- `MCP_SHARED_SECRET` : secret du pont MCP (voir ci-dessous). Vide = désactivé.
 
 ## Déploiement
 
@@ -103,7 +103,7 @@ des `DROP` destructifs).
 - **Créer une migration** (dev) : modifier `prisma/schema.prisma`, puis
   `npx prisma migrate dev --name <intitulé>`. La CI (job *Migrations*) échoue si un
   `schema.prisma` est modifié sans migration correspondante.
-- **Baseline** — ✅ **FAITE en production le 2026-08-05** (`Migration 0_init marked as
+- **Baseline** : ✅ **FAITE en production le 2026-08-05** (`Migration 0_init marked as
   applied.`, puis `No pending migrations to apply.`). Ne pas rejouer : la procédure
   ci-dessous n'est conservée que pour un futur environnement repartant d'un `db push`.
   La base de prod avait été créée
@@ -200,11 +200,14 @@ restic forget --keep-daily 7 --prune
 ```
 
 Tant que ce cron n'est pas en place, la seule protection est le **snapshot local vérifié**
-pris avant chaque MEP (ci-dessus) — qui ne survit pas à la perte du Pi.
+pris avant chaque MEP (ci-dessus), qui ne survit pas à la perte du Pi.
 
 ## Intégration MCP
 
 Les outils MCP `notes_*` (gérer pages, sections, databases, records, modèles… depuis Claude) sont
-**greffés sur le serveur MCP distant Sonar** et réutilisent son auth OIDC (Keycloak) — pas de serveur séparé.
+**greffés sur le serveur MCP distant Sonar** et réutilisent son auth OIDC (Keycloak), sans serveur séparé.
 L'API accepte un appel de confiance du MCP (`X-MCP-Secret` + `X-Act-As-Email`), désactivé tant
-que `MCP_SHARED_SECRET` est vide. Détails, outils et roadmap : voir `CLAUDE.md`.
+que `MCP_SHARED_SECRET` est vide. Détails et outils : voir `docs/doctrine/mcp.md`
+(ce renvoi pointait avant vers `CLAUDE.md` pour « outils et roadmap » ; le découpage de ce fichier
+a déplacé les outils dans la doctrine et retiré la roadmap, qui ne se tient plus dans le dépôt :
+elle se suit dans les notes, voir « Dev Loop » dans `CLAUDE.md`).
