@@ -15,8 +15,10 @@ playwright-report
 blob-report
 playwright/.cache
 
-# Uploads locaux (dev) — en prod, volume Docker /data/uploads
+# Uploads locaux (dev) : en prod, volume Docker /data/uploads
 /data/
 
-# Réglages Claude Code locaux (propres à chaque dev)
-.claude/
+# Réglages Claude Code locaux (propres à chaque dev) : seules les rules sont suivies.
+# `.claude/*` et non `.claude/` : git ne rouvre pas un dossier ignoré en entier.
+.claude/*
+!.claude/rules/

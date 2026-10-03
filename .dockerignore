@@ -17,3 +17,8 @@ docker-compose.yml
 tsconfig.tsbuildinfo
 npm-debug.log*
 README.md
+# Doc et règles Claude Code : jamais lues par le build, mais chaque modification
+# invaliderait sinon le COPY . . de l'étape builder (README.md est déjà ici).
+CLAUDE.md
+docs
+.claude
